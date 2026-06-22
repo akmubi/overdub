@@ -16,7 +16,7 @@ The guide covers:
 - how to write a native mod
 - memory, object lifetime, cleanup, and DLL reload
 
-The current mod SDK files are in the [`mod/`](mod/) directory.
+The current mod SDK files are in the [`mod/`](../mod/) directory.
 
 Important files:
 ```
