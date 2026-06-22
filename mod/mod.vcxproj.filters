@@ -1,0 +1,40 @@
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Mod">
+      <UniqueIdentifier>{2F25DBB8-8650-4DD6-96D1-7C0A40A42FA6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SDK">
+      <UniqueIdentifier>{957C32F4-BB0F-481A-9E75-6B0A37224903}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="main.c">
+      <Filter>Mod</Filter>
+    </ClCompile>
+    <ClCompile Include="mod_sdk.c">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="mod_unreal.c">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="mod_nuklear.c">
+      <Filter>SDK</Filter>
+    </ClCompile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="mod_api.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="mod_sdk.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="mod_unreal.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="mod_nuklear.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
