@@ -36,7 +36,7 @@ Steam and Epic Games:
 ```
 <game>/Hibiki/Binaries/Win64/
 |-- overdub.dll
-`-- XAPOFX1_5.dll
++-- XAPOFX1_5.dll
 ```
 
 Xbox and Game Pass:
@@ -44,7 +44,7 @@ Xbox and Game Pass:
 ```
 <game>/Hibiki/Binaries/WinGDK/
 |-- overdub.dll
-`-- dsound.dll
++-- dsound.dll
 ```
 
 Linux and Steam Deck use the same files and the same installation steps. Install them into the Windows game directory used by Proton. No DLL override or extra launch option is required.
@@ -78,10 +78,10 @@ Every mod must have its own directory inside `mods`. Each mod needs at least a `
 
 ```
 mods/
-`-- example-mod/
++-- example-mod/
     |-- mod.ini
     |-- main.dll
-    `-- ...
+    +-- ...
 ```
 
 Asset mods may also contain `.pak`, `.utoc`, and `.ucas` files.
