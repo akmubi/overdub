@@ -1584,11 +1584,20 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
 
   bool has_modal = dialog_is_open(ui);
 
-  nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MINIMIZABLE |
-                   NK_WINDOW_CLOSE_BUTTON_HIDES;
+  nk_flags flags =
+    NK_WINDOW_BORDER |
+    NK_WINDOW_MOVABLE |
+    NK_WINDOW_SCALABLE |
+    NK_WINDOW_TITLE |
+    NK_WINDOW_CLOSABLE |
+    NK_WINDOW_NO_SCROLLBAR |
+    NK_WINDOW_MINIMIZABLE |
+    NK_WINDOW_CLOSE_BUTTON_HIDES;
 
   if (has_modal) {
     flags |= NK_WINDOW_NOT_INTERACTIVE;
+  } else {
+    flags |= NK_WINDOW_REMOVE_ROM;
   }
 
   ui->vw = viewport_width;
