@@ -707,9 +707,6 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
 
     nk_layout_row_dynamic(ctx, 20.0f, 1);
     {
-      const char *button_action_str = (m->enabled) ? "Disable" : "Enable";
-      str_t       button_label      = str_push_fmt(tmp.arena, "%s %.*s", button_action_str, STR_ARG(mod_kind_to_str(m->kind)));
-
       if (m->has_assets && nk_widget_is_hovered(ctx)) {
         nk_tooltip(ctx, "Restart required. Asset archives cannot be mounted or unmounted safely while the game is running");
       }
@@ -730,7 +727,7 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
       nk_style_push_color(ctx, &ctx->style.button.text_hover, button_text_hover);
       nk_style_push_color(ctx, &ctx->style.button.text_active, button_text_active);
 
-      if (ui_button_str(ctx, button_label)) {
+      if (ui_button_str(ctx, (m->enabled) ? "Disable" : "Enable")) {
         mod_manager_mod_set_enabled(manager, mod_handle_make(m), !m->enabled);
         mod_manager_save_cfg(manager);
       }
