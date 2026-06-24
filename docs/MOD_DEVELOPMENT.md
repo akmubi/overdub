@@ -867,7 +867,7 @@ static void
 call_example(uobject_t *obj)
 {
   if (!obj || !unreal_uobject_is_valid(obj)) {
-    return false;
+    return;
   }
 
   /* find function named "SetCount" */
