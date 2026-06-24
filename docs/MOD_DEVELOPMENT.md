@@ -859,47 +859,37 @@ v
 read output and return properties
 ```
 
-#### Simple Example
+#### Example
 
-This example only works when the parameter is really a plain `int32_t`.
+This example only works when the parameter is really a plain `int32_t`. Error handling is omitted:
 ```c
-static bool
+static void
 call_example(uobject_t *obj)
 {
   if (!obj || !unreal_uobject_is_valid(obj)) {
     return false;
   }
 
-  // find function named "SetCount"
+  /* find function named "SetCount" */
   ufunc_t *func = unreal_ustruct_find_func((ustruct_t *)obj->cls, STR_LIT("SetCount"));
-  if (!func) {
-    return false;
+
+  /* create an arena for temporary allocations */
+  tmp_arena_t tmp = mod_scratch_begin(0);
+  {
+    /* allocate space for function parameters (zeroed out) */
+    uint8_t *params = MOD_ARENA_PUSH_ARRAY_ZERO(tmp.arena, uint8_t, func->params_size);
+
+    /* find function parameter called "Count" */
+    fprop_t *count_prop = unreal_ustruct_find_prop((ustruct_t *)func, STR_LIT("Count"));
+
+    /* get the "Count" parameter location and set its value to 5 */
+    int32_t *count_ptr = (int32_t *)unreal_uprop_ptr(count_prop, params);
+    *count_ptr = 5;
+
+    /* call the function with provided parameters */
+    unreal_process_event(obj, func, params);
   }
-
-  tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_INVALID);
-
-  // allocate memory for the parameters
-  uint8_t *params = MOD_ARENA_PUSH_ARRAY_ZERO(tmp.arena, uint8_t, func->params_size);
-  if (!params) {
-    mod_scratch_end(tmp);
-    return false;
-  }
-
-  // find function parameter called "Count"
-  fprop_t *count_prop = unreal_ustruct_find_prop((ustruct_t *)func, STR_LIT("Count"));
-  if (!count_prop) {
-    mod_scratch_end(tmp);
-    return false;
-  }
-
-  // set the parameter value to 5
-  *(int32_t *)unreal_uprop_ptr(count_prop, params) = 5;
-
-  // call the function
-  unreal_process_event(obj, func, params);
-
   mod_scratch_end(tmp);
-  return true;
 }
 ```
 
