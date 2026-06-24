@@ -1,6 +1,6 @@
 # Overdub Mod Development Guide
 
-You do not need to have read Unreal Engine source code before starting this guide, but *native DLL* mod development requires basic C knowledge.
+You do not need to have read Unreal Engine source code before starting this guide. To read code examples you need some basic **C/C++** knowledge.
 
 The guide covers:
 - main parts of an Unreal Engine game
@@ -933,17 +933,15 @@ mod post callbacks receive consumed = true
 
 All pre callbacks still run. Overdub **combines their results**.
 
-#### Why This Is Dangerous
+#### Why This Is Can be Dangerous
 
-Skipping the original call can skip:
+Skipping the original call may skip:
 - gameplay logic
 - Blueprint events
 - return-value creation
 - output parameters
 - internal state changes
 - delegate broadcasts
-
-A mod that consumes a call must fully replace the expected behavior.
 
 #### ProcessEvent Can Recurse
 
@@ -2662,7 +2660,7 @@ The tracer records calls seen through the `ProcessEvent` and `UFunction::Invoke`
 
 Write one rule per line or separate rules with semicolons:
 
-```text
+```
 +target:text
 -target:text
 ```
@@ -2674,13 +2672,13 @@ Every valid rule starts with a sign:
 
 The target and text are separated by `:`. When the target is omitted, the tracer uses `func`.
 
-```text
+```
 +OnBeat
 ```
 
 is the same as:
 
-```text
+```
 +func:OnBeat
 ```
 
@@ -2708,7 +2706,7 @@ Rules with no sign, an unknown target, empty text, or invalid syntax are ignored
 
 Include rules use OR.
 
-```text
+```
 +func:OnBeat
 +func:OnDamage
 ```
@@ -2717,7 +2715,7 @@ A call passes the include stage when either function rule matches. Two include r
 
 Exclude rules are checked after includes. Any matching exclusion rejects the call.
 
-```text
+```
 +class_inherit:Actor
 -func:Tick
 -self:Default__
@@ -2727,7 +2725,7 @@ This captures calls where the receiving object's class is `Actor` or inherits fr
 
 When a filter contains only exclude rules, every call starts included and only matching exclusions are removed:
 
-```text
+```
 -func:Tick
 -func:ReceiveTick
 ```
