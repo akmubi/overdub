@@ -407,6 +407,34 @@ str_push_copy(arena_t *arena, str_t str)
   return result;
 }
 
+uint64_t
+str_write_vfmt(void *buf, uint64_t cap, const char *fmt, va_list args)
+{
+  va_list args_copy;
+  va_copy(args_copy, args);
+
+  int written;
+  if (!buf || cap == 0) {
+    written = stbsp_vsnprintf(NULL, 0, fmt, args_copy);
+  } else {
+    written = stbsp_vsnprintf((char *)buf, (size_t)cap, fmt, args_copy);
+  }
+
+  va_end(args_copy);
+
+  return written >= 0 ? (uint64_t)written : 0;
+}
+
+uint64_t
+str_write_fmt(void *buf, uint64_t cap, const char *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  uint64_t written = str_write_vfmt(buf, cap, fmt, args);
+  va_end(args);
+  return written;
+}
+
 str_t
 str_push_vfmt(arena_t *arena, const char *fmt, va_list args)
 {

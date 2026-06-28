@@ -1198,11 +1198,11 @@ dialog_window_init_centered(ui_mod_manager_t *ui, ui_dialog_window_t *win, float
   win->inited   = true;
 }
 
-static bool
-dialog_is_open(ui_mod_manager_t *ui)
-{
-  return ui->dialog.kind != UI_DIALOG_NONE;
-}
+// static bool
+// dialog_is_open(ui_mod_manager_t *ui)
+// {
+//   return ui->dialog.kind != UI_DIALOG_NONE;
+// }
 
 static void
 dialog_open(ui_mod_manager_t *ui, ui_dialog_kind_t kind, mod_manager_t *manager)
@@ -1404,8 +1404,6 @@ draw_reorder_dialog(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
 
   if (nk_window_is_closed(ctx, name)) {
     dialog_close(ui);
-  } else {
-    nk_window_set_focus(ctx, name);
   }
 }
 
@@ -1552,7 +1550,7 @@ draw_body(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager)
         .min_before     = 180.0f,
         .min_after      = 320.0f,
         .line_thickness = 2.0f,
-        .disabled       = dialog_is_open(ui),
+        .disabled       = false, //dialog_is_open(ui),
       };
 
       ui_splitter(ctx, &ui->split, &split_opts);
@@ -1579,8 +1577,6 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
     return;
   }
 
-  bool has_modal = dialog_is_open(ui);
-
   nk_flags flags =
     NK_WINDOW_BORDER |
     NK_WINDOW_MOVABLE |
@@ -1590,12 +1586,6 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
     NK_WINDOW_NO_SCROLLBAR |
     NK_WINDOW_MINIMIZABLE |
     NK_WINDOW_CLOSE_BUTTON_HIDES;
-
-  if (has_modal) {
-    flags |= NK_WINDOW_NOT_INTERACTIVE;
-  } else {
-    flags |= NK_WINDOW_REMOVE_ROM;
-  }
 
   ui->vw = viewport_width;
   ui->vh = viewport_height;
@@ -1612,6 +1602,16 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
     };
   }
 
+  static char title[256] = {0};
+  str_write_fmt(title, sizeof(title), "Mod manager - %.1f FPS", globals.fps);
+
+  if (nk_begin_titled(ctx, name, title, ui->bounds, flags)) {
+    ui->bounds = nk_window_get_bounds(ctx);
+
+    draw_body(ui, ctx, manager);
+  }
+  nk_end(ctx);
+
   if (ui->dialog.config_win.inited) {
     draw_config_dialog(ui, ctx, manager);
   }
@@ -1619,20 +1619,6 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
   if (ui->dialog.reorder_win.inited) {
     draw_reorder_dialog(ui, ctx, manager);
   }
-
-  static char title[256] = {0};
-  stbsp_snprintf(title, sizeof(title), "Mod manager - %.1f FPS", globals.fps);
-
-  if (nk_begin_titled(ctx, name, title, ui->bounds, flags)) {
-    ui->bounds = nk_window_get_bounds(ctx);
-
-    draw_body(ui, ctx, manager);
-
-    if (has_modal) {
-      nk_fill_rect(nk_window_get_canvas(ctx), ui->bounds, 0.0f, nk_rgba(0, 0, 0, 90));
-    }
-  }
-  nk_end(ctx);
 
   if (nk_window_is_hidden(ctx, name)) {
     ui_mod_manager_close(ui);

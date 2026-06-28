@@ -213,6 +213,10 @@ str_has_char(str_t s, char c, str_cmp_flags_t flags);
 /* allocation */
 str_t
 str_push_copy(arena_t *arena, str_t str);
+uint64_t
+str_write_vfmt(void *buf, uint64_t cap, const char *fmt, va_list args);
+uint64_t
+str_write_fmt(void *buf, uint64_t cap, const char *fmt, ...) ATTR_FORMAT(3, 4);
 str_t
 str_push_vfmt(arena_t *arena, const char *fmt, va_list args);
 str_t

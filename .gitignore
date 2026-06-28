@@ -16,6 +16,7 @@ tmp
 *.d
 *.obj
 *.log
+.clangd
 
 tags
 cscope.out
