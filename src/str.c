@@ -417,7 +417,7 @@ str_write_vfmt(void *buf, uint64_t cap, const char *fmt, va_list args)
   if (!buf || cap == 0) {
     written = stbsp_vsnprintf(NULL, 0, fmt, args_copy);
   } else {
-    written = stbsp_vsnprintf((char *)buf, (size_t)cap, fmt, args_copy);
+    written = stbsp_vsnprintf((char *)buf, (int)cap, fmt, args_copy);
   }
 
   va_end(args_copy);

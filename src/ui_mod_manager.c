@@ -727,7 +727,7 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
       nk_style_push_color(ctx, &ctx->style.button.text_hover, button_text_hover);
       nk_style_push_color(ctx, &ctx->style.button.text_active, button_text_active);
 
-      if (ui_button_str(ctx, (m->enabled) ? "Disable" : "Enable")) {
+      if (ui_button_str(ctx, (m->enabled) ? STR_LIT("Disable") : STR_LIT("Enable"))) {
         mod_manager_mod_set_enabled(manager, mod_handle_make(m), !m->enabled);
         mod_manager_save_cfg(manager);
       }
