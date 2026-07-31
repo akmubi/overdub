@@ -66,8 +66,6 @@ struct ui_mod_manager_s {
   ui_reorder_state_t     reorder;
   ui_inspector_state_t   inspector;
   mod_handle_t           selected;
-  struct nk_font        *font_body;
-  struct nk_font        *font_title;
   struct nk_rect         bounds;
   bool                   inited;
   bool                   closed;
@@ -76,10 +74,7 @@ struct ui_mod_manager_s {
 };
 
 void
-ui_mod_manager_init(ui_mod_manager_t     *ui,
-                    ui_keybind_capture_t *cap,
-                    struct nk_font       *font_body,
-                    struct nk_font       *font_title);
+ui_mod_manager_init(ui_mod_manager_t *ui, ui_keybind_capture_t *cap);
 
 void
 ui_mod_manager_draw(ui_mod_manager_t  *ui,

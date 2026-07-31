@@ -816,7 +816,7 @@ test_ui_style_configurator(struct nk_context *ctx,
   stbsp_snprintf(title, sizeof(title), "Configurator (%.1f, %.1f) %.1fx%.1f", bounds.x, bounds.y, bounds.w, bounds.h);
 
   if (nk_begin_titled(
-        ctx, name, title, nk_rect(viewport_width / 2.0f, 0, viewport_width / 2.0f, viewport_height), window_flags)) {
+        ctx, name, title, nk_rect(viewport_width / 2.0f, 0, viewport_width / 2.0f, (float)viewport_height), window_flags)) {
     if (nk_tree_push(ctx, NK_TREE_TAB, "Global Colors", NK_MAXIMIZED)) {
       style_global_colors(ctx, color_table);
       nk_tree_pop(ctx);

@@ -14,9 +14,6 @@ struct ui_manager_s {
   struct nk_context *ctx;
   struct nk_color    color_table[NK_COLOR_COUNT];
 
-  struct nk_font *font_body;
-  struct nk_font *font_title;
-
   bool inited;
 
   bool     input_begun;
@@ -38,7 +35,7 @@ struct ui_manager_s {
 void
 ui_manager_preinit(ui_manager_t *manager, mod_manager_t *mod_manager, arena_t *arena);
 void
-ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *font_body, struct nk_font *font_title, unsigned int vw, unsigned int vh);
+ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *font, unsigned int vw, unsigned int vh);
 void
 ui_manager_shutdown(ui_manager_t *manager);
 

@@ -710,7 +710,7 @@ ui_detail_row(trace_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, boo
   struct nk_style *style  = &ctx->style;
   struct nk_panel *layout = ctx->current->layout;
 
-  float row_h = style->font->height + 2.0f * style->tab.padding.y;
+  float row_h = style->font_size + 2.0f * style->tab.padding.y;
   float pad_x = style->tab.padding.x;
   float gap_w = ui_text_width(ctx, STR_LIT(" "));
 
@@ -723,7 +723,7 @@ ui_detail_row(trace_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, boo
     indent_w = 12.0f;
   }
 
-  float symbol_w = NK_MAX(style->font->height, 12.0f);
+  float symbol_w = NK_MAX(style->font_size, 12.0f);
   float parts_w  = 0.0f;
 
   if (cols) {

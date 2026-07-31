@@ -306,7 +306,7 @@ ui_manager_preinit(ui_manager_t *manager, mod_manager_t *mod_manager, arena_t *a
 }
 
 void
-ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *font_body, struct nk_font *font_title, unsigned int vw, unsigned int vh)
+ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *font, unsigned int vw, unsigned int vh)
 {
   if (manager->inited || !ctx) {
     return;
@@ -315,14 +315,13 @@ ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *f
   ctx->clip.paste = nk_clipboard_paste;
   ctx->clip.copy  = nk_clipboard_copy;
 
-  manager->ctx        = ctx;
-  manager->font_body  = font_body;
-  manager->font_title = font_title;
-  manager->inited     = true;
-  manager->vw         = vw;
-  manager->vh         = vh;
+  manager->ctx    = ctx;
+  manager->inited = true;
+  manager->vw     = vw;
+  manager->vh     = vh;
 
-  ui_mod_manager_init(&manager->main, &manager->keybind_capture, font_body, font_title);
+  nk_style_set_font(ctx, &font->handle);
+  ui_mod_manager_init(&manager->main, &manager->keybind_capture);
   set_style(manager, ctx);
 }
 
@@ -426,18 +425,16 @@ is_any_window(struct nk_context *ctx, uint32_t inc_flags, uint32_t exc_flags)
 }
 
 static bool
-is_any_interactive_window_hovered(const struct nk_context *ctx)
+is_any_interactive_window_hovered(struct nk_context *ctx)
 {
-  if (!ctx) {
-    return false;
-  }
+  ASSERT(ctx != NULL);
 
   struct nk_window *win = ctx->begin;
   while (win) {
     if (!(win->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED | (enum nk_window_flags)NK_WINDOW_NO_INPUT))) {
       struct nk_rect bounds = win->bounds;
       if (win->flags & NK_WINDOW_MINIMIZED) {
-        bounds.h = ctx->style.font->height + 2 * ctx->style.window.header.padding.y;
+        bounds.h = ctx->style.font_size + 2 * ctx->style.window.header.padding.y;
       }
 
       if (nk_input_is_mouse_hovering_rect(&ctx->input, bounds)) {

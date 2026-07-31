@@ -119,6 +119,12 @@ utf16_ascii_to_lower(uint16_t c)
   return (c >= 'A' && c <= 'Z') ? (uint16_t)('a' + (c - 'A')) : c;
 }
 
+static inline uint16_t
+utf16_ascii_to_upper(uint16_t c)
+{
+  return (c >= 'a' && c <= 'z') ? (uint16_t)(c - ('a' - 'A')) : c;
+}
+
 static inline uint8_t
 nibble_to_hex(uint8_t d)
 {

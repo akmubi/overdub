@@ -20456,8 +20456,6 @@ static void kbts__ExecuteOp(kbts_shape_scratchpad *Scratchpad, kbts_glyph_storag
             }
           }
 
-          kbts_u32 SingleRecompositionCodepoints[KBTS_MAXIMUM_RECOMPOSITION_PARENTS];
-          kbts_un SingleRecompositionCodepointCount = 0;
           kbts_un DoubleRecompositionCount = LastBaseParentCount;
 
           if(!Glyph->CombiningClass)
@@ -20485,14 +20483,10 @@ static void kbts__ExecuteOp(kbts_shape_scratchpad *Scratchpad, kbts_glyph_storag
                 Parent.Codepoint1 = kbts__GetDecompositionCodepoint(Decomposition, 1);
 
                 kbts_un DecompositionSize = kbts__GetDecompositionSize(Decomposition);
-                if(DecompositionSize == 1)
-                {
-                  SingleRecompositionCodepoints[SingleRecompositionCodepointCount++] = Parent.Codepoint;
-                }
-                else
-                {
-                  LastBaseParents[DoubleDecompositionCount++] = Parent;
-                }
+              if(DecompositionSize != 1)
+              {
+                LastBaseParents[DoubleDecompositionCount++] = Parent;
+              }
               }
 
               LastBaseParentCount = DoubleDecompositionCount;
@@ -20558,24 +20552,6 @@ static void kbts__ExecuteOp(kbts_shape_scratchpad *Scratchpad, kbts_glyph_storag
               }
             }
             KBTS_INSTRUMENT_BLOCK_END(ParentNSquaredStupidity);
-          }
-
-          if(!Recomposed)
-          {
-            KBTS__FOR(SingleRecompositionIndex, 0, SingleRecompositionCodepointCount)
-            {
-              kbts_u16 ParentGlyphId = (kbts_u16)kbts_CodepointToGlyphId(Font, (int)SingleRecompositionCodepoints[SingleRecompositionIndex]);
-
-              if(ParentGlyphId)
-              {
-                kbts_glyph ParentGlyph = kbts_CodepointToGlyph(Font, (int)SingleRecompositionCodepoints[SingleRecompositionIndex], 0, 0);
-                ParentGlyph.Config = Glyph->Config;
-
-                kbts__SetGlyphPreserveLinksAndUserId(Glyph, &ParentGlyph);
-                Recomposed = 1;
-                break;
-              }
-            }
           }
 
           // It is safe to look for fractions here, because decimal digits/the fraction slash are not marks or

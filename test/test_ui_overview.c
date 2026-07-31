@@ -39,7 +39,7 @@ test_ui_overview(struct nk_context *ctx, unsigned int viewport_width, unsigned i
   char title[256] = {0};
   stbsp_snprintf(title, sizeof(title), "Overview (%.1f, %.1f) %.1fx%.1f", bounds.x, bounds.y, bounds.w, bounds.h);
 
-  if (nk_begin_titled(ctx, name, title, nk_rect(0, 0, viewport_width / 2.0f, viewport_height), actual_window_flags)) {
+  if (nk_begin_titled(ctx, name, title, nk_rect(0, 0, viewport_width / 2.0f, (float)viewport_height), actual_window_flags)) {
     if (show_menu) {
       /* menubar */
       enum menu_states { MENU_DEFAULT, MENU_WINDOWS };
@@ -68,7 +68,9 @@ test_ui_overview(struct nk_context *ctx, unsigned int viewport_width, unsigned i
         nk_menu_end(ctx);
       }
       /* menu #2 */
-      nk_layout_row_push(ctx, 60);
+      float advanced_width = nk_text_width(ctx, ctx->style.font, ctx->style.font_size, "ADVANCED", 8);
+      advanced_width += 2 * ctx->style.menu_button.padding.x + 2 * ctx->style.menu_button.border;
+      nk_layout_row_push(ctx, advanced_width);
       if (nk_menu_begin_label(ctx, "ADVANCED", NK_TEXT_LEFT, nk_vec2(200, 600))) {
         enum menu_state { MENU_NONE, MENU_FILE, MENU_EDIT, MENU_VIEW, MENU_CHART };
         static enum menu_state  menu_state = MENU_NONE;
@@ -1149,7 +1151,7 @@ test_ui_overview(struct nk_context *ctx, unsigned int viewport_width, unsigned i
         for (i = 0; i < 3; ++i) {
           /* make sure button perfectly fits text */
           const struct nk_user_font *f            = ctx->style.font;
-          float                      text_width   = f->width(f->userdata, f->height, names[i], nk_strlen(names[i]));
+          float                      text_width   = nk_text_width(ctx, f, ctx->style.font_size, names[i], nk_strlen(names[i]));
           float                      widget_width = text_width + 3 * ctx->style.button.padding.x;
           nk_layout_row_push(ctx, widget_width);
           if (current_tab == i) {

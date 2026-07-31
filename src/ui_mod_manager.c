@@ -1,5 +1,6 @@
 #include "ui_mod_manager.h"
 #include "arena.h"
+#include "config.h"
 #include "globals.h"
 #include "mod_manager.h"
 #include "scratch.h"
@@ -677,13 +678,9 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     version_text = str_push_fmt(tmp.arena, "%d.%d.%d", VERSION_ARG(m->manifest.info.version));
     status_text  = mod_status_text(m, tmp.arena);
 
-    if (ui->font_title) {
-      nk_style_push_font(ctx, &ui->font_title->handle);
-    }
+    nk_style_push_font_size(ctx, CONFIG_NK_FONT_HEADING_SIZE);
     ui_label_wrap(ctx, m->manifest.info.name);
-    if (ui->font_title) {
-      nk_style_pop_font(ctx);
-    }
+    nk_style_pop_font_size(ctx);
 
     draw_spacer(ctx, 2.0f);
 
@@ -1659,7 +1656,7 @@ ui_mod_manager_is_open(ui_mod_manager_t *ui)
 }
 
 void
-ui_mod_manager_init(ui_mod_manager_t *ui, ui_keybind_capture_t *cap, struct nk_font *font_body, struct nk_font *font_title)
+ui_mod_manager_init(ui_mod_manager_t *ui, ui_keybind_capture_t *cap)
 {
   *ui = (ui_mod_manager_t){
     .keybind_capture = cap,
@@ -1692,10 +1689,8 @@ ui_mod_manager_init(ui_mod_manager_t *ui, ui_keybind_capture_t *cap, struct nk_f
         .config_manager          = NK_MAXIMIZED,
         .config_console          = NK_MAXIMIZED,
       },
-    .selected   = MOD_HANDLE_INVALID,
-    .font_body  = font_body,
-    .font_title = font_title,
-    .closed     = true,
-    .inited     = true,
+    .selected = MOD_HANDLE_INVALID,
+    .closed   = true,
+    .inited   = true,
   };
 }

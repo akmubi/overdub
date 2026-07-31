@@ -13,6 +13,7 @@
 typedef struct globals_s globals_t;
 struct globals_s {
   arena_t  perm;
+  void    *module;
   bool     engine_inited;
   bool     input_inited;
   uint32_t game_thread_id;

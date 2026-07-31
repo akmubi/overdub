@@ -8,6 +8,7 @@
 #include "mod_manager.h"
 #include "nk_d3d12.h"
 #include "path.h"
+#include "profiler.h"
 #include "scratch.h"
 #include "signatures.h"
 #include "str.h"
@@ -90,7 +91,6 @@ on_engine_init(void)
   LOG_INFO("Engine initialized");
 
   globals.game_thread_id = GetCurrentThreadId();
-  globals.hwnd           = (uint64_t)FindWindowW(L"UnrealWindow", NULL);
 
   LOG_DEBUG("on_engine_init: Thread ID: %lu", GetCurrentThreadId());
 
@@ -129,6 +129,13 @@ on_engine_tick_pre(float delta)
   if (globals.engine_inited) {
     mod_manager_dispatch_tick(&globals.mod_manager, delta);
   }
+
+#if defined BUILD_DEBUG
+  if (keybind_str_is_pressed(STR_LIT("Ctrl+P"))) {
+    profiler_log_report();
+    profiler_reset();
+  }
+#endif
 }
 
 static void
@@ -226,10 +233,11 @@ dxgi_hook_thread(LPVOID param)
 }
 
 static void
-loader_init(void)
+loader_init(HINSTANCE inst)
 {
   uint64_t start = time_now_us();
 
+  globals.module   = inst;
   globals.perm     = arena_new_dynamic(CONFIG_PERM_ARENA_SIZE, 64 * KB);
   globals.game_dir = path_module_dir(&globals.perm);
 
@@ -280,12 +288,11 @@ loader_init(void)
 BOOL WINAPI
 DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
-  (void)inst;
   (void)reserved;
 
   if (reason == DLL_PROCESS_ATTACH) {
     ASSERT(MH_Initialize() == MH_OK);
-    loader_init();
+    loader_init(inst);
   }
   return TRUE;
 }

@@ -10,7 +10,6 @@
 #define NK_INCLUDE_DEFAULT_ALLOCATOR
 #define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
 #define NK_INCLUDE_FONT_BAKING
-#define NK_INCLUDE_DEFAULT_FONT
 #define NK_BUTTON_TRIGGER_ON_RELEASE
 #define NK_UINT_DRAW_INDEX
 
@@ -4022,9 +4021,8 @@ enum nk_edit_flags {
 };
 enum nk_edit_types {
   NK_EDIT_SIMPLE = NK_EDIT_ALWAYS_INSERT_MODE,
-  NK_EDIT_FIELD  = NK_EDIT_SIMPLE | NK_EDIT_SELECTABLE | NK_EDIT_CLIPBOARD,
-  NK_EDIT_BOX =
-    NK_EDIT_ALWAYS_INSERT_MODE | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE | NK_EDIT_ALLOW_TAB | NK_EDIT_CLIPBOARD,
+  NK_EDIT_FIELD  = NK_EDIT_ALWAYS_INSERT_MODE | NK_EDIT_SELECTABLE | NK_EDIT_CLIPBOARD,
+  NK_EDIT_BOX    = NK_EDIT_ALWAYS_INSERT_MODE | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE | NK_EDIT_ALLOW_TAB | NK_EDIT_CLIPBOARD,
   NK_EDIT_EDITOR = NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE | NK_EDIT_ALLOW_TAB | NK_EDIT_CLIPBOARD
 };
 enum nk_edit_events {
@@ -4354,8 +4352,11 @@ nk_style_load_cursor(struct nk_context *, enum nk_style_cursor, const struct nk_
 NK_API void
 nk_style_load_all_cursors(struct nk_context *, const struct nk_cursor *);
 NK_API const char *nk_style_get_color_by_name(enum nk_style_colors);
+/** Sets the default face and resets font_size to font->height. */
 NK_API void
 nk_style_set_font(struct nk_context *, const struct nk_user_font *);
+NK_API void
+nk_style_set_font_size(struct nk_context *, float);
 NK_API nk_bool
 nk_style_set_cursor(struct nk_context *, enum nk_style_cursor);
 NK_API void
@@ -4363,8 +4364,11 @@ nk_style_show_cursor(struct nk_context *);
 NK_API void
 nk_style_hide_cursor(struct nk_context *);
 
+/** Temporarily switches faces without changing font_size. */
 NK_API nk_bool
 nk_style_push_font(struct nk_context *, const struct nk_user_font *);
+NK_API nk_bool
+nk_style_push_font_size(struct nk_context *, float);
 NK_API nk_bool
 nk_style_push_float(struct nk_context *, float *, float);
 NK_API nk_bool
@@ -4378,6 +4382,8 @@ nk_style_push_color(struct nk_context *, struct nk_color *, struct nk_color);
 
 NK_API nk_bool
 nk_style_pop_font(struct nk_context *);
+NK_API nk_bool
+nk_style_pop_font_size(struct nk_context *);
 NK_API nk_bool
 nk_style_pop_float(struct nk_context *);
 NK_API nk_bool
@@ -4624,180 +4630,198 @@ nk_utf_at(const char *buffer, int length, int index, nk_rune *unicode, int *len)
  * ===============================================================*/
 /**
  * \page Font
- * Font handling in this library was designed to be quite customizable and lets
- * you decide what you want to use and what you want to provide. There are three
- * different ways to use the font atlas. The first two will use your font
- * handling scheme and only requires essential data to run nuklear. The next
- * slightly more advanced features is font handling with vertex buffer output.
- * Finally the most complex API wise is using nuklear's font baking API.
  *
- * # Using your own implementation without vertex buffer output
+ * Text measurement and drawing always go through the configured shaping backend.
+ * A font identifies one face and provides glyph images by font-specific glyph ID.
+ * `height` is the face's default UI size; `nk_style_push_font_size` can override it.
  *
- * So first up the easiest way to do font handling is by just providing a
- * `nk_user_font` struct which only requires the height in pixel of the used
- * font and a callback to calculate the width of a string. This way of handling
- * fonts is best fitted for using the normal draw shape command API where you
- * do all the text drawing yourself and the library does not require any kind
- * of deeper knowledge about which font handling mechanism you use.
- * IMPORTANT: the `nk_user_font` pointer provided to nuklear has to persist
- * over the complete life time! I know this sucks but it is currently the only
- * way to switch between fonts.
- *
- * ```c
- *     float your_text_width_calculation(nk_handle handle, float height, const char *text, int len)
- *     {
- *         your_font_type *type = handle.ptr;
- *         float text_width = ...;
- *         return text_width;
- *     }
- *
- *     struct nk_user_font font;
- *     font.userdata.ptr = &your_font_class_or_struct;
- *     font.height = your_font_height;
- *     font.width = your_text_width_calculation;
- *
- *     struct nk_context ctx;
- *     nk_init_default(&ctx, &font);
- * ```
- * # Using your own implementation with vertex buffer output
- *
- * While the first approach works fine if you don't want to use the optional
- * vertex buffer output it is not enough if you do. To get font handling working
- * for these cases you have to provide two additional parameters inside the
- * `nk_user_font`. First a texture atlas handle used to draw text as subimages
- * of a bigger font atlas texture and a callback to query a character's glyph
- * information (offset, size, ...). So it is still possible to provide your own
- * font and use the vertex buffer output.
- *
- * ```c
- *     float your_text_width_calculation(nk_handle handle, float height, const char *text, int len)
- *     {
- *         your_font_type *type = handle.ptr;
- *         float text_width = ...;
- *         return text_width;
- *     }
- *     void query_your_font_glyph(nk_handle handle, float font_height, struct nk_user_font_glyph *glyph, nk_rune
- * codepoint, nk_rune next_codepoint)
- *     {
- *         your_font_type *type = handle.ptr;
- *         glyph.width = ...;
- *         glyph.height = ...;
- *         glyph.xadvance = ...;
- *         glyph.uv[0].x = ...;
- *         glyph.uv[0].y = ...;
- *         glyph.uv[1].x = ...;
- *         glyph.uv[1].y = ...;
- *         glyph.offset.x = ...;
- *         glyph.offset.y = ...;
- *     }
- *
- *     struct nk_user_font font;
- *     font.userdata.ptr = &your_font_class_or_struct;
- *     font.height = your_font_height;
- *     font.width = your_text_width_calculation;
- *     font.query = query_your_font_glyph;
- *     font.texture.id = your_font_texture;
- *
- *     struct nk_context ctx;
- *     nk_init_default(&ctx, &font);
- * ```
- *
- * # Nuklear font baker
- *
- * The final approach if you do not have a font handling functionality or don't
- * want to use it in this library is by using the optional font baker.
- * The font baker APIs can be used to create a font plus font atlas texture
- * and can be used with or without the vertex buffer output.
- *
- * It still uses the `nk_user_font` struct and the two different approaches
- * previously stated still work. The font baker is not located inside
- * `nk_context` like all other systems since it can be understood as more of
- * an extension to nuklear and does not really depend on any `nk_context` state.
- *
- * Font baker need to be initialized first by one of the nk_font_atlas_init_xxx
- * functions. If you don't care about memory just call the default version
- * `nk_font_atlas_init_default` which will allocate all memory from the standard library.
- * If you want to control memory allocation but you don't care if the allocated
- * memory is temporary and therefore can be freed directly after the baking process
- * is over or permanent you can call `nk_font_atlas_init`.
- *
- * After successfully initializing the font baker you can add Truetype(.ttf) fonts from
- * different sources like memory or from file by calling one of the `nk_font_atlas_add_xxx`.
- * functions. Adding font will permanently store each font, font config and ttf memory block(!)
- * inside the font atlas and allows to reuse the font atlas. If you don't want to reuse
- * the font baker by for example adding additional fonts you can call
- * `nk_font_atlas_cleanup` after the baking process is over (after calling nk_font_atlas_end).
- *
- * As soon as you added all fonts you wanted you can now start the baking process
- * for every selected glyph to image by calling `nk_font_atlas_bake`.
- * The baking process returns image memory, width and height which can be used to
- * either create your own image object or upload it to any graphics library.
- * No matter which case you finally have to call `nk_font_atlas_end` which
- * will free all temporary memory including the font atlas image so make sure
- * you created our texture beforehand. `nk_font_atlas_end` requires a handle
- * to your font texture or object and optionally fills a `struct nk_draw_null_texture`
- * which can be used for the optional vertex output. If you don't want it just
- * set the argument to `NULL`.
- *
- * At this point you are done and if you don't want to reuse the font atlas you
- * can call `nk_font_atlas_cleanup` to free all truetype blobs and configuration
- * memory. Finally if you don't use the font atlas and any of it's fonts anymore
- * you need to call `nk_font_atlas_clear` to free all memory still being used.
- *
- * ```c
- *     struct nk_font_atlas atlas;
- *     nk_font_atlas_init_default(&atlas);
- *     nk_font_atlas_begin(&atlas);
- *     nk_font *font = nk_font_atlas_add_from_file(&atlas, "Path/To/Your/TTF_Font.ttf", 13, 0);
- *     nk_font *font2 = nk_font_atlas_add_from_file(&atlas, "Path/To/Your/TTF_Font2.ttf", 16, 0);
- *     const void* img = nk_font_atlas_bake(&atlas, &img_width, &img_height, NK_FONT_ATLAS_RGBA32);
- *     nk_font_atlas_end(&atlas, nk_handle_id(texture), 0);
- *
- *     struct nk_context ctx;
- *     nk_init_default(&ctx, &font->handle);
- *     while (1) {
- *
- *     }
- *     nk_font_atlas_clear(&atlas);
- * ```
- * The font baker API is probably the most complex API inside this library and
- * I would suggest reading some of my examples `example/` to get a grip on how
- * to use the font atlas. There are a number of details I left out. For example
- * how to merge fonts, configure a font with `nk_font_config` to use other languages,
- * use another texture coordinate format and a lot more:
- *
- * ```c
- *     struct nk_font_config cfg = nk_font_config(font_pixel_height);
- *     cfg.merge_mode = nk_false or nk_true;
- *     cfg.range = nk_font_korean_glyph_ranges();
- *     cfg.coord_type = NK_COORD_PIXEL;
- *     nk_font *font = nk_font_atlas_add_from_file(&atlas, "Path/To/Your/TTF_Font.ttf", 13, &cfg);
- * ```
+ * Nuklear's optional font atlas remains available as a raster atlas builder. Shaping
+ * is independent of it, so another rasterizer or atlas implementation may be used.
  */
-
 struct nk_user_font_glyph;
-typedef float (*nk_text_width_f)(nk_handle, float h, const char *, int len);
-typedef void (*nk_query_font_glyph_f)(
-  nk_handle handle, float font_height, struct nk_user_font_glyph *glyph, nk_rune codepoint, nk_rune next_codepoint);
+typedef nk_uint nk_glyph_id;
+typedef void (*nk_query_font_glyph_id_f)(
+  nk_handle handle, float font_height, struct nk_user_font_glyph *glyph, nk_glyph_id glyph_id);
 
 #if defined(NK_INCLUDE_VERTEX_BUFFER_OUTPUT) || defined(NK_INCLUDE_SOFTWARE_FONT)
 struct nk_user_font_glyph {
   struct nk_vec2 uv[2];         /**!< texture coordinates */
-  struct nk_vec2 offset;        /**!< offset between top left and glyph */
+  struct nk_vec2 offset;        /**!< bitmap top-left relative to the glyph origin and shared text baseline */
   float          width, height; /**!< size of the glyph  */
   float          xadvance;      /**!< offset to the next glyph */
 };
 #endif
 
 struct nk_user_font {
-  nk_handle       userdata; /**!< user provided font handle */
-  float           height;   /**!< max height of the font */
-  nk_text_width_f width;    /**!< font string width in pixel callback */
+  nk_handle userdata; /**!< user provided font handle */
+  float     height;   /**!< default font size */
 #ifdef NK_INCLUDE_VERTEX_BUFFER_OUTPUT
-  nk_query_font_glyph_f query;   /**!< font glyph callback to query drawing info */
-  nk_handle             texture; /**!< texture handle to the used font atlas or texture */
+  nk_query_font_glyph_id_f query_glyph; /**!< glyph-id callback used by shaped text */
+  nk_handle                texture;     /**!< texture handle to the used font atlas or texture */
 #endif
 };
+
+/**
+ * Backend-neutral output of a text shaping operation.
+ *
+ * Source offsets are byte offsets into the original UTF-8 string.
+ * Clusters are stored in logical source order.
+ * Runs and the glyphs inside each run are stored in *visual order*.
+ * All metrics are normalized to pixels at the requested font height before they enter this representation.
+ *
+ * These structures are non-owning views.
+ * The producer of an nk_text_shape must keep the source and all arrays alive while the shape is consumed.
+ * Nuklear will copy them when persistent ownership is required (for example, by a text cache).
+ */
+enum nk_text_direction {
+  NK_TEXT_DIRECTION_INVALID = 0,
+  NK_TEXT_DIRECTION_LTR,
+  NK_TEXT_DIRECTION_RTL,
+  NK_TEXT_DIRECTION_TTB,
+  NK_TEXT_DIRECTION_BTT
+};
+
+enum nk_text_boundary_flags {
+  NK_TEXT_BOUNDARY_NONE       = 0,
+  NK_TEXT_BOUNDARY_GRAPHEME   = NK_FLAG(0),
+  NK_TEXT_BOUNDARY_WORD       = NK_FLAG(1),
+  NK_TEXT_BOUNDARY_LINE_SOFT  = NK_FLAG(2),
+  NK_TEXT_BOUNDARY_LINE_HARD  = NK_FLAG(3),
+  NK_TEXT_BOUNDARY_PARAGRAPH  = NK_FLAG(4)
+};
+
+struct nk_text_glyph {
+  nk_glyph_id id;          /**!< font-specific glyph identifier (not a unicode codepoint!!) */
+  int         cluster_idx; /**!< index into nk_text_shape.clusters */
+  float       offset_x;    /**!< drawing offset from the current pen position (in pixels) */
+  float       offset_y;
+  float       advance_x;   /**!< pen position after drawing this glyph (in pixels) */
+  float       advance_y;
+};
+
+struct nk_text_boundary {
+  int      source_offset; /**!< UTF-8 byte offset at which this boundary occurs */
+  nk_flags flags;         /**!< nk_text_boundary_flags present at this offset */
+};
+
+struct nk_text_cluster {
+  int source_begin; /**!< inclusive UTF-8 byte offset */
+  int source_end;   /**!< exclusive UTF-8 byte offset */
+  int glyph_begin;  /**!< first associated glyph in the visual glyph array */
+  int glyph_count;  /**!< associated glyph count (may be zero for controls) */
+};
+
+struct nk_text_run {
+  const struct nk_user_font *font; /**!< font selected for this run */
+  int                        source_begin;
+  int                        source_end;
+  int                        glyph_begin;
+  int                        glyph_count;
+  enum nk_text_direction     direction;
+  unsigned int               bidi_level;
+};
+
+struct nk_text_shape {
+  char                    *source;
+  int                      source_len;
+  struct nk_text_boundary *boundaries;
+  int                      num_boundaries;
+  struct nk_text_cluster  *clusters;
+  int                      num_clusters;
+  struct nk_text_run      *runs;
+  int                      num_runs;
+  struct nk_text_glyph    *glyphs;
+  int                      num_glyphs;
+  float                    baseline; /**!< shared glyph baseline measured from the top of the line */
+  struct nk_vec2           advance;
+};
+
+#define NK_TEXT_TAG(A, B, C, D)    \
+  (((nk_uint)(nk_byte)(A) << 24) | \
+   ((nk_uint)(nk_byte)(B) << 16) | \
+   ((nk_uint)(nk_byte)(C) <<  8) | \
+   ((nk_uint)(nk_byte)(D) <<  0))
+
+struct nk_text_feature {
+  nk_uint tag;   /**!< OpenType-style tag (created with NK_TEXT_TAG) */
+  int     value; /**!< feature value (zero disables the feature) */
+};
+
+struct nk_text_request {
+  const char                   *source;
+  int                           source_len;
+  const struct nk_user_font    *font;        /**!< preferred font; a backend may select fallback fonts */
+  float                         font_height; /**!< requested output size in pixels */
+  enum nk_text_direction        direction;   /**!< INVALID requests automatic direction detection */
+  nk_uint                       script_tag;  /**!< zero requests automatic script detection */
+  const char                   *lang;        /**!< optional BCP-47 tag; it need not be NUL-terminated */
+  int                           lang_len;
+  const struct nk_text_feature *features;
+  int                           num_features;
+};
+
+/**
+ * Optional append-only storage used by shaping backends while their output size is unknown.
+ * A list stores one fixed-size item type. The caller chooses the buffer that owns its chunks
+ * and may flatten the list into the same or a different buffer.
+ */
+#ifndef NK_TEXT_CHUNK_DATA_SIZE
+#define NK_TEXT_CHUNK_DATA_SIZE 512
+#endif
+
+#ifndef NK_TEXT_CACHE_BUCKET_COUNT
+#define NK_TEXT_CACHE_BUCKET_COUNT 1024
+#endif
+
+struct nk_text_chunk {
+  struct nk_text_chunk *next;
+  nk_size               used;
+  nk_byte               data[NK_TEXT_CHUNK_DATA_SIZE];
+};
+
+struct nk_text_chunk_list {
+  struct nk_text_chunk *first;
+  struct nk_text_chunk *last;
+  nk_size               item_size;
+  nk_uint               count;
+};
+
+NK_API void
+nk_text_chunk_list_init(struct nk_text_chunk_list *list, nk_size item_size);
+NK_API nk_bool
+nk_text_chunk_list_push(struct nk_text_chunk_list *list, struct nk_buffer *buffer, const void *item);
+NK_API void *
+nk_text_chunk_list_flatten(const struct nk_text_chunk_list *list, struct nk_buffer *buffer, nk_size alignment);
+
+/** Builds a shape using the supplied cache buffer. */
+typedef struct nk_text_shape *(*nk_text_shape_build_f)(nk_handle userdata, struct nk_buffer *cache, const struct nk_text_request *request);
+
+struct nk_text_backend {
+  nk_handle             userdata;
+  nk_text_shape_build_f build;
+  struct nk_buffer     *temporary; /**!< caller-owned output buffer used when a shape cannot be cached */
+};
+
+/** Reserves a fixed cache region from an unused context created by nk_init_fixed. */
+NK_API nk_bool
+nk_text_memory_init_fixed(struct nk_context *ctx, nk_size cache_size);
+
+/** Invalidates all cached text measurements and shapes, then reuses their memory. */
+NK_API void
+nk_text_memory_clear(struct nk_context *ctx);
+
+/** Copies the backend descriptor into the context and invalidates its text cache. */
+NK_API void
+nk_text_backend_set(struct nk_context *ctx, const struct nk_text_backend *backend);
+
+/** Returns a matching cached shape or builds one. An uncached result remains valid until the next shaping call. */
+NK_API struct nk_text_shape *
+nk_text_shape_build(struct nk_context *ctx, const struct nk_text_request *request);
+NK_API float
+nk_text_shape_width(const struct nk_text_shape *shape, int source_begin, int source_end);
+/** Returns a cached width, storing only the request key and width until a full shape is needed. */
+NK_API float
+nk_text_width(struct nk_context *ctx, const struct nk_user_font *font, float height, const char *text, int len);
 
 #ifdef NK_INCLUDE_FONT_BAKING
 enum nk_font_coord_type {
@@ -4833,28 +4857,25 @@ struct nk_font_config {
   struct nk_vec2          spacing;        /**!< extra pixel spacing between glyphs  */
   const nk_rune          *range;          /**!< list of unicode ranges (2 values per range, zero terminated) */
   struct nk_baked_font   *font;           /**!< font to setup in the baking process: NOTE: not needed for font atlas */
-  nk_rune                 fallback_glyph; /**!< fallback glyph to use if a given rune is not found */
   struct nk_font_config  *n;
   struct nk_font_config  *p;
 };
 
 struct nk_font_glyph {
   nk_rune codepoint;
+  nk_glyph_id id;
   float   xadvance;
   float   x0, y0, x1, y1, w, h;
   float   u0, v0, u1, v1;
 };
 
 struct nk_font {
-  struct nk_font             *next;
-  struct nk_user_font         handle;
-  struct nk_baked_font        info;
-  float                       scale;
-  struct nk_font_glyph       *glyphs;
-  const struct nk_font_glyph *fallback;
-  nk_rune                     fallback_codepoint;
-  nk_handle                   texture;
-  struct nk_font_config      *config;
+  struct nk_font        *next;
+  struct nk_user_font    handle;
+  struct nk_baked_font   info;
+  struct nk_font_glyph  *glyphs;
+  nk_handle              texture;
+  struct nk_font_config *config;
 };
 
 enum nk_font_atlas_format { NK_FONT_ATLAS_ALPHA8, NK_FONT_ATLAS_RGBA32 };
@@ -4930,8 +4951,6 @@ NK_API const void *
 nk_font_atlas_bake(struct nk_font_atlas *, int *width, int *height, enum nk_font_atlas_format);
 NK_API void
 nk_font_atlas_end(struct nk_font_atlas *, nk_handle tex, struct nk_draw_null_texture *);
-NK_API const struct nk_font_glyph *
-nk_font_find_glyph(const struct nk_font *, nk_rune unicode);
 NK_API void
 nk_font_atlas_cleanup(struct nk_font_atlas *atlas);
 NK_API void
@@ -5199,6 +5218,7 @@ enum nk_text_edit_mode {
 };
 
 struct nk_text_edit {
+  struct nk_context   *context;
   struct nk_clipboard clip;
   struct nk_str       string;
   nk_plugin_filter    filter;
@@ -5504,11 +5524,12 @@ struct nk_command_text {
 enum nk_command_clipping { NK_CLIPPING_OFF = nk_false, NK_CLIPPING_ON = nk_true };
 
 struct nk_command_buffer {
-  struct nk_buffer *base;
-  struct nk_rect    clip;
-  int               use_clipping;
-  nk_handle         userdata;
-  nk_size           begin, end, last;
+  struct nk_context *context;
+  struct nk_buffer  *base;
+  struct nk_rect     clip;
+  int                use_clipping;
+  nk_handle          userdata;
+  nk_size            begin, end, last;
 };
 
 /** shape outlines */
@@ -5868,13 +5889,7 @@ nk_draw_list_fill_poly_convex(struct nk_draw_list *,
 NK_API void
 nk_draw_list_add_image(struct nk_draw_list *, struct nk_image texture, struct nk_rect rect, struct nk_color);
 NK_API void
-nk_draw_list_add_text(struct nk_draw_list *,
-                      const struct nk_user_font *,
-                      struct nk_rect,
-                      const char *text,
-                      int         len,
-                      float       font_height,
-                      struct nk_color);
+nk_draw_list_add_text_shape(struct nk_draw_list *, const struct nk_text_shape *, struct nk_rect, float font_height, struct nk_color);
 #  ifdef NK_INCLUDE_COMMAND_USERDATA
 NK_API void
 nk_draw_list_push_userdata(struct nk_draw_list *, nk_handle userdata);
@@ -6354,6 +6369,7 @@ struct nk_style_window {
 
 struct nk_style {
   const struct nk_user_font *font;
+  float                      font_size;
   const struct nk_cursor    *cursors[NK_CURSOR_COUNT];
   const struct nk_cursor    *cursor_active;
   struct nk_cursor          *cursor_last;
@@ -6409,8 +6425,8 @@ enum nk_panel_type {
 };
 enum nk_panel_set {
   NK_PANEL_SET_NONBLOCK = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP,
-  NK_PANEL_SET_POPUP    = NK_PANEL_SET_NONBLOCK | NK_PANEL_POPUP,
-  NK_PANEL_SET_SUB      = NK_PANEL_SET_POPUP | NK_PANEL_GROUP,
+  NK_PANEL_SET_POPUP    = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP | NK_PANEL_POPUP,
+  NK_PANEL_SET_SUB      = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP | NK_PANEL_POPUP | NK_PANEL_GROUP,
 };
 
 struct nk_chart_slot {
@@ -6504,14 +6520,14 @@ struct nk_table;
 
 enum nk_window_flags {
   NK_WINDOW_PRIVATE         = NK_FLAG(14),
-  NK_WINDOW_DYNAMIC         = NK_WINDOW_PRIVATE,                  /**< special window type growing up in height while being filled to a certain maximum height */
-  NK_WINDOW_ROM             = NK_FLAG(15),                        /**< sets window widgets into a read only mode and does not allow input changes */
-  NK_WINDOW_NOT_INTERACTIVE = NK_WINDOW_ROM | NK_WINDOW_NO_INPUT, /**< prevents all interaction caused by input to either window or widgets inside */
-  NK_WINDOW_HIDDEN          = NK_FLAG(16),                        /**< Hides window and stops any window interaction and drawing */
-  NK_WINDOW_CLOSED          = NK_FLAG(17),                        /**< Directly closes and frees the window at the end of the frame */
-  NK_WINDOW_MINIMIZED       = NK_FLAG(18),                        /**< marks the window as minimized */
-  NK_WINDOW_MAXIMIZED       = NK_FLAG(19),                        /**< marks the window as maximized */
-  NK_WINDOW_REMOVE_ROM      = NK_FLAG(20),                        /**< Removes read only mode at the end of the window */
+  NK_WINDOW_DYNAMIC         = NK_WINDOW_PRIVATE,         /**< special window type growing up in height while being filled to a certain maximum height */
+  NK_WINDOW_ROM             = NK_FLAG(15),               /**< sets window widgets into a read only mode and does not allow input changes */
+  NK_WINDOW_NOT_INTERACTIVE = NK_FLAG(15) | NK_FLAG(12), /**< prevents all interaction caused by input to either window or widgets inside */
+  NK_WINDOW_HIDDEN          = NK_FLAG(16),               /**< Hides window and stops any window interaction and drawing */
+  NK_WINDOW_CLOSED          = NK_FLAG(17),               /**< Directly closes and frees the window at the end of the frame */
+  NK_WINDOW_MINIMIZED       = NK_FLAG(18),               /**< marks the window as minimized */
+  NK_WINDOW_MAXIMIZED       = NK_FLAG(19),               /**< marks the window as maximized */
+  NK_WINDOW_REMOVE_ROM      = NK_FLAG(20),               /**< Removes read only mode at the end of the window */
 };
 
 struct nk_popup_state {
@@ -6749,6 +6765,12 @@ struct nk_context {
   /** draw buffer used for overlay drawing operation like cursor */
   struct nk_command_buffer overlay;
 
+  /** optional fixed measurement and shaped-text cache, carved from nk_init_fixed memory */
+  struct nk_buffer             text_cache;
+  struct nk_text_cache_entry **text_cache_buckets;
+  struct nk_text_backend       text_backend;
+  nk_bool                      text_memory_initialized;
+
   struct nk_rect window_maximize_bounds;
 
   /** windows */
@@ -6823,7 +6845,9 @@ struct nk_context {
 }
 #endif
 
-#ifdef __cplusplus
+#if defined(_MSC_VER) && !defined(__cplusplus)
+#  define NK_ALIGNOF(t) __alignof(t)
+#elif defined(__cplusplus)
 template <typename T> struct nk_alignof;
 template <typename T, int size_diff> struct nk_helper {
   enum { value = size_diff };
@@ -7024,7 +7048,8 @@ NK_LIB char *
 nk_dtoa(char *s, double n);
 #endif
 NK_LIB int
-nk_text_clamp(const struct nk_user_font *font,
+nk_text_clamp(struct nk_context          *ctx,
+              const struct nk_user_font *font,
               const char                *text,
               int                        text_len,
               float                      space,
@@ -7033,7 +7058,8 @@ nk_text_clamp(const struct nk_user_font *font,
               nk_rune                   *sep_list,
               int                        sep_count);
 NK_LIB struct nk_vec2
-nk_text_calculate_text_bounds(const struct nk_user_font *font,
+nk_text_calculate_text_bounds(struct nk_context          *ctx,
+                              const struct nk_user_font *font,
                               const char                *begin,
                               int                        byte_len,
                               float                      row_height,

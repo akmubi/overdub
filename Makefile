@@ -30,7 +30,8 @@ SRCS_TEST_UI :=                     \
   src/misc.c                        \
   src/mod_host.c                    \
   src/mod_manager.c                 \
-  src/nk_prebaked_font.c            \
+  src/nk_kb_text_shape.c            \
+  src/nk_font_runtime.c             \
   src/path.c                        \
   src/profiler.c                    \
   src/scratch.c                     \
@@ -45,6 +46,7 @@ SRCS_TEST_UI :=                     \
   src/ui_nuklear.c                  \
   src/unreal.c                      \
   src/vendor.c                      \
+  src/vendor_kb.c                   \
   src/builtin/cache.c               \
   src/builtin/common.c              \
   src/builtin/details_panel.c       \
@@ -54,8 +56,7 @@ SRCS_TEST_UI :=                     \
   src/builtin/ufunction_tracer.c    \
   src/builtin/tweaks.c              \
   test/test_ui_overview.c           \
-  test/test_ui_style_configurator.c \
-  test/test_font_prebaker.c
+  test/test_ui_style_configurator.c
 
 OBJS_DEBUG   := $(SRCS:%.c=$(OBJ_DIR_DEBUG)/%.o)
 OBJS_RELEASE := $(SRCS:%.c=$(OBJ_DIR_RELEASE)/%.o)

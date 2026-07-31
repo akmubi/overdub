@@ -3373,7 +3373,7 @@ ui_detail_row(search_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bo
   struct nk_style *style  = &ctx->style;
   struct nk_panel *layout = ctx->current->layout;
 
-  float row_h = style->font->height + 2.0f * style->tab.padding.y;
+  float row_h = style->font_size + 2.0f * style->tab.padding.y;
   float pad_x = style->tab.padding.x;
   float gap_w = ui_text_width(ctx, STR_LIT(" "));
 
@@ -3386,7 +3386,7 @@ ui_detail_row(search_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bo
     indent_w = 12.0f;
   }
 
-  float symbol_w = NK_MAX(style->font->height, 12.0f);
+  float symbol_w = NK_MAX(style->font_size, 12.0f);
   float parts_w  = 0.0f;
 
   if (cols) {
@@ -4110,7 +4110,7 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
       float group_pad_y = tool->ctx->style.window.group_padding.y;
       float scroll_h    = tool->ctx->style.window.scrollbar_size.y;
       float pad_y       = tool->ctx->style.window.spacing.y;
-      float row_h       = tool->ctx->style.font->height + 2.0f * tool->ctx->style.tab.padding.y + pad_y;
+      float row_h       = tool->ctx->style.font_size + 2.0f * tool->ctx->style.tab.padding.y + pad_y;
       int   row_count   = detail_visible_prop_row_count(tab);
       float group_h     = group_pad_y + (float)row_count * row_h + scroll_h + group_pad_y;
 

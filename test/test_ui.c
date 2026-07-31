@@ -14,6 +14,11 @@
 #define MAX_VERTEX_BUFFER (1 * MB)
 #define MAX_INDEX_BUFFER  (256 * KB)
 
+#define NK_CONTEXT_MEMORY_SIZE (40 * MB)
+#define NK_TEXT_CACHE_SIZE     (32 * MB)
+#define NK_TEXT_TEMPORARY_SIZE (1 * MB)
+#define KB_CONTEXT_MEMORY_SIZE (32 * MB)
+
 #include "arena.h"
 #include "builtin.h"
 #include "config.h"
@@ -21,7 +26,10 @@
 #include "input.h"
 #include "log.h"
 #include "mod_manager.h"
+#include "nk_kb_text_shape.h"
+#include "nk_font_runtime.h"
 #include "path.h"
+#include "profiler.h"
 #include "scratch.h"
 #include "str.h"
 #include "types.h"
@@ -32,16 +40,176 @@
 #include "vendor_stb.h"
 
 extern int
-test_ui_overview(struct nk_context *ctx, unsigned int viewport_width, unsigned int viewport_height);
+test_ui_overview(struct nk_context *ctx, unsigned int vw, unsigned int vh);
 extern int
-test_ui_style_configurator(struct nk_context *ctx, struct nk_color color_table[NK_COLOR_COUNT], unsigned int viewport_width, unsigned int viewport_height);
-extern void
-test_dump_prebaked_font_data(void);
+test_ui_style_configurator(struct nk_context *ctx, struct nk_color color_table[NK_COLOR_COUNT], unsigned int vw, unsigned int vh);
+
+static void
+test_ui_text_profile(struct nk_context *ctx, unsigned int vw, unsigned int vh)
+{
+  static const char row[] =
+    "MovieSceneBuiltInEasingFunction /Game/Hibiki/Blueprints/HUD/SpecialItemGetPopup/LifecoreIcon_UI."
+    "LifecoreIcon_UI_C.Piece4Get_Anim_INST.Piece4Get_Anim.MovieScenePieceGet_Anim.MovieSceneBuiltInEasingFunction";
+  char text[512];
+
+  if (globals.frame_counter < 60) {
+    int begin = (int)globals.frame_counter * 700;
+    int end   = begin + 700;
+
+    for (int i = begin; i < end; ++i) {
+      int len = stbsp_snprintf(text, sizeof(text), "MovieSceneBuiltInEasingFunction /Game/Hibiki/TextCachePressure/Object_%05d", i);
+      nk_text_width(ctx, ctx->style.font, ctx->style.font->height, text, len);
+    }
+  }
+
+  if (nk_begin(ctx, "Text profile", nk_rect(0.0f, 0.0f, (float)vw, (float)vh), 0)) {
+    int rows = (int)(vh / 20);
+    for (int i = 0; i < rows; ++i) {
+      int len = stbsp_snprintf(text, sizeof(text), "%s_%d", row, i);
+      nk_layout_row_dynamic(ctx, 20.0f, 1);
+      nk_text(ctx, text, len, NK_TEXT_LEFT);
+    }
+  }
+  nk_end(ctx);
+}
 
 static IDXGISwapChain         *swap_chain;
 static ID3D11Device           *device;
 static ID3D11DeviceContext    *context;
 static ID3D11RenderTargetView *rt_view;
+
+static void
+test_ui_kb_allocator(void *data, kbts_allocator_op *op)
+{
+  if (op->Kind == KBTS_ALLOCATOR_OP_KIND_ALLOCATE) {
+    op->Allocate.Pointer = arena_push_aligned(data, op->Allocate.Size, 16);
+  }
+}
+
+#if 0
+static void
+test_ui_text_lines(struct nk_context *ctx, str_t text)
+{
+  const char *data       = (const char *)text.data;
+  uint64_t    line_begin = 0;
+
+  for (uint64_t i = 0; i < text.len; ++i) {
+    if (text.data[i] == '\n') {
+      nk_layout_row_dynamic(ctx, 16, 1);
+      nk_text(ctx, data + line_begin, (int)(i - line_begin), NK_TEXT_LEFT);
+      line_begin = i + 1;
+    }
+  }
+
+  if (line_begin < text.len) {
+    nk_layout_row_dynamic(ctx, 16, 1);
+    nk_text(ctx, data + line_begin, (int)(text.len - line_begin), NK_TEXT_LEFT);
+  }
+}
+
+static void
+test_ui_text_shaping(struct nk_context *ctx, struct nk_runtime_fonts *fonts, struct nk_font *utf8_font, int system_font_count, str_t utf8_demo, unsigned int vw, unsigned int vh)
+{
+  struct nk_font *bold        = nk_runtime_font(fonts, NK_RUNTIME_FONT_BOLD);
+  struct nk_font *italic      = nk_runtime_font(fonts, NK_RUNTIME_FONT_ITALIC);
+  struct nk_font *bold_italic = nk_runtime_font(fonts, NK_RUNTIME_FONT_BOLD_ITALIC);
+  nk_flags flags = 0; // NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE NK_WINDOW_TITLE;
+
+  if (nk_begin(ctx, "Text shaping", nk_rect(0, 0, (float)vw, (float)vh), flags)) {
+    #if 0
+    nk_layout_row_dynamic(ctx, 34, 1);
+    nk_style_push_font_size(ctx, 24.0f);
+    nk_label(ctx, "Text shaping integration", NK_TEXT_LEFT);
+    nk_style_pop_font_size(ctx);
+
+    nk_layout_row_dynamic(ctx, 24, 1);
+    nk_label(ctx, "One face, stackable sizes: 12 / 18 / 28 px", NK_TEXT_LEFT);
+    {
+      const float sizes[] = {12.0f, 18.0f, 28.0f};
+      for (int i = 0; i < COUNTOF(sizes); ++i) {
+        nk_layout_row_dynamic(ctx, sizes[i] + 10.0f, 1);
+        nk_style_push_font_size(ctx, sizes[i]);
+        nk_label(ctx, "Hamburgefonts office affinity -> ffi fi fl", NK_TEXT_LEFT);
+        nk_style_pop_font_size(ctx);
+      }
+    }
+
+    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_label(ctx, "Font faces", NK_TEXT_LEFT);
+    if (bold) {
+      nk_style_push_font(ctx, &bold->handle);
+      nk_label(ctx, "Bold: AVATAR office", NK_TEXT_LEFT);
+      nk_style_pop_font(ctx);
+    }
+
+    if (italic) {
+      nk_style_push_font(ctx, &italic->handle);
+      nk_label(ctx, "Italic: AVATAR office", NK_TEXT_LEFT);
+      nk_style_pop_font(ctx);
+    }
+
+    if (bold_italic) {
+      nk_style_push_font(ctx, &bold_italic->handle);
+      nk_label(ctx, "Bold italic: AVATAR office", NK_TEXT_LEFT);
+      nk_style_pop_font(ctx);
+    }
+
+    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_label(ctx, "Scripts and automatic direction", NK_TEXT_LEFT);
+    nk_label(ctx, "Русский: Съешь ещё этих мягких французских булок", NK_TEXT_LEFT);
+    nk_label(ctx, "Ελληνικά: Καλημέρα κόσμε", NK_TEXT_LEFT);
+    nk_label(ctx, "العربية: مرحباً بالعالم", NK_TEXT_LEFT);
+    nk_label(ctx, "עברית: שלום עולם", NK_TEXT_LEFT);
+    nk_label(ctx, "Mixed bidi: build 123 — مرحباً — done 456", NK_TEXT_LEFT);
+
+    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_label(ctx, system_font_count ? "System-font fallback" : "System fonts unavailable", NK_TEXT_LEFT);
+    nk_label(ctx, "日本語: こんにちは世界  中文: 你好世界", NK_TEXT_LEFT);
+    nk_label(ctx, "Emoji: 😀 🎉 ❤️  Icons:   󰏌", NK_TEXT_LEFT);
+    #endif
+
+    struct nk_font *consolas = fonts->faces[4].font;
+    if (consolas) {
+      nk_style_push_font(ctx, &consolas->handle);
+      nk_style_push_font_size(ctx, 16.0f);
+    }
+
+    static const char *refterm_simple_text[] = {
+      "[0] The quick brown fox jumped over the lazy dog.",
+      "[1] السلام عليكم",
+      "[2] السَّلَامُ عَلَيْكُمْ",
+      "[3] hello こんにちは 你好 مرحبا שלום မင်္ဂလာပါ 👨‍🍳 👶 👅 👀 ™ 🅱️",
+      "[4] I love you אני אוהב אותך",
+      "[5] Ňuňatý, šišatý a žluťoučký koníček s ďolíčkatými tvářemi úpí nad bezútěšností zvůle světa.",
+      "[6] ﷲ",
+      "[7] כָּכָה־מָה, וַיֹּאמֶר הַמֶּלֶךְ",
+      "[8] ∮ E⋅da = Q,  n → ∞,  ∑ f(i) = ∏ g(i)",
+      "[9] ๏ แผ่นดินฮั่นเสื่อมโทรมแสนสังเวช  พระปกเกศกองบู๊กู้ขึ้นใหม่",
+      "[10] ╔══╦══╗  ┌──┬──┐  ╭──┬──╮  ╭──┬──╮  ┏━━┳━━┓",
+    };
+
+    nk_layout_row_dynamic(ctx, 22, 1);
+    nk_label(ctx, "refterm simple_text", NK_TEXT_LEFT);
+    for (int i = 0; i < COUNTOF(refterm_simple_text); ++i) {
+      nk_label(ctx, refterm_simple_text[i], NK_TEXT_LEFT);
+    }
+
+    if (consolas) {
+      nk_style_pop_font_size(ctx);
+      nk_style_pop_font(ctx);
+    }
+
+    nk_style_push_font(ctx, &utf8_font->handle);
+    nk_style_push_font_size(ctx, 16.0f);
+    nk_style_push_vec2(ctx, &ctx->style.window.spacing, nk_vec2(ctx->style.window.spacing.x, 0.0f));
+    test_ui_text_lines(ctx, utf8_demo);
+    nk_style_pop_vec2(ctx);
+    nk_style_pop_font_size(ctx);
+    nk_style_pop_font(ctx);
+  }
+  nk_end(ctx);
+}
+#endif
 
 static void
 set_swap_chain_size(int width, int height)
@@ -979,8 +1147,8 @@ ui_tabs(struct nk_context *ctx, const char *group_name, str_t tab_names[], int t
 static void
 draw_test_window(struct nk_context *ctx)
 {
-  int width  = NK_MAX(0, g_width - (g_width / 10));
-  int height = NK_MAX(0, g_height - (g_height / 10));
+  float width  = (float)NK_MAX(0, g_width - (g_width / 10));
+  float height = (float)NK_MAX(0, g_height - (g_height / 10));
 
   nk_flags       flags  = NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE;
   struct nk_rect bounds = nk_rect((g_width - width) * 0.5f, (g_height - height) * 0.5f, width, height);
@@ -1036,7 +1204,7 @@ draw_test_window(struct nk_context *ctx)
     }
 
     int closed_tab = -1;
-    ui_tabs(ctx, "test.tabs", tabs.items, tabs.count, &current_tab, &closed_tab);
+    ui_tabs(ctx, "test.tabs", tabs.items, (int)tabs.count, &current_tab, &closed_tab);
 
     if (closed_tab >= 0 && (uint64_t)closed_tab < tabs.count) {
       for (uint64_t i = closed_tab; i < tabs.count - 1; ++i) {
@@ -1046,19 +1214,24 @@ draw_test_window(struct nk_context *ctx)
     }
 
     if (tabs.count > 0 && (uint64_t)current_tab >= tabs.count) {
-      current_tab = tabs.count - 1;
+      current_tab = (int)tabs.count - 1;
     }
   }
   nk_end(ctx);
 }
 
 int
-main(void)
+main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
+
   globals.perm     = arena_new_dynamic(CONFIG_PERM_ARENA_SIZE, 64 * KB);
+  globals.module   = GetModuleHandleW(NULL);
   globals.game_dir = path_module_dir(&globals.perm);
 
   log_init(STR_LIT(CONFIG_LOG_FILE_NAME), CONFIG_LOG_LEVEL, false);
+  bool text_profile = GetEnvironmentVariableA("OVERDUB_TEXT_PROFILE", NULL, 0) != 0;
 
   WNDCLASSW wc = {
     .style         = CS_DBLCLKS,
@@ -1109,14 +1282,68 @@ main(void)
   }
   set_swap_chain_size(WINDOW_WIDTH, WINDOW_HEIGHT);
 
-  struct nk_context *ctx = nk_d3d11_init(device, WINDOW_WIDTH, WINDOW_HEIGHT, MAX_VERTEX_BUFFER, MAX_INDEX_BUFFER);
+  void              *nk_memory = arena_push_aligned(&globals.perm, NK_CONTEXT_MEMORY_SIZE, 16);
+  struct nk_context *ctx       = nk_d3d11_init_fixed(device, WINDOW_WIDTH, WINDOW_HEIGHT, MAX_VERTEX_BUFFER, MAX_INDEX_BUFFER, nk_memory, NK_CONTEXT_MEMORY_SIZE, NK_TEXT_CACHE_SIZE);
   ASSERT(ctx != NULL);
 
-  struct nk_font *font_body  = NULL;
-  struct nk_font *font_title = NULL;
-  nk_d3d11_setup_fonts(&font_body, &font_title);
+  static const struct {
+    const char                *name;
+    enum nk_runtime_font_style style;
+  } system_fonts[] = {
+    {"consola.ttf",  NK_RUNTIME_FONT_REGULAR},
+    {"consolab.ttf", NK_RUNTIME_FONT_BOLD},
+    {"consolai.ttf", NK_RUNTIME_FONT_ITALIC},
+    {"consolaz.ttf", NK_RUNTIME_FONT_BOLD_ITALIC},
+  };
+  struct nk_runtime_font_source font_sources[COUNTOF(system_fonts)];
+  int                           font_source_count = 0;
 
-  nk_style_set_font(ctx, &font_body->handle);
+  for (int i = 0; i < COUNTOF(system_fonts); ++i) {
+    if (nk_runtime_font_source_system(&font_sources[font_source_count], &globals.perm, system_fonts[i].name, system_fonts[i].style)) {
+      font_source_count += 1;
+    } else if (i == 0) {
+      MASSERT(false, "failed to load the Consolas system font");
+    }
+  }
+
+  struct nk_runtime_fonts fonts    = {0};
+  tmp_arena_t             font_tmp = scratch_begin(NULL);
+  {
+    MASSERT(nk_runtime_fonts_bake(&fonts, &globals.perm, font_tmp.arena, font_sources, font_source_count, CONFIG_NK_FONT_SIZE), "failed to bake font atlas");
+    nk_d3d11_setup_fonts(&fonts);
+  }
+  scratch_end(font_tmp);
+
+  void                     *kb_context_memory     = arena_push_aligned(&globals.perm, KB_CONTEXT_MEMORY_SIZE, 16);
+  void                     *text_temporary_memory = arena_push_aligned(&globals.perm, NK_TEXT_TEMPORARY_SIZE, 16);
+  kbts_shape_context       *kb_context            = kbts_PlaceShapeContextFixedMemory(kb_context_memory, KB_CONTEXT_MEMORY_SIZE);
+  kbts_font                 kb_font_data[NK_RUNTIME_FONT_CAPACITY];
+  kbts_font                *kb_fonts[NK_RUNTIME_FONT_CAPACITY];
+  struct nk_buffer          text_temporary;
+  struct nk_kb_text_backend kb_backend;
+  struct nk_text_backend    text_backend = {0};
+
+  ASSERT(kb_context != NULL);
+
+  for (int i = 0; i < fonts.face_count; ++i) {
+    struct nk_runtime_font_face *face = &fonts.faces[i];
+    kb_font_data[i]          = kbts_FontFromMemory(face->ttf, (int)face->ttf_size, 0, test_ui_kb_allocator, &globals.perm);
+    kb_font_data[i].UserData = &face->font->handle;
+    kb_fonts[i]              = &kb_font_data[i];
+    ASSERT(kbts_FontIsValid(&kb_font_data[i]));
+  }
+
+  nk_buffer_init_fixed(&text_temporary, text_temporary_memory, NK_TEXT_TEMPORARY_SIZE);
+  kb_backend.context        = kb_context;
+  kb_backend.fonts          = kb_fonts;
+  kb_backend.temporary      = &text_temporary;
+  kb_backend.num_fonts      = fonts.face_count;
+  text_backend.userdata.ptr = &kb_backend;
+  text_backend.build        = nk_kb_text_shape_build;
+  text_backend.temporary    = &text_temporary;
+  nk_text_backend_set(ctx, &text_backend);
+
+  nk_style_set_font(ctx, &fonts.faces[0].font->handle);
 
   mod_manager_init(&globals.mod_manager, globals.game_dir);
   mod_manager_startup_load_cfg(&globals.mod_manager);
@@ -1130,7 +1357,7 @@ main(void)
   mod_manager_startup_load_mods(&globals.mod_manager);
 
   ui_manager_preinit(&globals.ui_manager, &globals.mod_manager, &globals.perm);
-  ui_manager_init(&globals.ui_manager, ctx, font_body, font_title, g_width, g_height);
+  ui_manager_init(&globals.ui_manager, ctx, fonts.faces[0].font, g_width, g_height);
 
   // ui_mod_manager_open(&globals.ui_manager.main);
   // ui_console_open(&globals.ui_console);
@@ -1146,11 +1373,11 @@ main(void)
 
   mod_manager_start_dlls(&globals.mod_manager);
 
-  double frame_time_prev = (double)time_now_us();
-  int    running         = 1;
+  uint64_t frame_time_prev = time_now_us();
+  int      running         = 1;
   while (running) {
-    double frame_time_now = (double)time_now_us();
-    double delta          = (frame_time_now - frame_time_prev) / 1000000.0;
+    uint64_t frame_time_now = time_now_us();
+    float    delta          = (float)(frame_time_now - frame_time_prev) / 1000000.0f;
 
     MSG msg;
     nk_input_begin(ctx);
@@ -1184,11 +1411,19 @@ main(void)
 
     ui_manager_on_frame_end(&globals.ui_manager, g_width, g_height);
 
-    test_ui_overview(ctx, g_width, g_height);
+    if (text_profile) {
+      PROF_SCOPE_BEGIN("test_ui.text_rows", text_rows);
+      test_ui_text_profile(ctx, g_width, g_height);
+      PROF_SCOPE_END(text_rows);
+    } else {
+      test_ui_overview(ctx, g_width, g_height);
+    }
 
     ID3D11DeviceContext_ClearRenderTargetView(context, rt_view, &bg.r);
     ID3D11DeviceContext_OMSetRenderTargets(context, 1, &rt_view, NULL);
+    PROF_SCOPE_BEGIN("test_ui.render", render);
     nk_d3d11_render(context, NK_ANTI_ALIASING_ON);
+    PROF_SCOPE_END(render);
     HRESULT hr = IDXGISwapChain_Present(swap_chain, 1, 0);
     if (hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_REMOVED) {
       MessageBoxW(NULL, L"D3D11 device is lost or removed!", L"Error", 0);
@@ -1201,6 +1436,12 @@ main(void)
     mem_copy(globals.prev_keys_down, globals.keys_down, sizeof(globals.prev_keys_down));
 
     scratch_reset();
+    if (text_profile && globals.frame_counter == 60) {
+      profiler_reset();
+    } else if (text_profile && globals.frame_counter == 360) {
+      profiler_log_report();
+      running = 0;
+    }
     globals.frame_counter += 1;
 
     frame_time_prev = frame_time_now;

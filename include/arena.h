@@ -72,7 +72,7 @@ tmp_arena_begin(arena_t *a)
 static inline void
 tmp_arena_end(tmp_arena_t tmp)
 {
-  arena_pop_to(tmp.arena, tmp.pos);
+  arena_set_used(tmp.arena, tmp.pos);
 }
 
 #endif /* ARENA_H */

@@ -1,4 +1,5 @@
 #include "nuklear_d3d11.h"
+#include "profiler.h"
 
 #include <d3d11.h>
 
@@ -17,11 +18,30 @@ struct nk_d3d11_vertex {
   nk_byte col[4];
 };
 
+#define NK_D3D11_GLYPH_TABLE_CAPACITY   4096
+#define NK_D3D11_DYNAMIC_GLYPH_CAPACITY 1024
+#define NK_D3D11_GLYPH_BITMAP_SIZE      128
+#define NK_D3D11_DYNAMIC_ATLAS_HEIGHT   1024
+
+struct nk_d3d11_glyph_slot {
+  nk_glyph_id                 id;
+  float                       height;
+  const struct nk_font_glyph *glyph;
+};
+
+struct nk_d3d11_font_data {
+  const void                *ttf;
+  struct nk_d3d11_glyph_slot table[NK_D3D11_GLYPH_TABLE_CAPACITY];
+  struct nk_font_glyph       dynamic_glyphs[NK_D3D11_DYNAMIC_GLYPH_CAPACITY];
+  unsigned int               dynamic_glyph_count;
+};
+
 static struct {
-  struct nk_context ctx;
-  struct nk_buffer  cmds;
-  struct nk_font    font_body;
-  struct nk_font    font_title;
+  struct nk_context         ctx;
+  struct nk_buffer          cmds;
+  struct nk_font           *fonts[NK_RUNTIME_FONT_CAPACITY];
+  struct nk_d3d11_font_data font_data[NK_RUNTIME_FONT_CAPACITY];
+  int                       font_count;
 
   struct nk_draw_null_texture tex_null;
   unsigned int                max_vertex_buffer;
@@ -29,6 +49,7 @@ static struct {
 
   D3D11_VIEWPORT            viewport;
   ID3D11Device             *device;
+  ID3D11DeviceContext      *render_context;
   ID3D11RasterizerState    *rasterizer_state;
   ID3D11VertexShader       *vertex_shader;
   ID3D11InputLayout        *input_layout;
@@ -38,7 +59,17 @@ static struct {
   ID3D11Buffer             *index_buffer;
   ID3D11Buffer             *vertex_buffer;
   ID3D11ShaderResourceView *font_texture_view;
+  ID3D11Texture2D          *font_texture;
   ID3D11SamplerState       *sampler_state;
+
+  int atlas_width;
+  int atlas_height;
+  int atlas_next_x;
+  int atlas_next_y;
+  int atlas_row_height;
+
+  nk_byte glyph_alpha[NK_D3D11_GLYPH_BITMAP_SIZE * NK_D3D11_GLYPH_BITMAP_SIZE];
+  nk_byte glyph_rgba[NK_D3D11_GLYPH_BITMAP_SIZE * NK_D3D11_GLYPH_BITMAP_SIZE * 4];
 } d3d11;
 
 NK_API void
@@ -106,7 +137,11 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
         struct nk_buffer vbuf, ibuf;
         nk_buffer_init_fixed(&vbuf, vertices.pData, (size_t)d3d11.max_vertex_buffer);
         nk_buffer_init_fixed(&ibuf, indices.pData, (size_t)d3d11.max_index_buffer);
+        d3d11.render_context = context;
+        PROF_SCOPE_BEGIN("nk_convert", convert);
         nk_convert(&d3d11.ctx, &d3d11.cmds, &vbuf, &ibuf, &config);
+        PROF_SCOPE_END(convert);
+        d3d11.render_context = NULL;
       }
     }
 
@@ -114,6 +149,7 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
     ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)d3d11.index_buffer, 0);
 
     /* iterate over and execute each draw command */
+    PROF_SCOPE_BEGIN("d3d11.draw", draw);
     nk_draw_foreach(cmd, &d3d11.ctx, &d3d11.cmds)
     {
       D3D11_RECT                scissor;
@@ -122,9 +158,9 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
         continue;
       }
 
-      scissor.left   = (LONG)cmd->clip_rect.x;
+      scissor.left   = (LONG)(cmd->clip_rect.x);
       scissor.right  = (LONG)(cmd->clip_rect.x + cmd->clip_rect.w);
-      scissor.top    = (LONG)cmd->clip_rect.y;
+      scissor.top    = (LONG)(cmd->clip_rect.y);
       scissor.bottom = (LONG)(cmd->clip_rect.y + cmd->clip_rect.h);
 
       ID3D11DeviceContext_PSSetShaderResources(context, 0, 1, &texture_view);
@@ -132,6 +168,7 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
       ID3D11DeviceContext_DrawIndexed(context, (UINT)cmd->elem_count, offset, 0);
       offset += cmd->elem_count;
     }
+    PROF_SCOPE_END(draw);
     nk_clear(&d3d11.ctx);
     nk_buffer_clear(&d3d11.cmds);
   }
@@ -407,9 +444,15 @@ nk_d3d11_handle_event(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam)
   return 0;
 }
 
-NK_API struct nk_context *
-nk_d3d11_init(
-  ID3D11Device *device, int width, int height, unsigned int max_vertex_buffer, unsigned int max_index_buffer)
+static struct nk_context *
+nk_d3d11_init_internal(ID3D11Device *device,
+                       int           width,
+                       int           height,
+                       unsigned int  max_vertex_buffer,
+                       unsigned int  max_index_buffer,
+                       void         *memory,
+                       nk_size       memory_size,
+                       nk_size       text_cache_size)
 {
   HRESULT hr;
   d3d11.max_vertex_buffer = max_vertex_buffer;
@@ -417,7 +460,13 @@ nk_d3d11_init(
   d3d11.device            = device;
   ID3D11Device_AddRef(device);
 
-  nk_init_default(&d3d11.ctx, 0);
+  if (memory) {
+    if (!nk_init_fixed(&d3d11.ctx, memory, memory_size, 0) || !nk_text_memory_init_fixed(&d3d11.ctx, text_cache_size)) {
+      return NULL;
+    }
+  } else {
+    nk_init_default(&d3d11.ctx, 0);
+  }
 
   nk_buffer_init_default(&d3d11.cmds);
 
@@ -575,121 +624,223 @@ nk_d3d11_init(
   return &d3d11.ctx;
 }
 
-static const struct nk_font_glyph *
-nk_d3d11_find_glyph(const struct nk_font *font, nk_rune codepoint)
+NK_API struct nk_context *
+nk_d3d11_init(
+  ID3D11Device *device, int width, int height, unsigned int max_vertex_buffer, unsigned int max_index_buffer)
 {
-  uint32_t lo = 0;
-  uint32_t hi = font->info.glyph_count;
-
-  while (lo < hi) {
-    uint32_t mid = lo + (hi - lo) / 2;
-    nk_rune  cp  = font->glyphs[mid].codepoint;
-
-    if (cp < codepoint) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-
-  if (lo < font->info.glyph_count && font->glyphs[lo].codepoint == codepoint) {
-    return &font->glyphs[lo];
-  }
-
-  return font->fallback;
+  return nk_d3d11_init_internal(device, width, height, max_vertex_buffer, max_index_buffer, NULL, 0, 0);
 }
 
-static float
-nk_d3d11_font_width(nk_handle handle, float height, const char *text, int len)
+NK_API struct nk_context *
+nk_d3d11_init_fixed(ID3D11Device *device,
+                    int           width,
+                    int           height,
+                    unsigned int  max_vertex_buffer,
+                    unsigned int  max_index_buffer,
+                    void         *memory,
+                    nk_size       memory_size,
+                    nk_size       text_cache_size)
 {
-  struct nk_font *font = handle.ptr;
-  if (!font || !text || len <= 0) {
-    return 0.0f;
-  }
+  return nk_d3d11_init_internal(device, width, height, max_vertex_buffer, max_index_buffer, memory, memory_size, text_cache_size);
+}
 
-  float scale = height / font->info.height;
-  float width = 0.0f;
-
-  int off = 0;
-  while (off < len) {
-    nk_rune cp        = 0;
-    int     glyph_len = nk_utf_decode(text + off, &cp, len - off);
-    if (glyph_len <= 0 || cp == NK_UTF_INVALID) {
-      break;
+static struct nk_d3d11_font_data *
+nk_d3d11_get_font_data(const struct nk_font *font)
+{
+  for (int i = 0; i < d3d11.font_count; ++i) {
+    if (font == d3d11.fonts[i]) {
+      return &d3d11.font_data[i];
     }
-
-    const struct nk_font_glyph *g = nk_d3d11_find_glyph(font, cp);
-
-    width += g->xadvance * scale;
-    off   += glyph_len;
   }
+  return NULL;
+}
 
-  return width;
+static struct nk_d3d11_glyph_slot *
+nk_d3d11_find_glyph_slot(struct nk_d3d11_font_data *font_data, nk_glyph_id id, float height)
+{
+  unsigned int idx = id * 2654435761u;
+
+  for (unsigned int i = 0; i < NK_D3D11_GLYPH_TABLE_CAPACITY; ++i) {
+    struct nk_d3d11_glyph_slot *slot = &font_data->table[(idx + i) & (NK_D3D11_GLYPH_TABLE_CAPACITY - 1)];
+    if (!slot->glyph || (slot->id == id && slot->height == height)) {
+      return slot;
+    }
+  }
+  return NULL;
 }
 
 static void
-nk_d3d11_font_query(
-  nk_handle handle, float height, struct nk_user_font_glyph *out, nk_rune codepoint, nk_rune next_codepoint)
+nk_d3d11_cache_prebaked_glyphs(struct nk_d3d11_font_data *font_data, struct nk_font *font)
 {
-  (void)next_codepoint;
+  for (unsigned int i = 0; i < font->info.glyph_count; ++i) {
+    if (!font->glyphs[i].id) {
+      continue;
+    }
+    struct nk_d3d11_glyph_slot *slot = nk_d3d11_find_glyph_slot(font_data, font->glyphs[i].id, font->info.height);
+    if (slot && !slot->glyph) {
+      slot->id     = font->glyphs[i].id;
+      slot->height = font->info.height;
+      slot->glyph  = &font->glyphs[i];
+    }
+  }
+}
 
-  struct nk_font *font = handle.ptr;
-  if (!font || !out) {
+static nk_bool
+nk_d3d11_place_glyph_bitmap(int width, int height, int *x, int *y)
+{
+  int packed_width  = width + 2;
+  int packed_height = height + 2;
+
+  if (d3d11.atlas_next_x + packed_width > d3d11.atlas_width) {
+    d3d11.atlas_next_x  = 0;
+    d3d11.atlas_next_y += d3d11.atlas_row_height;
+    d3d11.atlas_row_height = 0;
+  }
+  if (d3d11.atlas_next_y + packed_height > d3d11.atlas_height) {
+    return nk_false;
+  }
+
+  *x = d3d11.atlas_next_x + 1;
+  *y = d3d11.atlas_next_y + 1;
+  d3d11.atlas_next_x += packed_width;
+  d3d11.atlas_row_height = NK_MAX(d3d11.atlas_row_height, packed_height);
+  return nk_true;
+}
+
+static const struct nk_font_glyph *
+nk_d3d11_rasterize_glyph(struct nk_font *font, struct nk_d3d11_font_data *font_data, nk_glyph_id id, float height)
+{
+  struct nk_font_glyph *glyph;
+  int                   bitmap_width;
+  int                   bitmap_height;
+  int                   atlas_x = 0;
+  int                   atlas_y = 0;
+
+  if (font_data->dynamic_glyph_count == NK_D3D11_DYNAMIC_GLYPH_CAPACITY || !d3d11.render_context) {
+    return NULL;
+  }
+
+  glyph = &font_data->dynamic_glyphs[font_data->dynamic_glyph_count];
+  if (!nk_runtime_font_rasterize(font_data->ttf,
+                                 height,
+                                 id,
+                                 d3d11.glyph_alpha,
+                                 NK_D3D11_GLYPH_BITMAP_SIZE,
+                                 glyph)) {
+    return NULL;
+  }
+
+  bitmap_width  = (int)glyph->w;
+  bitmap_height = (int)glyph->h;
+
+  if ((bitmap_width || bitmap_height) && !nk_d3d11_place_glyph_bitmap(bitmap_width, bitmap_height, &atlas_x, &atlas_y)) {
+    return NULL;
+  }
+
+  font_data->dynamic_glyph_count += 1;
+
+  if (bitmap_width && bitmap_height) {
+    D3D11_BOX box = {0};
+
+    for (int y = 0; y < bitmap_height; ++y) {
+      for (int x = 0; x < bitmap_width; ++x) {
+        int dst = (y * bitmap_width + x) * 4;
+        d3d11.glyph_rgba[dst + 0] = 255;
+        d3d11.glyph_rgba[dst + 1] = 255;
+        d3d11.glyph_rgba[dst + 2] = 255;
+        d3d11.glyph_rgba[dst + 3] = d3d11.glyph_alpha[y * NK_D3D11_GLYPH_BITMAP_SIZE + x];
+      }
+    }
+
+    box.left   = atlas_x;
+    box.top    = atlas_y;
+    box.front  = 0;
+    box.right  = atlas_x + bitmap_width;
+    box.bottom = atlas_y + bitmap_height;
+    box.back   = 1;
+    ID3D11DeviceContext_UpdateSubresource(d3d11.render_context, (ID3D11Resource *)d3d11.font_texture, 0, &box, d3d11.glyph_rgba, bitmap_width * 4, 0);
+
+    glyph->u0 = (float)atlas_x / d3d11.atlas_width;
+    glyph->v0 = (float)atlas_y / d3d11.atlas_height;
+    glyph->u1 = (float)(atlas_x + bitmap_width) / d3d11.atlas_width;
+    glyph->v1 = (float)(atlas_y + bitmap_height) / d3d11.atlas_height;
+  }
+  return glyph;
+}
+
+static void
+nk_d3d11_font_query_glyph(nk_handle handle, float height, struct nk_user_font_glyph *out, nk_glyph_id id)
+{
+  struct nk_font             *font = handle.ptr;
+  struct nk_d3d11_font_data  *font_data;
+  struct nk_d3d11_glyph_slot *slot;
+  const struct nk_font_glyph *glyph;
+
+  memset(out, 0, sizeof(*out));
+  if (!font) {
     return;
   }
 
-  const struct nk_font_glyph *g     = nk_d3d11_find_glyph(font, codepoint);
-  float                       scale = height / font->info.height;
+  font_data = nk_d3d11_get_font_data(font);
+  slot      = nk_d3d11_find_glyph_slot(font_data, id, height);
+  if (!slot) {
+    return;
+  }
 
-  out->width    = (g->x1 - g->x0) * scale;
-  out->height   = (g->y1 - g->y0) * scale;
-  out->offset   = nk_vec2(g->x0 * scale, g->y0 * scale);
-  out->xadvance = g->xadvance * scale;
-  out->uv[0]    = nk_vec2(g->u0, g->v0);
-  out->uv[1]    = nk_vec2(g->u1, g->v1);
-}
+  glyph = slot->glyph;
+  if (!glyph) {
+    glyph = nk_d3d11_rasterize_glyph(font, font_data, id, height);
+    if (!glyph) {
+      return;
+    }
+    slot->id     = id;
+    slot->height = height;
+    slot->glyph  = glyph;
+  }
 
-static void
-nk_d3d11_add_prebaked_font(struct nk_font             *font,
-                           const nk_baked_font_desc_t *desc,
-                           struct nk_font_glyph       *glyphs,
-                           nk_handle                   texture)
-{
-  mem_zero(font, sizeof(*font));
-
-  font->handle.userdata.ptr = font;
-  font->handle.height       = desc->height;
-  font->handle.width        = nk_d3d11_font_width;
-  font->handle.query        = nk_d3d11_font_query;
-  font->handle.texture      = texture;
-
-  font->info.height      = desc->height;
-  font->info.ascent      = desc->ascent;
-  font->info.descent     = desc->descent;
-  font->info.glyph_count = desc->glyph_count;
-
-  font->glyphs   = glyphs;
-  font->fallback = &glyphs[desc->fallback_glyph_idx];
-  font->texture  = texture;
+  out->width    = glyph->x1 - glyph->x0;
+  out->height   = glyph->y1 - glyph->y0;
+  out->offset   = nk_vec2(glyph->x0, glyph->y0);
+  out->xadvance = glyph->xadvance;
+  out->uv[0]    = nk_vec2(glyph->u0, glyph->v0);
+  out->uv[1]    = nk_vec2(glyph->u1, glyph->v1);
 }
 
 NK_API void
-nk_d3d11_setup_fonts(struct nk_font **body, struct nk_font **title)
+nk_d3d11_setup_fonts(struct nk_runtime_fonts *fonts)
 {
-  int         w     = (int)g_nk_font_body_desc.tex_w;
-  int         h     = (int)g_nk_font_body_desc.tex_h;
-  const void *image = g_nk_font_atlas_rgba;
-
-  ASSERT(g_nk_font_atlas_rgba_size == (uint32_t)(w * h * 4));
+  int         w     = fonts->width;
+  int         h     = fonts->height;
+  const void *image = fonts->pixels;
 
   /* upload font to texture and create texture view */
-  ID3D11Texture2D *font_texture;
-  HRESULT          hr;
+  HRESULT hr;
+
+  memset(d3d11.font_data, 0, sizeof(d3d11.font_data));
+  d3d11.font_count = fonts->face_count;
+  for (int i = 0; i < fonts->face_count; ++i) {
+    d3d11.fonts[i]         = fonts->faces[i].font;
+    d3d11.font_data[i].ttf = fonts->faces[i].ttf;
+  }
+
+  d3d11.atlas_width      = w;
+  d3d11.atlas_height     = h + NK_D3D11_DYNAMIC_ATLAS_HEIGHT;
+  d3d11.atlas_next_x     = 0;
+  d3d11.atlas_next_y     = h;
+  d3d11.atlas_row_height = 0;
+
+  for (int face = 0; face < fonts->face_count; ++face) {
+    struct nk_font *font = fonts->faces[face].font;
+    for (nk_rune i = 0; i < font->info.glyph_count; ++i) {
+      font->glyphs[i].v0 *= (float)h / d3d11.atlas_height;
+      font->glyphs[i].v1 *= (float)h / d3d11.atlas_height;
+    }
+  }
 
   D3D11_TEXTURE2D_DESC desc;
   memset(&desc, 0, sizeof(desc));
-  desc.Width              = (UINT)w;
-  desc.Height             = (UINT)h;
+  desc.Width              = d3d11.atlas_width;
+  desc.Height             = d3d11.atlas_height;
   desc.MipLevels          = 1;
   desc.ArraySize          = 1;
   desc.Format             = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -699,13 +850,15 @@ nk_d3d11_setup_fonts(struct nk_font **body, struct nk_font **title)
   desc.BindFlags          = D3D11_BIND_SHADER_RESOURCE;
   desc.CPUAccessFlags     = 0;
 
+  hr = ID3D11Device_CreateTexture2D(d3d11.device, &desc, NULL, &d3d11.font_texture);
+  assert(SUCCEEDED(hr));
+
   {
-    D3D11_SUBRESOURCE_DATA data;
-    data.pSysMem          = image;
-    data.SysMemPitch      = (UINT)(w * 4);
-    data.SysMemSlicePitch = 0;
-    hr                    = ID3D11Device_CreateTexture2D(d3d11.device, &desc, &data, &font_texture);
-    assert(SUCCEEDED(hr));
+    D3D11_BOX              box = {0, 0, 0, w, h, 1};
+    ID3D11DeviceContext   *upload_context;
+    ID3D11Device_GetImmediateContext(d3d11.device, &upload_context);
+    ID3D11DeviceContext_UpdateSubresource(upload_context, (ID3D11Resource *)d3d11.font_texture, 0, &box, image, w * 4, 0);
+    ID3D11DeviceContext_Release(upload_context);
   }
 
   {
@@ -716,25 +869,21 @@ nk_d3d11_setup_fonts(struct nk_font **body, struct nk_font **title)
     srv.Texture2D.MipLevels       = 1;
     srv.Texture2D.MostDetailedMip = 0;
     hr                            = ID3D11Device_CreateShaderResourceView(
-      d3d11.device, (ID3D11Resource *)font_texture, &srv, &d3d11.font_texture_view);
+      d3d11.device, (ID3D11Resource *)d3d11.font_texture, &srv, &d3d11.font_texture_view);
     assert(SUCCEEDED(hr));
   }
-  ID3D11Texture2D_Release(font_texture);
 
   d3d11.tex_null.texture = nk_handle_ptr(d3d11.font_texture_view);
-  d3d11.tex_null.uv      = nk_vec2(((float)g_nk_font_body_desc.white_x + 0.5f) / (float)w,
-                                   ((float)g_nk_font_body_desc.white_y + 0.5f) / (float)h);
+  d3d11.tex_null.uv      = nk_vec2(((float)fonts->atlas.custom.x + 0.5f) / d3d11.atlas_width,
+                                   ((float)fonts->atlas.custom.y + 0.5f) / d3d11.atlas_height);
 
-  nk_d3d11_add_prebaked_font(&d3d11.font_body, &g_nk_font_body_desc, g_nk_font_body_glyphs, d3d11.tex_null.texture);
-  nk_d3d11_add_prebaked_font(&d3d11.font_title, &g_nk_font_title_desc, g_nk_font_title_glyphs, d3d11.tex_null.texture);
-
-  if (body) {
-    *body = &d3d11.font_body;
+  for (int i = 0; i < fonts->face_count; ++i) {
+    struct nk_font *font       = fonts->faces[i].font;
+    font->handle.query_glyph   = nk_d3d11_font_query_glyph;
+    nk_d3d11_cache_prebaked_glyphs(&d3d11.font_data[i], font);
   }
-
-  if (title) {
-    *title = &d3d11.font_title;
-  }
+  fonts->atlas.tex_height = d3d11.atlas_height;
+  nk_font_atlas_end(&fonts->atlas, d3d11.tex_null.texture, NULL);
 }
 
 NK_API
@@ -746,6 +895,7 @@ nk_d3d11_shutdown(void)
 
   ID3D11SamplerState_Release(d3d11.sampler_state);
   ID3D11ShaderResourceView_Release(d3d11.font_texture_view);
+  ID3D11Texture2D_Release(d3d11.font_texture);
   ID3D11Buffer_Release(d3d11.vertex_buffer);
   ID3D11Buffer_Release(d3d11.index_buffer);
   ID3D11BlendState_Release(d3d11.blend_state);

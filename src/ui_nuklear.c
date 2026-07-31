@@ -168,11 +168,11 @@ ui_nk_select_fg(struct nk_context *ctx, nk_flags state, bool selected)
 float
 ui_text_width(struct nk_context *ctx, str_t text)
 {
-  if (!ctx || !ctx->style.font || !ctx->style.font->width || str_is_empty(text)) {
+  if (!ctx || !ctx->style.font || str_is_empty(text)) {
     return 0.0f;
   }
 
-  return ctx->style.font->width(ctx->style.font->userdata, ctx->style.font->height, (const char *)text.data, (int)text.len);
+  return nk_text_width(ctx, ctx->style.font, ctx->style.font_size, (const char *)text.data, (int)text.len);
 }
 
 bool
@@ -211,7 +211,7 @@ ui_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct nk_re
     return;
   }
 
-  float font_h = ctx->style.font->height;
+  float font_h = ctx->style.font_size;
   float text_w = opts.text_width;
   if ((a & (NK_TEXT_ALIGN_CENTERED | NK_TEXT_ALIGN_RIGHT)) && text_w <= 0.0f) {
     text_w = ui_text_width(ctx, text);
@@ -274,7 +274,7 @@ ui_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct nk_re
   cmd->foreground = opts.fg;
   cmd->font       = ctx->style.font;
   cmd->length     = (int)text.len;
-  cmd->height     = ctx->style.font->height;
+  cmd->height     = ctx->style.font_size;
 
   NK_MEMCPY(cmd->string, text.data, (nk_size)text.len);
   cmd->string[text.len] = 0;
@@ -510,9 +510,9 @@ ui_is_soft_break(nk_rune rune)
 }
 
 static int
-ui_wrap_fit_line(struct nk_user_font *font, str_t text, float space, int *advance_bytes)
+ui_wrap_fit_line(struct nk_context *ctx, str_t text, float space, int *advance_bytes)
 {
-  NK_ASSERT(font != NULL);
+  NK_ASSERT(ctx != NULL);
   NK_ASSERT(advance_bytes != NULL);
 
   int last_break_draw    = -1; // draw up to here
@@ -529,7 +529,7 @@ ui_wrap_fit_line(struct nk_user_font *font, str_t text, float space, int *advanc
       break;
     }
 
-    float next_w = font->width(font->userdata, font->height, data, at + step);
+    float next_w = nk_text_width(ctx, ctx->style.font, ctx->style.font_size, data, at + step);
     if (next_w > space) {
       if (last_break_draw >= 0) {
         *advance_bytes = last_break_advance;
@@ -565,7 +565,7 @@ ui_wrap_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct 
     return;
   }
 
-  float line_h = font->height + 2.0f * padding.y;
+  float line_h = ctx->style.font_size + 2.0f * padding.y;
   float wrap_w = bounds.w - 2.0f * padding.x;
   wrap_w       = NK_MAX(wrap_w, 1.0f);
 
@@ -614,7 +614,7 @@ ui_wrap_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct 
           return;
         }
 
-        draw_bytes = ui_wrap_fit_line(font, str_make(it + consumed, logical_len - consumed), wrap_w, &advance_bytes);
+        draw_bytes = ui_wrap_fit_line(ctx, str_make(it + consumed, logical_len - consumed), wrap_w, &advance_bytes);
         if (advance_bytes <= 0) {
           return;
         }
@@ -649,7 +649,7 @@ ui_text_wrap_height(struct nk_context *ctx, float bounds_w, str_t text)
     return 0.0f;
   }
 
-  float line_h = font->height + 2.0f * padding.y;
+  float line_h = ctx->style.font_size + 2.0f * padding.y;
   float wrap_w = bounds_w - 2.0f * padding.x;
 
   wrap_w = NK_MAX(wrap_w, 1.0f);
@@ -670,7 +670,7 @@ ui_text_wrap_height(struct nk_context *ctx, float bounds_w, str_t text)
       int consumed = 0;
       while (consumed < logical_len) {
         int advance_bytes = 0;
-        ui_wrap_fit_line(font, str_make(it + consumed, logical_len - consumed), wrap_w, &advance_bytes);
+        ui_wrap_fit_line(ctx, str_make(it + consumed, logical_len - consumed), wrap_w, &advance_bytes);
 
         if (advance_bytes <= 0) {
           break;

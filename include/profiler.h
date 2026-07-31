@@ -5,13 +5,18 @@
 
 #define PROF_MAX_ZONES (256)
 
-#define PROF_SCOPE_BEGIN(NAME, SCOPEVAR)                                          \
-  static uint32_t CAT(SCOPEVAR, _zone_id) = UINT32_MAX;                           \
-  if (CAT(SCOPEVAR, _zone_id) == UINT32_MAX) {                                    \
-    CAT(SCOPEVAR, _zone_id) = profiler_register_zone((NAME), __FILE__, __LINE__); \
-  }                                                                               \
-  prof_scope_t SCOPEVAR = profiler_scope_begin(CAT(SCOPEVAR, _zone_id))
-#define PROF_SCOPE_END(SCOPEVAR) profiler_scope_end(&(SCOPEVAR))
+#if defined BUILD_RELEASE
+#  define PROF_SCOPE_BEGIN(NAME, SCOPEVAR)
+#  define PROF_SCOPE_END(SCOPEVAR)
+#else
+#  define PROF_SCOPE_BEGIN(NAME, SCOPEVAR)                                          \
+    static uint32_t CAT(SCOPEVAR, _zone_id) = UINT32_MAX;                           \
+    if (CAT(SCOPEVAR, _zone_id) == UINT32_MAX) {                                    \
+      CAT(SCOPEVAR, _zone_id) = profiler_register_zone((NAME), __FILE__, __LINE__); \
+    }                                                                               \
+    prof_scope_t SCOPEVAR = profiler_scope_begin(CAT(SCOPEVAR, _zone_id))
+#  define PROF_SCOPE_END(SCOPEVAR) profiler_scope_end(&(SCOPEVAR))
+#endif
 
 #define PROF_FUNC_BEGIN() PROF_SCOPE_BEGIN(__func__, prof_func_scope)
 #define PROF_FUNC_END()   PROF_SCOPE_END(prof_func_scope)

@@ -11,6 +11,7 @@
 #include "mod_host.h"
 #include "mod_manager.h"
 #include "nk_d3d12.h"
+#include "profiler.h"
 #include "scratch.h"
 #include "str.h"
 #include "unreal.h"
@@ -404,6 +405,7 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
       ui_text_cols_t cols = {0};
       ui_text_cols_reset(&cols, 2);
 
+      PROF_SCOPE_BEGIN("uobject.width_pass", width_pass);
       for (uint32_t i = start_idx; i < end_idx; ++i) {
         uint32_t slot = tool->search.visible.slots[i];
         if (slot >= tool->cache.record_cap) {
@@ -422,7 +424,9 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
         ui_text_cols_include(&cols, 0, type_record->name);
         ui_text_cols_include(&cols, 1, record->full_name);
       }
+      PROF_SCOPE_END(width_pass);
 
+      PROF_SCOPE_BEGIN("uobject.row_pass", row_pass);
       for (uint32_t i = start_idx; i < end_idx; ++i) {
         uint32_t slot = tool->search.visible.slots[i];
         if (slot >= tool->cache.record_cap) {
@@ -442,6 +446,7 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
           detail_tab_open(tool, record, false);
         }
       }
+      PROF_SCOPE_END(row_pass);
       nk_group_end(ctx);
     }
 

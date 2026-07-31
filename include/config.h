@@ -14,10 +14,13 @@
 
 /* Nuklear */
 #define CONFIG_NK_ARENA_SIZE          (128 * MB) // dedicated arena reserve size
-#define CONFIG_NK_INTERNAL_STATE_SIZE (8 * MB)
+#define CONFIG_NK_INTERNAL_STATE_SIZE (40 * MB)
 #define CONFIG_NK_CMD_BUF_SIZE        (1 * MB) // command buffer size
-#define CONFIG_NK_FONT_BODY_SIZE      (14.0f)
-#define CONFIG_NK_FONT_TITLE_SIZE     (18.0f)
+#define CONFIG_NK_TEXT_CACHE_SIZE     (32 * MB)
+#define CONFIG_NK_TEXT_TEMPORARY_SIZE (1 * MB)
+#define CONFIG_NK_KB_CONTEXT_SIZE     (32 * MB)
+#define CONFIG_NK_FONT_SIZE           (14.0f)
+#define CONFIG_NK_FONT_HEADING_SIZE   (18.0f)
 
 /* Nuklear (D3D12 backend) */
 #define CONFIG_NK_D3D12_MAX_VERTICES     (2 * MB)   // max vertices per frame snapshot
@@ -40,7 +43,7 @@
 #define CONFIG_NK_CONSOLE_BG_ALPHA             (128)  // 0-255
 #define CONFIG_NK_CONSOLE_HANDLE_HEIGHT        (8.0f) // drag handle at top
 #define CONFIG_NK_CONSOLE_INPUT_HEIGHT         (28.0f)
-#define CONFIG_NK_CONSOLE_LINE_HEIGHT          (CONFIG_NK_FONT_BODY_SIZE + 0.5f)
+#define CONFIG_NK_CONSOLE_LINE_HEIGHT          (CONFIG_NK_FONT_SIZE + 0.5f)
 #define CONFIG_NK_CONSOLE_PADDING              (4.0f)
 #define CONFIG_UI_CONSOLE_WINDOW_NAME          "Console"
 
