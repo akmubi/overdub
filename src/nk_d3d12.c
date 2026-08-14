@@ -866,6 +866,8 @@ nk_d3d12_init(IDXGISwapChain *swap)
     {"consolab.ttf", NK_RUNTIME_FONT_BOLD},
     {"consolai.ttf", NK_RUNTIME_FONT_ITALIC},
     {"consolaz.ttf", NK_RUNTIME_FONT_BOLD_ITALIC},
+    {"segoeui.ttf",  NK_RUNTIME_FONT_FALLBACK},
+    {"seguisym.ttf", NK_RUNTIME_FONT_FALLBACK},
   };
 
   struct nk_runtime_font_source font_sources[COUNTOF(system_fonts)];

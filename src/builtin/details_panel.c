@@ -3831,8 +3831,13 @@ draw_detail_disasm_section(search_tool_t *tool, detail_tab_t *tab)
     nk_layout_row_dynamic(ctx, 260.0f, 1);
     if (nk_group_begin(ctx, "uobject_search.function.disasm", NK_WINDOW_BORDER)) {
       for (str_node_t *node = tab->disasm_lines.first; node; node = node->next) {
+        struct nk_text_options options = {
+          .alignment = NK_TEXT_LEFT,
+          .flags     = NK_TEXT_OPTION_SELECTABLE,
+          .color     = UI_C_TEXT,
+        };
         nk_layout_row_dynamic(ctx, 18.0f, 1);
-        ui_text(ctx, node->str, ui_text_width(ctx, node->str), NK_TEXT_LEFT, UI_C_TEXT);
+        nk_text_ex(ctx, (const char *)node->str.data, (int)node->str.len, &options);
       }
 
       nk_group_end(ctx);

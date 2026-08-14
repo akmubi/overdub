@@ -1555,7 +1555,8 @@ nk_text_clamp(struct nk_context *ctx, const struct nk_user_font *font, const cha
     len += glyph_len;
     while (shape && cluster_idx < shape->num_clusters && shape->clusters[cluster_idx].source_end <= len) {
       struct nk_text_cluster *cluster = &shape->clusters[cluster_idx++];
-      for (int glyph_idx = cluster->glyph_begin; glyph_idx < cluster->glyph_begin + cluster->glyph_count; ++glyph_idx) {
+      int                     glyph_idx;
+      for (glyph_idx = cluster->glyph_begin; glyph_idx < cluster->glyph_begin + cluster->glyph_count; ++glyph_idx) {
         shape_width += shape->glyphs[glyph_idx].advance_x;
       }
     }
@@ -1601,10 +1602,12 @@ nk_text_calculate_text_bounds(struct nk_context *ctx, const struct nk_user_font 
   struct nk_vec2 text_size   = nk_vec2(0, 0);
   float          line_width  = 0.0f;
 
-  int     glyph_len  = 0;
-  nk_rune unicode    = 0;
-  int     text_len   = 0;
-  int     line_begin = 0;
+  int     glyph_len          = 0;
+  nk_rune unicode            = 0;
+  int     text_len           = 0;
+  int     line_begin         = 0;
+  nk_bool stopped_on_newline = nk_false;
+
   if (!begin || byte_len <= 0 || !font) {
     return nk_vec2(0, row_height);
   }
@@ -1622,6 +1625,7 @@ nk_text_calculate_text_bounds(struct nk_context *ctx, const struct nk_user_font 
       text_size.y += line_height;
       *glyphs     += 1;
       if (op == NK_STOP_ON_NEW_LINE) {
+        stopped_on_newline = nk_true;
         break;
       }
 
@@ -1648,12 +1652,12 @@ nk_text_calculate_text_bounds(struct nk_context *ctx, const struct nk_user_font 
     text_size.x = line_width;
   }
 
-  if (out_offset) {
-    *out_offset = nk_vec2(line_width, text_size.y + line_height);
+  if (!stopped_on_newline && (line_width > 0 || text_size.y == 0.0f)) {
+    text_size.y += line_height;
   }
 
-  if (line_width > 0 || text_size.y == 0.0f) {
-    text_size.y += line_height;
+  if (out_offset) {
+    *out_offset = nk_vec2(line_width, text_size.y);
   }
 
   if (remaining) {
@@ -1715,6 +1719,8 @@ struct nk_text_cache_entry {
   int                         lang_len;
   struct nk_text_feature     *features;
   int                         num_features;
+  unsigned int                last_used_seq;
+  nk_bool                     probation;
 };
 
 struct nk_text_cache_state {
@@ -1722,8 +1728,10 @@ struct nk_text_cache_state {
   struct nk_text_cache_chunk *first_chunk;
   struct nk_text_cache_chunk *last_chunk;
   struct nk_text_cache_chunk *free_chunks;
-  struct nk_text_cache_entry *lru_head;
-  struct nk_text_cache_entry *lru_tail;
+  struct nk_text_cache_entry *protected_head;
+  struct nk_text_cache_entry *protected_tail;
+  struct nk_text_cache_entry *probation_head;
+  struct nk_text_cache_entry *probation_tail;
 };
 
 NK_INTERN struct nk_text_cache_state *
@@ -1854,40 +1862,58 @@ nk_text_cache_chunk_release(struct nk_context *ctx, struct nk_text_cache_chunk *
 NK_INTERN void
 nk_text_cache_lru_unlink(struct nk_context *ctx, struct nk_text_cache_entry *entry)
 {
-  struct nk_text_cache_state *state = nk_text_cache_state(ctx);
+  struct nk_text_cache_state  *state = nk_text_cache_state(ctx);
+  struct nk_text_cache_entry **head  = entry->probation ? &state->probation_head : &state->protected_head;
+  struct nk_text_cache_entry **tail  = entry->probation ? &state->probation_tail : &state->protected_tail;
 
   if (entry->lru_prev) {
     entry->lru_prev->lru_next = entry->lru_next;
   } else {
-    state->lru_head = entry->lru_next;
+    *head = entry->lru_next;
   }
 
   if (entry->lru_next) {
     entry->lru_next->lru_prev = entry->lru_prev;
   } else {
-    state->lru_tail = entry->lru_prev;
+    *tail = entry->lru_prev;
   }
+}
+
+NK_INTERN void
+nk_text_cache_lru_link_head(struct nk_context *ctx, struct nk_text_cache_entry *entry)
+{
+  struct nk_text_cache_state  *state = nk_text_cache_state(ctx);
+  struct nk_text_cache_entry **head  = entry->probation ? &state->probation_head : &state->protected_head;
+  struct nk_text_cache_entry **tail  = entry->probation ? &state->probation_tail : &state->protected_tail;
+
+  entry->lru_prev = NULL;
+  entry->lru_next = *head;
+
+  if (entry->lru_next) {
+    entry->lru_next->lru_prev = entry;
+  } else {
+    *tail = entry;
+  }
+  *head = entry;
 }
 
 NK_INTERN void
 nk_text_cache_lru_touch(struct nk_context *ctx, struct nk_text_cache_entry *entry)
 {
-  struct nk_text_cache_state *state = nk_text_cache_state(ctx);
-  if (state->lru_head == entry) {
+  struct nk_text_cache_state *state   = nk_text_cache_state(ctx);
+  struct nk_text_cache_entry *head    = entry->probation ? state->probation_head : state->protected_head;
+  nk_bool                     promote = entry->probation && entry->last_used_seq != ctx->seq;
+
+  entry->last_used_seq = ctx->seq;
+  if (!promote && head == entry) {
     return;
   }
 
   nk_text_cache_lru_unlink(ctx, entry);
-
-  entry->lru_prev = NULL;
-  entry->lru_next = state->lru_head;
-
-  if (entry->lru_next) {
-    entry->lru_next->lru_prev = entry;
-  } else {
-    state->lru_tail = entry;
+  if (promote) {
+    entry->probation = nk_false;
   }
-  state->lru_head = entry;
+  nk_text_cache_lru_link_head(ctx, entry);
 }
 
 NK_INTERN void
@@ -1961,6 +1987,7 @@ nk_text_cache_chunk_alloc(struct nk_context *ctx, nk_size size, struct nk_text_c
 {
   struct nk_text_cache_state *state = nk_text_cache_state(ctx);
   struct nk_text_cache_chunk *chunk;
+  struct nk_text_cache_entry *victim;
   nk_size                     capacity;
 
   if (size > (nk_size)-1 - 7) {
@@ -1992,9 +2019,16 @@ nk_text_cache_chunk_alloc(struct nk_context *ctx, nk_size size, struct nk_text_c
       return chunk;
     }
 
-    struct nk_text_cache_entry *victim = state->lru_tail;
-    while (victim && victim == pinned) {
+    victim = state->probation_tail;
+    while (victim && (victim == pinned || victim->last_used_seq == ctx->seq)) {
       victim = victim->lru_prev;
+    }
+
+    if (!victim) {
+      victim = state->protected_tail;
+      while (victim && (victim == pinned || victim->last_used_seq == ctx->seq)) {
+        victim = victim->lru_prev;
+      }
     }
 
     if (!victim) {
@@ -2063,20 +2097,13 @@ nk_text_cache_alloc(struct nk_context *ctx, const struct nk_text_request *reques
 NK_INTERN void
 nk_text_cache_link(struct nk_context *ctx, struct nk_text_cache_entry *entry)
 {
-  struct nk_text_cache_state *state  = nk_text_cache_state(ctx);
-  nk_hash                     bucket = entry->hash % NK_TEXT_CACHE_BUCKET_COUNT;
+  nk_hash bucket = entry->hash % NK_TEXT_CACHE_BUCKET_COUNT;
 
   entry->next_hash                = ctx->text_cache_buckets[bucket];
   ctx->text_cache_buckets[bucket] = entry;
-  entry->lru_prev                 = NULL;
-  entry->lru_next                 = state->lru_head;
-
-  if (entry->lru_next) {
-    entry->lru_next->lru_prev = entry;
-  } else {
-    state->lru_tail = entry;
-  }
-  state->lru_head = entry;
+  entry->last_used_seq            = ctx->seq;
+  entry->probation                = nk_true;
+  nk_text_cache_lru_link_head(ctx, entry);
 }
 
 NK_INTERN struct nk_text_geometry *
@@ -2088,6 +2115,7 @@ nk_text_geometry_build(struct nk_context *ctx, struct nk_text_cache_entry *entry
   nk_size                     runs_size  = sizeof(*geometry->runs) * shape->num_runs;
   nk_size                     quads_size = sizeof(*geometry->quads) * shape->num_glyphs;
   nk_size                     size       = sizeof(*geometry) + runs_size + quads_size;
+  int                         run_idx;
 
   chunk = nk_text_cache_chunk_alloc(ctx, size, entry);
   if (!chunk) {
@@ -2099,14 +2127,15 @@ nk_text_geometry_build(struct nk_context *ctx, struct nk_text_cache_entry *entry
   geometry->num_runs = shape->num_runs;
   geometry->quads    = nk_ptr_add(struct nk_text_geometry_quad, geometry->runs, runs_size);
 
-  for (int run_idx = 0; run_idx < shape->num_runs; ++run_idx) {
+  for (run_idx = 0; run_idx < shape->num_runs; ++run_idx) {
     const struct nk_text_run *run = &shape->runs[run_idx];
+    int                       glyph_idx;
 
     geometry->runs[run_idx].texture    = run->font->texture;
     geometry->runs[run_idx].quad_begin = run->glyph_begin;
     geometry->runs[run_idx].quad_count = run->glyph_count;
 
-    for (int glyph_idx = run->glyph_begin; glyph_idx < run->glyph_begin + run->glyph_count; ++glyph_idx) {
+    for (glyph_idx = run->glyph_begin; glyph_idx < run->glyph_begin + run->glyph_count; ++glyph_idx) {
       const struct nk_text_glyph   *glyph = &shape->glyphs[glyph_idx];
       struct nk_text_geometry_quad *quad  = &geometry->quads[glyph_idx];
       struct nk_user_font_glyph     font_glyph;
@@ -2405,10 +2434,455 @@ nk_text_shape_width(const struct nk_text_shape *shape, int source_begin, int sou
   return width;
 }
 
+NK_API int
+nk_text_shape_boundary_previous(const struct nk_text_shape *shape, int source_offset, nk_flags flags)
+{
+  int i;
+  for (i = shape->num_boundaries - 1; i >= 0; --i) {
+    if (shape->boundaries[i].source_offset < source_offset && (shape->boundaries[i].flags & flags)) {
+      return shape->boundaries[i].source_offset;
+    }
+  }
+  return 0;
+}
+
+NK_API int
+nk_text_shape_boundary_next(const struct nk_text_shape *shape, int source_offset, nk_flags flags)
+{
+  int i;
+  for (i = 0; i < shape->num_boundaries; ++i) {
+    if (shape->boundaries[i].source_offset > source_offset && (shape->boundaries[i].flags & flags)) {
+      return shape->boundaries[i].source_offset;
+    }
+  }
+  return shape->source_len;
+}
+
+NK_INTERN nk_bool
+nk_text_shape_cluster_glyph_bounds(const struct nk_text_shape *shape, int cluster_idx,
+                                   float *left, float *right, enum nk_text_direction *direction)
+{
+  float   pen   = 0.0f;
+  int     run_idx;
+  nk_bool found = nk_false;
+
+  for (run_idx = 0; run_idx < shape->num_runs; ++run_idx) {
+    struct nk_text_run *run = &shape->runs[run_idx];
+    int                 glyph_idx;
+
+    for (glyph_idx = run->glyph_begin; glyph_idx < run->glyph_begin + run->glyph_count; ++glyph_idx) {
+      struct nk_text_glyph *glyph = &shape->glyphs[glyph_idx];
+      float                 next  = pen + glyph->advance_x;
+
+      if (glyph->cluster_idx == cluster_idx) {
+        if (!found) {
+          *left  = NK_MIN(pen, next);
+          *right = NK_MAX(pen, next);
+          found  = nk_true;
+        } else {
+          *left  = NK_MIN(*left,  NK_MIN(pen, next));
+          *right = NK_MAX(*right, NK_MAX(pen, next));
+        }
+        *direction = run->direction;
+      }
+      pen = next;
+    }
+  }
+  return found;
+}
+
+NK_INTERN nk_bool
+nk_text_shape_cluster_bounds(const struct nk_text_shape *shape, int cluster_idx, float *left, float *right, enum nk_text_direction *direction)
+{
+  int   owner = cluster_idx;
+  int   group_end;
+  int   group_count;
+  int   group_offset;
+  float group_left;
+  float group_right;
+  float width;
+
+  while (owner > 0 && !shape->clusters[owner].glyph_count) {
+    owner -= 1;
+  }
+  if (!shape->clusters[owner].glyph_count ||
+      !nk_text_shape_cluster_glyph_bounds(shape, owner, &group_left, &group_right, direction)) {
+    return nk_false;
+  }
+
+  group_end = owner + 1;
+  while (group_end < shape->num_clusters && !shape->clusters[group_end].glyph_count) {
+    group_end += 1;
+  }
+  if (cluster_idx >= group_end) {
+    return nk_false;
+  }
+
+  group_count  = group_end - owner;
+  group_offset = cluster_idx - owner;
+  width        = (group_right - group_left) / group_count;
+  if (*direction == NK_TEXT_DIRECTION_RTL) {
+    *left  = group_right - width * (group_offset + 1);
+    *right = group_right - width * group_offset;
+  } else {
+    *left  = group_left + width * group_offset;
+    *right = *left + width;
+  }
+  return nk_true;
+}
+
+NK_INTERN struct nk_text_cursor
+nk_text_shape_cluster_edge(const struct nk_text_shape *shape, int cluster_idx, enum nk_text_affinity affinity)
+{
+  struct nk_text_cluster *cluster = &shape->clusters[cluster_idx];
+  struct nk_text_cursor   cursor;
+  enum nk_text_direction  direction;
+  float                   left;
+  float                   right;
+
+  cursor.source_offset = affinity == NK_TEXT_AFFINITY_LEADING ? cluster->source_begin : cluster->source_end;
+  cursor.affinity      = affinity;
+  if (nk_text_shape_cluster_bounds(shape, cluster_idx, &left, &right, &direction)) {
+    if (direction == NK_TEXT_DIRECTION_RTL) {
+      cursor.x = affinity == NK_TEXT_AFFINITY_LEADING ? right : left;
+    } else {
+      cursor.x = affinity == NK_TEXT_AFFINITY_LEADING ? left : right;
+    }
+    return cursor;
+  }
+
+  if (affinity == NK_TEXT_AFFINITY_LEADING) {
+    int previous;
+    for (previous = cluster_idx - 1; previous >= 0; --previous) {
+      if (shape->clusters[previous].glyph_count) {
+        cursor.x = nk_text_shape_cluster_edge(shape, previous, NK_TEXT_AFFINITY_TRAILING).x;
+        return cursor;
+      }
+    }
+  } else {
+    int next;
+    for (next = cluster_idx + 1; next < shape->num_clusters; ++next) {
+      if (shape->clusters[next].glyph_count) {
+        cursor.x = nk_text_shape_cluster_edge(shape, next, NK_TEXT_AFFINITY_LEADING).x;
+        return cursor;
+      }
+    }
+  }
+  cursor.x = affinity == NK_TEXT_AFFINITY_LEADING ? 0.0f : shape->advance.x;
+  return cursor;
+}
+
+NK_API struct nk_text_cursor
+nk_text_shape_cursor_at(const struct nk_text_shape *shape, int source_offset, enum nk_text_affinity affinity)
+{
+  struct nk_text_cursor cursor;
+  int                   cluster_idx;
+
+  cursor.source_offset = NK_CLAMP(0, source_offset, shape->source_len);
+  cursor.affinity      = affinity;
+  cursor.x             = source_offset <= 0 ? 0.0f : shape->advance.x;
+
+  if (affinity == NK_TEXT_AFFINITY_LEADING) {
+    for (cluster_idx = 0; cluster_idx < shape->num_clusters; ++cluster_idx) {
+      if (shape->clusters[cluster_idx].source_begin == cursor.source_offset) {
+        return nk_text_shape_cluster_edge(shape, cluster_idx, affinity);
+      }
+    }
+  } else {
+    for (cluster_idx = shape->num_clusters - 1; cluster_idx >= 0; --cluster_idx) {
+      if (shape->clusters[cluster_idx].source_end == cursor.source_offset) {
+        return nk_text_shape_cluster_edge(shape, cluster_idx, affinity);
+      }
+    }
+  }
+  return cursor;
+}
+
+NK_API struct nk_text_cursor
+nk_text_shape_hit_test(const struct nk_text_shape *shape, float x)
+{
+  struct nk_text_cursor first = nk_text_shape_cursor_at(shape, 0, NK_TEXT_AFFINITY_LEADING);
+  struct nk_text_cursor last  = nk_text_shape_cursor_at(shape, shape->source_len, NK_TEXT_AFFINITY_TRAILING);
+  float                 pen   = 0.0f;
+  int                   run_idx;
+
+  if (x <= 0.0f) {
+    return first.x <= last.x ? first : last;
+  }
+
+  if (x >= shape->advance.x) {
+    return first.x >= last.x ? first : last;
+  }
+
+  for (run_idx = 0; run_idx < shape->num_runs; ++run_idx) {
+    struct nk_text_run *run       = &shape->runs[run_idx];
+    int                 glyph_idx = run->glyph_begin;
+
+    while (glyph_idx < run->glyph_begin + run->glyph_count) {
+      struct nk_text_glyph *glyph       = &shape->glyphs[glyph_idx];
+      int                   cluster_idx = glyph->cluster_idx;
+      float                 begin       = pen;
+
+      do {
+        pen       += shape->glyphs[glyph_idx].advance_x;
+        glyph_idx += 1;
+      } while (glyph_idx < run->glyph_begin + run->glyph_count && shape->glyphs[glyph_idx].cluster_idx == cluster_idx);
+
+      if (x < (begin + pen) * 0.5f) {
+        return nk_text_shape_cluster_edge(shape, cluster_idx, run->direction == NK_TEXT_DIRECTION_RTL ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING);
+      }
+
+      if (x <= pen) {
+        return nk_text_shape_cluster_edge(shape, cluster_idx, run->direction == NK_TEXT_DIRECTION_RTL ? NK_TEXT_AFFINITY_LEADING : NK_TEXT_AFFINITY_TRAILING);
+      }
+    }
+  }
+  return last;
+}
+
+NK_API struct nk_text_cursor
+nk_text_shape_cursor_move(const struct nk_text_shape *shape, struct nk_text_cursor cursor, int direction)
+{
+  struct nk_text_cursor current = nk_text_shape_cursor_at(shape, cursor.source_offset, cursor.affinity);
+  struct nk_text_cursor best    = current;
+  int                   cluster_idx;
+
+  for (cluster_idx = 0; cluster_idx < shape->num_clusters; ++cluster_idx) {
+    struct nk_text_cursor leading  = nk_text_shape_cluster_edge(shape, cluster_idx, NK_TEXT_AFFINITY_LEADING);
+    struct nk_text_cursor trailing = nk_text_shape_cluster_edge(shape, cluster_idx, NK_TEXT_AFFINITY_TRAILING);
+    struct nk_text_cursor edges[]  = {leading, trailing};
+    int                   edge_idx;
+
+    for (edge_idx = 0; edge_idx < 2; ++edge_idx) {
+      struct nk_text_cursor edge = edges[edge_idx];
+      if (direction < 0 && edge.x < current.x && (best.x == current.x || edge.x > best.x)) {
+        best = edge;
+      }
+
+      if (direction > 0 && edge.x > current.x && (best.x == current.x || edge.x < best.x)) {
+        best = edge;
+      }
+    }
+  }
+  return best;
+}
+
+NK_API void
+nk_text_selection_iterator_begin(struct nk_text_selection_iterator *iterator, const struct nk_text_shape *shape, int source_begin, int source_end)
+{
+  NK_MEMSET(iterator, 0, sizeof(*iterator));
+  iterator->shape        = shape;
+  iterator->source_begin = NK_CLAMP(0, source_begin, shape->source_len);
+  iterator->source_end   = NK_CLAMP(iterator->source_begin, source_end, shape->source_len);
+  iterator->glyph_idx    = shape->num_runs ? shape->runs[0].glyph_begin : 0;
+}
+
+NK_API nk_bool
+nk_text_selection_iterator_next(struct nk_text_selection_iterator *iterator, struct nk_text_selection_span *span)
+{
+  const struct nk_text_shape *shape  = iterator->shape;
+  nk_bool                     inside = nk_false;
+
+  if (iterator->has_pending) {
+    span->x               = iterator->pending_x;
+    span->width           = iterator->pending_width;
+    iterator->has_pending = nk_false;
+    inside                = nk_true;
+  }
+
+  while (iterator->run_idx < shape->num_runs) {
+    struct nk_text_run *run = &shape->runs[iterator->run_idx];
+
+    while (iterator->glyph_idx < run->glyph_begin + run->glyph_count) {
+      int   cluster_idx     = shape->glyphs[iterator->glyph_idx].cluster_idx;
+      int   group_end       = cluster_idx + 1;
+      int   selected_begin  = 0;
+      int   selected_end    = 0;
+      int   group_count     = 0;
+      float group_left      = iterator->pen_x;
+      float group_right     = 0;
+      float selected_left   = 0;
+      float selected_right  = 0;
+
+      do {
+        iterator->pen_x     += shape->glyphs[iterator->glyph_idx].advance_x;
+        iterator->glyph_idx += 1;
+      } while (iterator->glyph_idx < run->glyph_begin + run->glyph_count && shape->glyphs[iterator->glyph_idx].cluster_idx == cluster_idx);
+      group_right = iterator->pen_x;
+
+      while (group_end < shape->num_clusters && !shape->clusters[group_end].glyph_count) {
+        group_end += 1;
+      }
+
+      selected_begin = cluster_idx;
+      while (selected_begin < group_end && shape->clusters[selected_begin].source_end <= iterator->source_begin) {
+        selected_begin += 1;
+      }
+
+      selected_end = selected_begin;
+      while (selected_end < group_end && shape->clusters[selected_end].source_begin < iterator->source_end) {
+        selected_end += 1;
+      }
+
+      if (selected_begin == selected_end) {
+        if (inside) {
+          return nk_true;
+        }
+        continue;
+      }
+
+      group_count = group_end - cluster_idx;
+      if (run->direction == NK_TEXT_DIRECTION_RTL) {
+        selected_left  = group_right - (group_right - group_left) * (selected_end - cluster_idx) / group_count;
+        selected_right = group_right - (group_right - group_left) * (selected_begin - cluster_idx) / group_count;
+      } else {
+        selected_left  = group_left + (group_right - group_left) * (selected_begin - cluster_idx) / group_count;
+        selected_right = group_left + (group_right - group_left) * (selected_end - cluster_idx) / group_count;
+      }
+
+      if (!inside) {
+        span->x     = selected_left;
+        span->width = selected_right - selected_left;
+        inside      = nk_true;
+      } else if (selected_left == span->x + span->width) {
+        span->width = selected_right - span->x;
+      } else {
+        iterator->pending_x     = selected_left;
+        iterator->pending_width = selected_right - selected_left;
+        iterator->has_pending   = nk_true;
+        return nk_true;
+      }
+    }
+
+    iterator->run_idx += 1;
+    if (iterator->run_idx < shape->num_runs) {
+      iterator->glyph_idx = shape->runs[iterator->run_idx].glyph_begin;
+    }
+  }
+
+  if (inside) {
+    return nk_true;
+  }
+  return nk_false;
+}
+
+NK_API void
+nk_text_wrap_iterator_begin(struct nk_text_wrap_iterator *iterator, const struct nk_text_shape *shape, float max_width)
+{
+  NK_ASSERT(iterator);
+  NK_MEMSET(iterator, 0, sizeof(*iterator));
+  iterator->shape     = shape;
+  iterator->max_width = NK_MAX(0.0f, max_width);
+}
+
+NK_INTERN float
+nk_text_cluster_width(const struct nk_text_shape *shape, int cluster_idx)
+{
+  struct nk_text_cluster *cluster = &shape->clusters[cluster_idx];
+  float                   width   = 0.0f;
+  int                     glyph_idx;
+
+  for (glyph_idx = cluster->glyph_begin; glyph_idx < cluster->glyph_begin + cluster->glyph_count; ++glyph_idx) {
+    width += shape->glyphs[glyph_idx].advance_x;
+  }
+  return width;
+}
+
+NK_INTERN nk_flags
+nk_text_boundary_flags_at(const struct nk_text_shape *shape, int *boundary_idx, int source_offset)
+{
+  nk_flags flags = 0;
+
+  while (*boundary_idx < shape->num_boundaries && shape->boundaries[*boundary_idx].source_offset <= source_offset) {
+    struct nk_text_boundary *boundary = &shape->boundaries[*boundary_idx];
+    if (boundary->source_offset == source_offset) {
+      flags |= boundary->flags;
+    }
+    *boundary_idx += 1;
+  }
+  return flags;
+}
+
+NK_INTERN nk_bool
+nk_text_wrap_line_set(struct nk_text_wrap_iterator *iterator, struct nk_text_wrap_line *line,
+                      int source_end, float width, nk_flags flags, int cluster_idx, int boundary_idx)
+{
+  line->source_begin      = iterator->source_offset;
+  line->source_end        = source_end;
+  line->width             = width;
+  line->break_flags       = flags;
+  iterator->source_offset = source_end;
+  iterator->cluster_idx   = cluster_idx;
+  iterator->boundary_idx  = boundary_idx;
+  return nk_true;
+}
+
+NK_API nk_bool
+nk_text_wrap_iterator_next(struct nk_text_wrap_iterator *iterator, struct nk_text_wrap_line *line)
+{
+  const struct nk_text_shape *shape;
+  int                         line_cluster_begin;
+  int                         cluster_idx;
+  int                         boundary_idx;
+  int                         soft_source_end   = 0;
+  int                         soft_cluster_idx  = 0;
+  int                         soft_boundary_idx = 0;
+  float                       soft_width        = 0.0f;
+  float                       width             = 0.0f;
+
+  NK_ASSERT(iterator);
+  NK_ASSERT(line);
+  shape = iterator->shape;
+  if (!shape || iterator->source_offset >= shape->source_len) {
+    return nk_false;
+  }
+
+  line_cluster_begin = iterator->cluster_idx;
+  cluster_idx        = iterator->cluster_idx;
+  boundary_idx       = iterator->boundary_idx;
+  while (boundary_idx < shape->num_boundaries && shape->boundaries[boundary_idx].source_offset <= iterator->source_offset) {
+    boundary_idx += 1;
+  }
+
+  while (cluster_idx < shape->num_clusters) {
+    const struct nk_text_cluster *cluster    = &shape->clusters[cluster_idx];
+    float                         next_width = width + nk_text_cluster_width(shape, cluster_idx);
+    nk_flags                      flags;
+
+    if (next_width > iterator->max_width && cluster_idx > line_cluster_begin) {
+      if (soft_source_end > iterator->source_offset) {
+        return nk_text_wrap_line_set(iterator, line, soft_source_end, soft_width, NK_TEXT_BOUNDARY_LINE_SOFT, soft_cluster_idx, soft_boundary_idx);
+      }
+      return nk_text_wrap_line_set(iterator, line, cluster->source_begin, width, NK_TEXT_BOUNDARY_GRAPHEME, cluster_idx, boundary_idx);
+    }
+
+    width        = next_width;
+    flags        = nk_text_boundary_flags_at(shape, &boundary_idx, cluster->source_end);
+    cluster_idx += 1;
+
+    if (flags & NK_TEXT_BOUNDARY_LINE_HARD) {
+      return nk_text_wrap_line_set(iterator, line, cluster->source_end, width, flags, cluster_idx, boundary_idx);
+    }
+
+    if (flags & NK_TEXT_BOUNDARY_LINE_SOFT) {
+      soft_source_end   = cluster->source_end;
+      soft_cluster_idx  = cluster_idx;
+      soft_boundary_idx = boundary_idx;
+      soft_width        = width;
+    }
+
+    if (width > iterator->max_width && cluster_idx == line_cluster_begin + 1) {
+      return nk_text_wrap_line_set(iterator, line, cluster->source_end, width, NK_TEXT_BOUNDARY_GRAPHEME, cluster_idx, boundary_idx);
+    }
+  }
+
+  return nk_text_wrap_line_set(iterator, line, shape->source_len, width, 0, shape->num_clusters, shape->num_boundaries);
+}
+
 NK_API float
 nk_text_width(struct nk_context *ctx, const struct nk_user_font *font, float height, const char *text, int len)
 {
-  struct nk_text_request     request = {0};
+  struct nk_text_request      request;
   struct nk_text_cache_entry *entry;
   struct nk_text_shape       *shape;
   nk_hash                     hash;
@@ -2420,6 +2894,7 @@ nk_text_width(struct nk_context *ctx, const struct nk_user_font *font, float hei
     return 0.0f;
   }
 
+  NK_MEMSET(&request, 0, sizeof(request));
   request.source      = text;
   request.source_len  = len;
   request.font        = font;
@@ -4465,33 +4940,11 @@ nk_push_custom(struct nk_command_buffer *b, struct nk_rect r, nk_command_custom_
   cmd->callback_data = usr;
   cmd->callback      = cb;
 }
-NK_API void
-nk_draw_text(struct nk_command_buffer *b, struct nk_rect r, const char *string, int length, const struct nk_user_font *font, struct nk_color bg, struct nk_color fg)
+NK_INTERN void
+nk_push_draw_text(struct nk_command_buffer *b, struct nk_rect r, const char *string, int length,
+                  const struct nk_user_font *font, float height, struct nk_color bg, struct nk_color fg)
 {
-  struct nk_text_shape   *shape;
-  float                   text_width;
   struct nk_command_text *cmd;
-
-  NK_ASSERT(b);
-  NK_ASSERT(font);
-  if (!b || !string || !length || (bg.a == 0 && fg.a == 0)) {
-    return;
-  }
-  if (b->use_clipping) {
-    const struct nk_rect *c = &b->clip;
-    if (c->w == 0 || c->h == 0 || !NK_INTERSECT(r.x, r.y, r.w, r.h, c->x, c->y, c->w, c->h)) {
-      return;
-    }
-  }
-
-  /* make sure text fits inside bounds */
-  shape      = nk_text_shape_build_default(b->context, font, b->context->style.font_size, string, length);
-  text_width = shape ? shape->advance.x : 0.0f;
-  if (text_width > r.w) {
-    int   glyphs    = 0;
-    float txt_width = (float)text_width;
-    length          = nk_text_clamp(b->context, font, string, length, r.w, &glyphs, &txt_width, 0, 0);
-  }
 
   if (!length) {
     return;
@@ -4508,9 +4961,40 @@ nk_draw_text(struct nk_command_buffer *b, struct nk_rect r, const char *string, 
   cmd->foreground = fg;
   cmd->font       = font;
   cmd->length     = length;
-  cmd->height     = b->context->style.font_size;
+  cmd->height     = height;
   NK_MEMCPY(cmd->string, string, (nk_size)length);
   cmd->string[length] = '\0';
+}
+
+NK_API void
+nk_draw_text(struct nk_command_buffer *b, struct nk_rect r, const char *string, int length,
+             const struct nk_user_font *font, struct nk_color bg, struct nk_color fg)
+{
+  struct nk_text_shape *shape;
+  float                 text_width;
+
+  NK_ASSERT(b);
+  NK_ASSERT(font);
+  if (!b || !string || !length || (bg.a == 0 && fg.a == 0)) {
+    return;
+  }
+
+  if (b->use_clipping) {
+    struct nk_rect *c = &b->clip;
+    if (c->w == 0 || c->h == 0 || !NK_INTERSECT(r.x, r.y, r.w, r.h, c->x, c->y, c->w, c->h)) {
+      return;
+    }
+  }
+
+  shape = nk_text_shape_build_default(b->context, font, b->context->style.font_size, string, length);
+  text_width = shape ? shape->advance.x : 0.0f;
+  if (text_width > r.w) {
+    int   glyphs = 0;
+    float width  = text_width;
+    length = nk_text_clamp(b->context, font, string, length, r.w, &glyphs, &width, 0, 0);
+  }
+
+  nk_push_draw_text(b, r, string, length, font, b->context->style.font_size, bg, fg);
 }
 
 /* ===============================================================
@@ -5811,6 +6295,7 @@ nk_draw_list_add_text_geometry(struct nk_draw_list *list, const struct nk_text_g
 {
   struct nk_text_vertex_writer writer = nk_text_vertex_writer_make(&list->config);
   struct nk_colorf             colorf;
+  int                          run_idx;
 
   if (!NK_INTERSECT(rect.x, rect.y, rect.w, rect.h, list->clip_rect.x, list->clip_rect.y, list->clip_rect.w, list->clip_rect.h)) {
     return;
@@ -5819,11 +6304,12 @@ nk_draw_list_add_text_geometry(struct nk_draw_list *list, const struct nk_text_g
   fg.a = (nk_byte)((float)fg.a * list->config.global_alpha);
   nk_color_fv(&colorf.r, fg);
 
-  for (int run_idx = 0; run_idx < geometry->num_runs; ++run_idx) {
+  for (run_idx = 0; run_idx < geometry->num_runs; ++run_idx) {
     struct nk_text_geometry_run *run = &geometry->runs[run_idx];
     nk_draw_index               *indices;
     nk_draw_index                index;
     void                        *vertices;
+    int                          quad_idx;
 
     nk_draw_list_push_image(list, run->texture);
     index    = (nk_draw_index)list->vertex_count;
@@ -5833,7 +6319,7 @@ nk_draw_list_add_text_geometry(struct nk_draw_list *list, const struct nk_text_g
       return;
     }
 
-    for (int quad_idx = run->quad_begin; quad_idx < run->quad_begin + run->quad_count; ++quad_idx) {
+    for (quad_idx = run->quad_begin; quad_idx < run->quad_begin + run->quad_count; ++quad_idx) {
       struct nk_text_geometry_quad *quad = &geometry->quads[quad_idx];
 
       struct nk_vec2 a   = nk_vec2(rect.x + quad->min.x, rect.y + quad->min.y);
@@ -6065,32 +6551,44 @@ nk_convert(struct nk_context *ctx, struct nk_buffer *cmds, struct nk_buffer *ver
       request.font        = t->font;
       request.font_height = t->height;
 
-      hash     = nk_text_request_hash(&request);
-      entry    = nk_text_cache_find(ctx, &request, hash);
-      geometry = entry ? entry->geometry : NULL;
+      NK_PROFILE_SCOPE_BEGIN("text.geometry_cache_lookup", geometry_cache_lookup);
+      {
+        hash     = nk_text_request_hash(&request);
+        entry    = nk_text_cache_find(ctx, &request, hash);
+        geometry = entry ? entry->geometry : NULL;
+      }
+      NK_PROFILE_SCOPE_END(geometry_cache_lookup);
 
       if (!geometry) {
-        shape = nk_text_shape_build(ctx, &request);
-        entry = nk_text_cache_find(ctx, &request, hash);
+        NK_PROFILE_SCOPE_BEGIN("text.geometry_prepare", geometry_prepare);
+        {
+          shape = nk_text_shape_build(ctx, &request);
+          entry = nk_text_cache_find(ctx, &request, hash);
 
-        if (shape && entry) {
-          NK_PROFILE_SCOPE_BEGIN("text.geometry_build", geometry_build);
-          {
-            geometry = nk_text_geometry_build(ctx, entry, shape, t->height);
+          if (shape && entry) {
+            NK_PROFILE_SCOPE_BEGIN("text.geometry_build", geometry_build);
+            {
+              geometry = nk_text_geometry_build(ctx, entry, shape, t->height);
+            }
+            NK_PROFILE_SCOPE_END(geometry_build);
           }
-          NK_PROFILE_SCOPE_END(geometry_build);
         }
+        NK_PROFILE_SCOPE_END(geometry_prepare);
       }
 
-      NK_PROFILE_SCOPE_BEGIN("text.geometry", text_geometry);
-      {
-        if (geometry) {
+      if (geometry) {
+        NK_PROFILE_SCOPE_BEGIN("text.geometry_cached", geometry_cached);
+        {
           nk_draw_list_add_text_geometry(&ctx->draw_list, geometry, nk_rect(t->x, t->y, t->w, t->h), t->foreground);
-        } else if (shape) {
+        }
+        NK_PROFILE_SCOPE_END(geometry_cached);
+      } else if (shape) {
+        NK_PROFILE_SCOPE_BEGIN("text.geometry_uncached", geometry_uncached);
+        {
           nk_draw_list_add_text_shape(&ctx->draw_list, shape, nk_rect(t->x, t->y, t->w, t->h), t->height, t->foreground);
         }
+        NK_PROFILE_SCOPE_END(geometry_uncached);
       }
-      NK_PROFILE_SCOPE_END(text_geometry);
     } break;
     case NK_COMMAND_IMAGE: {
       const struct nk_command_image *i = (const struct nk_command_image *)cmd;
@@ -15884,6 +16382,99 @@ nk_find_value(const struct nk_window *win, nk_hash name)
   return 0;
 }
 
+enum nk_text_selection_storage_field {
+  NK_TEXT_SELECTION_STORAGE_ANCHOR,
+  NK_TEXT_SELECTION_STORAGE_CURSOR,
+  NK_TEXT_SELECTION_STORAGE_FLAGS,
+  NK_TEXT_SELECTION_STORAGE_ANCHOR_WIDGET,
+  NK_TEXT_SELECTION_STORAGE_CURSOR_WIDGET,
+  NK_TEXT_SELECTION_STORAGE_INDEX,
+  NK_TEXT_SELECTION_STORAGE_WIDGET_COUNT,
+  NK_TEXT_SELECTION_STORAGE_FRAME,
+  NK_TEXT_SELECTION_STORAGE_COUNT
+};
+
+NK_LIB struct nk_window *
+nk_text_selection_storage_window(struct nk_window *win)
+{
+  while (win->parent) {
+    win = win->parent;
+  }
+  return win;
+}
+
+NK_LIB nk_hash
+nk_text_selection_storage_key(nk_hash scope, int field)
+{
+  return nk_murmur_hash(&scope, sizeof(scope), (nk_hash)(0x74584310u + field));
+}
+
+NK_LIB void
+nk_text_selection_panel_load(struct nk_context *ctx, struct nk_panel *panel)
+{
+  struct nk_window *win = NULL;
+  nk_uint          *value[NK_TEXT_SELECTION_STORAGE_COUNT];
+  nk_uint           flags;
+  int               i;
+
+  win                          = nk_text_selection_storage_window(ctx->current);
+  panel->text_selection_loaded = nk_true;
+  for (i = 0; i < NK_TEXT_SELECTION_STORAGE_COUNT; ++i) {
+    value[i] = nk_find_value(win, nk_text_selection_storage_key(panel->text_selection_scope, i));
+    if (!value[i]) {
+      return;
+    }
+  }
+
+  flags                                           = *value[NK_TEXT_SELECTION_STORAGE_FLAGS];
+  panel->text_selection.selection.anchor          = (int)*value[NK_TEXT_SELECTION_STORAGE_ANCHOR];
+  panel->text_selection.selection.cursor          = (int)*value[NK_TEXT_SELECTION_STORAGE_CURSOR];
+  panel->text_selection.selection.active          = (unsigned char)(flags & 0xffu);
+  panel->text_selection.selection.dragging        = (unsigned char)((flags >> 8) & 0xffu);
+  panel->text_selection.selection.affinity        = (unsigned char)((flags >> 16) & 0xffu);
+  panel->text_selection.selection.anchor_affinity = (unsigned char)((flags >> 24) & 0xffu);
+  panel->text_selection.anchor_widget             = *value[NK_TEXT_SELECTION_STORAGE_ANCHOR_WIDGET];
+  panel->text_selection.cursor_widget             = *value[NK_TEXT_SELECTION_STORAGE_CURSOR_WIDGET];
+  panel->text_selection.widget_index              = *value[NK_TEXT_SELECTION_STORAGE_INDEX];
+  panel->text_selection.widget_count              = *value[NK_TEXT_SELECTION_STORAGE_WIDGET_COUNT];
+  panel->text_selection.frame                     = *value[NK_TEXT_SELECTION_STORAGE_FRAME];
+}
+
+NK_LIB void
+nk_text_selection_panel_save(struct nk_context *ctx, struct nk_panel *panel)
+{
+  struct nk_window *win = nk_text_selection_storage_window(ctx->current);
+  nk_uint           value[NK_TEXT_SELECTION_STORAGE_COUNT];
+  int               i;
+  nk_uint           flags;
+
+  flags = (nk_uint)(panel->text_selection.selection.active          <<  0) |
+          (nk_uint)(panel->text_selection.selection.dragging        <<  8) |
+          (nk_uint)(panel->text_selection.selection.affinity        << 16) |
+          (nk_uint)(panel->text_selection.selection.anchor_affinity << 24);
+
+  value[NK_TEXT_SELECTION_STORAGE_ANCHOR]        = (nk_uint)panel->text_selection.selection.anchor;
+  value[NK_TEXT_SELECTION_STORAGE_CURSOR]        = (nk_uint)panel->text_selection.selection.cursor;
+  value[NK_TEXT_SELECTION_STORAGE_FLAGS]         = flags;
+  value[NK_TEXT_SELECTION_STORAGE_ANCHOR_WIDGET] = panel->text_selection.anchor_widget;
+  value[NK_TEXT_SELECTION_STORAGE_CURSOR_WIDGET] = panel->text_selection.cursor_widget;
+  value[NK_TEXT_SELECTION_STORAGE_INDEX]         = panel->text_selection.widget_index;
+  value[NK_TEXT_SELECTION_STORAGE_WIDGET_COUNT]  = panel->text_selection.widget_count;
+  value[NK_TEXT_SELECTION_STORAGE_FRAME]         = panel->text_selection.frame;
+
+  for (i = 0; i < NK_TEXT_SELECTION_STORAGE_COUNT; ++i) {
+    nk_hash  key   = nk_text_selection_storage_key(panel->text_selection_scope, i);
+    nk_uint *entry = nk_find_value(win, key);
+    if (!entry) {
+      entry = nk_add_value(ctx, win, key, value[i]);
+    }
+
+    if (entry) {
+      *entry = value[i];
+    }
+  }
+}
+
 /* ===============================================================
  *
  *                              PANEL
@@ -16027,6 +16618,11 @@ nk_panel_begin(struct nk_context *ctx, const char *title, enum nk_panel_type pan
   layout = win->layout;
   out    = &win->buffer;
   in     = (win->flags & NK_WINDOW_NO_INPUT) ? 0 : &ctx->input;
+  if (panel_type == NK_PANEL_WINDOW) {
+    layout->text_selection_scope = nk_murmur_hash(&win->name, sizeof(win->name), (nk_hash)panel_type);
+  } else {
+    layout->text_selection_scope = nk_murmur_hash(title, title ? (int)nk_strlen(title) : 0, win->name ^ (nk_hash)panel_type);
+  }
 #ifdef NK_INCLUDE_COMMAND_USERDATA
   win->buffer.userdata = ctx->userdata;
 #endif
@@ -16182,7 +16778,10 @@ nk_panel_begin(struct nk_context *ctx, const char *title, enum nk_panel_type pan
 
       /* window maximize button */
       if (win->flags & NK_WINDOW_MAXIMIZABLE) {
-        nk_flags ws = 0;
+        struct nk_style_button maximize_button;
+        nk_flags               ws = 0;
+        float                  icon_pad;
+
         if (style->window.header.align == NK_HEADER_RIGHT) {
           button.x = (header.w + header.x) - button.w;
           if (!(win->flags & NK_WINDOW_CLOSABLE)) {
@@ -16195,9 +16794,8 @@ nk_panel_begin(struct nk_context *ctx, const char *title, enum nk_panel_type pan
           header.x += button.w + style->window.header.spacing.x + style->window.header.padding.x;
         }
 
-        struct nk_style_button maximize_button = style->window.header.minimize_button;
-
-        float icon_pad            = NK_MAX(4.0f, button.h * 0.25f);
+        maximize_button           = style->window.header.minimize_button;
+        icon_pad                  = NK_MAX(4.0f, button.h * 0.25f);
         maximize_button.padding.x = NK_MAX(maximize_button.padding.x, icon_pad);
         maximize_button.padding.y = NK_MAX(maximize_button.padding.y, icon_pad);
 
@@ -16310,7 +16908,8 @@ nk_panel_begin(struct nk_context *ctx, const char *title, enum nk_panel_type pan
 NK_INTERN void
 nk_panel_disable_parent_scrolling(struct nk_panel *layout)
 {
-  for (struct nk_panel *parent = layout ? layout->parent : 0; parent; parent = parent->parent) {
+  struct nk_panel *parent;
+  for (parent = layout ? layout->parent : 0; parent; parent = parent->parent) {
     parent->has_scrolling = nk_false;
   }
 }
@@ -16339,6 +16938,10 @@ nk_panel_end(struct nk_context *ctx)
   style  = &ctx->style;
   out    = &window->buffer;
   in     = (layout->flags & NK_WINDOW_ROM || layout->flags & NK_WINDOW_NO_INPUT) ? 0 : &ctx->input;
+  if (layout->text_selection_loaded) {
+    nk_text_selection_panel_save(ctx, layout);
+  }
+
   if (!nk_panel_is_sub(layout->type)) {
     nk_push_scissor(out, nk_null_rect);
   }
@@ -16402,6 +17005,10 @@ nk_panel_end(struct nk_context *ctx)
     float          scroll_step;
     float          scroll_inc;
     nk_bool        scroll_consumed = nk_false;
+    nk_bool        shift_down;
+    nk_bool        can_shift_scroll_h;
+    float          h_scroll_target;
+    float          h_max_offset;
 
     /* mouse wheel scrolling */
     if (nk_panel_is_sub(layout->type)) {
@@ -16435,18 +17042,21 @@ nk_panel_end(struct nk_context *ctx)
       }
     }
 
-    nk_bool shift_down = in && nk_input_is_key_down(in, NK_KEY_SHIFT);
-
-    float h_scroll_target = (float)(int)(layout->max_x - layout->bounds.x);
-    float h_max_offset    = NK_MAX(h_scroll_target - layout->bounds.w, 0.0f);
-
-    nk_bool can_shift_scroll_h = shift_down && !(layout->flags & NK_WINDOW_NO_SCROLLBAR_H) && h_max_offset > 0.0f;
+    shift_down             = in && nk_input_is_key_down(in, NK_KEY_SHIFT);
+    h_scroll_target        = (float)(int)(layout->max_x - layout->bounds.x);
+    h_max_offset           = NK_MAX(h_scroll_target - layout->bounds.w, 0.0f);
+    can_shift_scroll_h     = shift_down && !(layout->flags & NK_WINDOW_NO_SCROLLBAR_H) && h_max_offset > 0.0f;
 
     if (!(layout->flags & NK_WINDOW_NO_SCROLLBAR_V)) {
       /* vertical scrollbar */
       nk_flags state          = 0;
       float    old_max_offset = 0.0f;
       float    new_max_offset = 0.0f;
+      float    input_scroll_y;
+      nk_bool  has_y_wheel_input;
+      nk_uint  before_offset_y;
+      nk_uint  after_offset_y;
+      nk_bool  y_consumed;
 
       scroll.x = layout->bounds.x + layout->bounds.w + panel_padding.x;
       scroll.y = layout->bounds.y;
@@ -16470,16 +17080,15 @@ nk_panel_end(struct nk_context *ctx)
         }
       }
 
-      float   input_scroll_y    = in ? in->mouse.scroll_delta.y : 0.0f;
-      nk_bool has_y_wheel_input = input_scroll_y != 0.0f && !can_shift_scroll_h;
-
-      nk_uint before_offset_y = *layout->offset_y;
+      input_scroll_y    = in ? in->mouse.scroll_delta.y : 0.0f;
+      has_y_wheel_input = input_scroll_y != 0.0f && !can_shift_scroll_h;
+      before_offset_y   = *layout->offset_y;
 
       scroll_offset = nk_do_scrollbarv(
         &state, out, scroll, scroll_has_scrolling && !can_shift_scroll_h, scroll_offset, scroll_target, scroll_step, scroll_inc, &ctx->style.scrollv, in, style->font);
 
-      nk_uint after_offset_y = (nk_uint)scroll_offset;
-      nk_bool y_consumed     = has_y_wheel_input && after_offset_y != before_offset_y;
+      after_offset_y = (nk_uint)scroll_offset;
+      y_consumed     = has_y_wheel_input && after_offset_y != before_offset_y;
 
       *layout->offset_y = after_offset_y;
 
@@ -16505,6 +17114,11 @@ nk_panel_end(struct nk_context *ctx)
       nk_flags state          = 0;
       float    old_max_offset = 0.0f;
       float    new_max_offset = 0.0f;
+      float    input_scroll_x;
+      nk_bool  has_x_wheel_input;
+      nk_uint  before_offset_x;
+      nk_uint  after_offset_x;
+      nk_bool  x_consumed;
 
       scroll.x = layout->bounds.x;
       scroll.y = layout->bounds.y + layout->bounds.h;
@@ -16528,18 +17142,18 @@ nk_panel_end(struct nk_context *ctx)
         }
       }
 
-      float input_scroll_x = in ? in->mouse.scroll_delta.x : 0.0f;
+      input_scroll_x = in ? in->mouse.scroll_delta.x : 0.0f;
       if (input_scroll_x == 0.0f && shift_down && in) {
         input_scroll_x = in->mouse.scroll_delta.y;
       }
 
-      nk_bool has_x_wheel_input = input_scroll_x != 0.0f;
-      nk_uint before_offset_x   = *layout->offset_x;
+      has_x_wheel_input = input_scroll_x != 0.0f;
+      before_offset_x   = *layout->offset_x;
 
       scroll_offset = nk_do_scrollbarh(&state, out, scroll, scroll_has_scrolling, scroll_offset, scroll_target, scroll_step, scroll_inc, &ctx->style.scrollh, in, style->font);
 
-      nk_uint after_offset_x = (nk_uint)scroll_offset;
-      nk_bool x_consumed     = has_x_wheel_input && after_offset_x != before_offset_x;
+      after_offset_x = (nk_uint)scroll_offset;
+      x_consumed     = has_x_wheel_input && after_offset_x != before_offset_x;
 
       *layout->offset_x = after_offset_x;
 
@@ -19624,15 +20238,16 @@ nk_group_scrolled_offset_begin(
   ctx->current      = &panel;
   nk_panel_begin(ctx, (flags & NK_WINDOW_TITLE) ? title : 0, NK_PANEL_GROUP);
 
-  win->buffer                = panel.buffer;
-  win->buffer.clip           = panel.layout->clip;
-  panel.layout->offset_x     = x_offset;
-  panel.layout->offset_y     = y_offset;
-  panel.layout->prev_max_x   = prev_max_x;
-  panel.layout->prev_max_y   = prev_max_y;
-  panel.layout->scroll_flags = scroll_flags;
-  panel.layout->parent       = win->layout;
-  win->layout                = panel.layout;
+  win->buffer                        = panel.buffer;
+  win->buffer.clip                   = panel.layout->clip;
+  panel.layout->offset_x             = x_offset;
+  panel.layout->offset_y             = y_offset;
+  panel.layout->prev_max_x           = prev_max_x;
+  panel.layout->prev_max_y           = prev_max_y;
+  panel.layout->scroll_flags         = scroll_flags;
+  panel.layout->parent               = win->layout;
+  panel.layout->text_selection_scope = nk_murmur_hash(title, title ? (int)nk_strlen(title) : 0, win->layout->text_selection_scope);
+  win->layout                        = panel.layout;
 
   ctx->current = win;
   if ((panel.layout->flags & NK_WINDOW_CLOSED) || (panel.layout->flags & NK_WINDOW_MINIMIZED)) {
@@ -20424,6 +21039,48 @@ nk_widget_disable_end(struct nk_context *ctx)
  *                              TEXT
  *
  * ===============================================================*/
+NK_INTERN struct nk_rect
+nk_widget_text_layout(const struct nk_context *ctx, struct nk_rect bounds, const struct nk_text *text, nk_flags alignment, float text_width)
+{
+  struct nk_rect label;
+
+  if (!(alignment & (NK_TEXT_ALIGN_LEFT | NK_TEXT_ALIGN_CENTERED | NK_TEXT_ALIGN_RIGHT))) {
+    alignment |= NK_TEXT_ALIGN_LEFT;
+  }
+
+  if (!(alignment & (NK_TEXT_ALIGN_TOP | NK_TEXT_ALIGN_MIDDLE | NK_TEXT_ALIGN_BOTTOM))) {
+    alignment |= NK_TEXT_ALIGN_TOP;
+  }
+
+  if (alignment & NK_TEXT_ALIGN_LEFT) {
+    label.x = bounds.x + text->padding.x;
+    label.w = NK_MAX(0, bounds.w - 2 * text->padding.x);
+  } else if (alignment & NK_TEXT_ALIGN_CENTERED) {
+    label.w = NK_MAX(1, 2 * text->padding.x + text_width);
+    label.x = bounds.x + text->padding.x + ((bounds.w - 2 * text->padding.x) - label.w) / 2;
+    label.x = NK_MAX(bounds.x + text->padding.x, label.x);
+    label.w = NK_MIN(bounds.x + bounds.w, label.x + label.w);
+    if (label.w >= label.x) {
+      label.w -= label.x;
+    }
+  } else {
+    label.x = NK_MAX(bounds.x + text->padding.x, bounds.x + bounds.w - (2 * text->padding.x + text_width));
+    label.w = text_width + 2 * text->padding.x;
+  }
+
+  if (alignment & NK_TEXT_ALIGN_TOP) {
+    label.y = bounds.y + text->padding.y;
+    label.h = NK_MIN(ctx->style.font_size, bounds.h - 2 * text->padding.y);
+  } else if (alignment & NK_TEXT_ALIGN_MIDDLE) {
+    label.h = NK_MIN(ctx->style.font_size, NK_MAX(0, bounds.h - 2 * text->padding.y));
+    label.y = bounds.y + (bounds.h - label.h) / 2.0f;
+  } else {
+    label.y = bounds.y + bounds.h - ctx->style.font_size;
+    label.h = ctx->style.font_size;
+  }
+  return label;
+}
+
 NK_LIB void
 nk_widget_text(struct nk_command_buffer *o, struct nk_rect b, const char *string, int len, const struct nk_text *t, nk_flags a, const struct nk_user_font *f)
 {
@@ -20443,55 +21100,17 @@ nk_widget_text(struct nk_command_buffer *o, struct nk_rect b, const char *string
   text_width  = shape ? shape->advance.x : 0.0f;
   text_width += (2.0f * t->padding.x);
 
-  /* use top-left alignment by default */
-  if (!(a & (NK_TEXT_ALIGN_LEFT | NK_TEXT_ALIGN_CENTERED | NK_TEXT_ALIGN_RIGHT))) {
-    a |= NK_TEXT_ALIGN_LEFT;
-  }
-  if (!(a & (NK_TEXT_ALIGN_TOP | NK_TEXT_ALIGN_MIDDLE | NK_TEXT_ALIGN_BOTTOM))) {
-    a |= NK_TEXT_ALIGN_TOP;
-  }
-
-  /* align in x-axis */
-  if (a & NK_TEXT_ALIGN_LEFT) {
-    label.x = b.x + t->padding.x;
-    label.w = NK_MAX(0, b.w - 2 * t->padding.x);
-  } else if (a & NK_TEXT_ALIGN_CENTERED) {
-    label.w = NK_MAX(1, 2 * t->padding.x + (float)text_width);
-    label.x = (b.x + t->padding.x + ((b.w - 2 * t->padding.x) - label.w) / 2);
-    label.x = NK_MAX(b.x + t->padding.x, label.x);
-    label.w = NK_MIN(b.x + b.w, label.x + label.w);
-    if (label.w >= label.x) {
-      label.w -= label.x;
-    }
-  } else if (a & NK_TEXT_ALIGN_RIGHT) {
-    label.x = NK_MAX(b.x + t->padding.x, (b.x + b.w) - (2 * t->padding.x + (float)text_width));
-    label.w = (float)text_width + 2 * t->padding.x;
-  }
-
-  /* align in y-axis */
-  if (a & NK_TEXT_ALIGN_TOP) {
-    label.y = b.y + t->padding.y;
-    label.h = NK_MIN(o->context->style.font_size, b.h - 2 * t->padding.y);
-  } else if (a & NK_TEXT_ALIGN_MIDDLE) {
-    label.y = b.y + b.h / 2.0f - o->context->style.font_size / 2.0f;
-    label.h = NK_MAX(b.h / 2.0f, b.h - (b.h / 2.0f + o->context->style.font_size / 2.0f));
-  } else if (a & NK_TEXT_ALIGN_BOTTOM) {
-    label.y = b.y + b.h - o->context->style.font_size;
-    label.h = o->context->style.font_size;
-  }
-
+  label = nk_widget_text_layout(o->context, b, t, a, text_width);
   nk_draw_text(o, label, (const char *)string, len, f, t->background, t->text);
 }
 NK_LIB void
 nk_widget_text_wrap(struct nk_command_buffer *o, struct nk_rect b, const char *string, int len, const struct nk_text *t, const struct nk_user_font *f)
 {
-  float             width;
-  int               glyphs  = 0;
-  int               fitting = 0;
-  int               done    = 0;
-  struct nk_rect    line;
-  struct nk_text    text;
-  NK_INTERN nk_rune seperator[] = {' '};
+  struct nk_text_shape         *shape;
+  struct nk_text_wrap_iterator  iterator;
+  struct nk_text_wrap_line      wrapped;
+  struct nk_rect                line;
+  float                         bottom;
 
   NK_ASSERT(o);
   NK_ASSERT(t);
@@ -20499,35 +21118,36 @@ nk_widget_text_wrap(struct nk_command_buffer *o, struct nk_rect b, const char *s
     return;
   }
 
-  text.padding    = nk_vec2(0, 0);
-  text.background = t->background;
-  text.text       = t->text;
-
   b.w = NK_MAX(b.w, 2 * t->padding.x);
   b.h = NK_MAX(b.h, 2 * t->padding.y);
-  b.h = b.h - 2 * t->padding.y;
 
   line.x = b.x + t->padding.x;
   line.y = b.y + t->padding.y;
   line.w = b.w - 2 * t->padding.x;
   line.h = 2 * t->padding.y + o->context->style.font_size;
+  bottom = b.y + b.h - t->padding.y;
 
-  fitting = nk_text_clamp(o->context, f, string, len, line.w, &glyphs, &width, seperator, NK_LEN(seperator));
-  while (done < len) {
-    if (!fitting || line.y + line.h >= (b.y + b.h)) {
-      break;
+  shape = nk_text_shape_build_default(o->context, f, o->context->style.font_size, string, len);
+  if (!shape) {
+    return;
+  }
+
+  nk_text_wrap_iterator_begin(&iterator, shape, line.w);
+  while (line.y + line.h <= bottom && nk_text_wrap_iterator_next(&iterator, &wrapped)) {
+    int draw_end = wrapped.source_end;
+    while (draw_end > wrapped.source_begin && (string[draw_end - 1] == '\r' || string[draw_end - 1] == '\n')) {
+      draw_end -= 1;
     }
-    nk_widget_text(o, line, &string[done], fitting, &text, NK_TEXT_LEFT, f);
-    done    += fitting;
-    line.y  += o->context->style.font_size + 2 * t->padding.y;
-    fitting  = nk_text_clamp(o->context, f, &string[done], len - done, line.w, &glyphs, &width, seperator, NK_LEN(seperator));
+    nk_push_draw_text(o, line, string + wrapped.source_begin, draw_end - wrapped.source_begin,
+                      f, o->context->style.font_size, t->background, t->text);
+    line.y += line.h;
   }
 }
-NK_API void
-nk_text_colored(struct nk_context *ctx, const char *str, int len, nk_flags alignment, struct nk_color color)
+NK_INTERN void
+nk_text_widget_colored(struct nk_context *ctx, const char *str, int len, nk_flags alignment, struct nk_color color)
 {
-  struct nk_window      *win;
-  const struct nk_style *style;
+  struct nk_window *win;
+  struct nk_style  *style;
 
   struct nk_vec2 item_padding;
   struct nk_rect bounds;
@@ -20551,11 +21171,11 @@ nk_text_colored(struct nk_context *ctx, const char *str, int len, nk_flags align
   text.text       = nk_rgb_factor(color, style->text.color_factor);
   nk_widget_text(&win->buffer, bounds, str, len, &text, alignment, style->font);
 }
-NK_API void
-nk_text_wrap_colored(struct nk_context *ctx, const char *str, int len, struct nk_color color)
+NK_INTERN void
+nk_text_wrap_widget_colored(struct nk_context *ctx, const char *str, int len, struct nk_color color)
 {
-  struct nk_window      *win;
-  const struct nk_style *style;
+  struct nk_window *win;
+  struct nk_style  *style;
 
   struct nk_vec2 item_padding;
   struct nk_rect bounds;
@@ -20578,6 +21198,37 @@ nk_text_wrap_colored(struct nk_context *ctx, const char *str, int len, struct nk
   text.background = style->window.background;
   text.text       = nk_rgb_factor(color, style->text.color_factor);
   nk_widget_text_wrap(&win->buffer, bounds, str, len, &text, style->font);
+}
+
+NK_API void
+nk_text_colored(struct nk_context *ctx, const char *str, int len, nk_flags alignment, struct nk_color color)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = alignment;
+  options.color     = color;
+#ifdef NK_DEFAULT_TEXT_SELECTABLE
+  options.flags |= NK_TEXT_OPTION_SELECTABLE;
+#endif
+
+  (void)nk_text_ex(ctx, str, len, &options);
+}
+
+NK_API void
+nk_text_wrap_colored(struct nk_context *ctx, const char *str, int len, struct nk_color color)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = NK_TEXT_LEFT;
+  options.flags     = NK_TEXT_OPTION_WRAP;
+  options.color     = color;
+#ifdef NK_DEFAULT_TEXT_SELECTABLE
+  options.flags |= NK_TEXT_OPTION_SELECTABLE;
+#endif
+
+  (void)nk_text_ex(ctx, str, len, &options);
 }
 #ifdef NK_INCLUDE_STANDARD_VARARGS
 NK_API void
@@ -20723,6 +21374,1154 @@ nk_label_colored_wrap(struct nk_context *ctx, const char *str, struct nk_color c
 {
   nk_text_wrap_colored(ctx, str, nk_strlen(str), color);
 }
+
+NK_INTERN void
+nk_text_selection_collapse(const struct nk_text_shape *shape, struct nk_text_selection *selection, int direction)
+{
+  struct nk_text_cursor anchor     = nk_text_shape_cursor_at(shape, selection->anchor, (enum nk_text_affinity)selection->anchor_affinity);
+  struct nk_text_cursor cursor     = nk_text_shape_cursor_at(shape, selection->cursor, (enum nk_text_affinity)selection->affinity);
+  nk_bool               use_anchor = direction < 0 ? anchor.x < cursor.x : anchor.x > cursor.x;
+  struct nk_text_cursor edge       = use_anchor ? anchor : cursor;
+
+  selection->anchor          = edge.source_offset;
+  selection->cursor          = edge.source_offset;
+  selection->affinity        = (unsigned char)edge.affinity;
+  selection->anchor_affinity = (unsigned char)edge.affinity;
+}
+
+NK_INTERN struct nk_text_selection_context *
+nk_text_selection_panel_context(struct nk_context *ctx)
+{
+  struct nk_panel *panel = ctx->current->layout;
+  if (!panel->text_selection_loaded) {
+    nk_text_selection_panel_load(ctx, panel);
+  }
+  return &panel->text_selection;
+}
+
+struct nk_text_selection_copy_chunk {
+  struct nk_command header;
+  nk_size           next;
+  int               length;
+  char              data[1];
+};
+
+struct nk_text_selection_copy_result {
+  struct nk_command header;
+  char              data[1];
+};
+
+NK_INTERN struct nk_text_selection_copy_chunk *
+nk_text_selection_copy_chunk_at(struct nk_context *ctx, nk_size offset)
+{
+  if (!offset) {
+    return NULL;
+  }
+  return nk_ptr_add(struct nk_text_selection_copy_chunk, ctx->memory.memory.ptr, offset - 1);
+}
+
+NK_INTERN nk_bool
+nk_text_selection_context_empty(const struct nk_text_selection_context *context)
+{
+  return context->anchor_widget == context->cursor_widget && context->selection.anchor == context->selection.cursor;
+}
+
+NK_INTERN void
+nk_text_selection_context_collapse(struct nk_text_selection_context *context, const struct nk_text_shape *shape, int direction)
+{
+  struct nk_text_selection *selection = &context->selection;
+  nk_bool                   use_anchor;
+
+  if (context->anchor_widget == context->cursor_widget) {
+    nk_text_selection_collapse(shape, selection, direction);
+    return;
+  }
+
+  use_anchor = direction < 0 ? context->anchor_widget < context->cursor_widget
+                             : context->anchor_widget > context->cursor_widget;
+  if (use_anchor) {
+    context->cursor_widget = context->anchor_widget;
+    selection->cursor      = selection->anchor;
+    selection->affinity    = selection->anchor_affinity;
+  } else {
+    context->anchor_widget      = context->cursor_widget;
+    selection->anchor           = selection->cursor;
+    selection->anchor_affinity  = selection->affinity;
+  }
+
+  context->anchor_widget     = context->cursor_widget;
+  selection->anchor          = selection->cursor;
+  selection->anchor_affinity = selection->affinity;
+}
+
+NK_INTERN nk_bool
+nk_text_selection_widget_range(struct nk_text_selection_context *context, unsigned int widget, int len, int *begin, int *end)
+{
+  struct nk_text_selection *selection = &context->selection;
+  if (!selection->active) {
+    return nk_false;
+  }
+
+  if (context->anchor_widget == context->cursor_widget) {
+    if (widget != context->anchor_widget) {
+      return nk_false;
+    }
+    *begin = NK_MIN(selection->anchor, selection->cursor);
+    *end   = NK_MAX(selection->anchor, selection->cursor);
+  } else if (context->anchor_widget < context->cursor_widget) {
+    if (widget < context->anchor_widget || widget > context->cursor_widget) {
+      return nk_false;
+    }
+    *begin = widget == context->anchor_widget ? selection->anchor : 0;
+    *end   = widget == context->cursor_widget ? selection->cursor : len;
+  } else {
+    if (widget < context->cursor_widget || widget > context->anchor_widget) {
+      return nk_false;
+    }
+    *begin = widget == context->cursor_widget ? selection->cursor : 0;
+    *end   = widget == context->anchor_widget ? selection->anchor : len;
+  }
+
+  *begin = NK_CLAMP(0, *begin, len);
+  *end   = NK_CLAMP(0, *end, len);
+  return nk_true;
+}
+
+NK_INTERN void
+nk_text_selection_copy_append(struct nk_context *ctx, struct nk_text_selection_context *context, const char *text, int length)
+{
+  int                                  prefix = context->copy_first ? 1 : 0;
+  nk_size                              size   = offsetof(struct nk_text_selection_copy_chunk, data) + prefix + length;
+  struct nk_text_selection_copy_chunk *chunk;
+  nk_size                              offset;
+
+  chunk = nk_command_buffer_push(&ctx->current->buffer, NK_COMMAND_NOP, size);
+  if (!chunk) {
+    return;
+  }
+
+  offset        = (nk_size)((nk_byte *)chunk - (nk_byte *)ctx->memory.memory.ptr) + 1;
+  chunk->next   = 0;
+  chunk->length = prefix + length;
+  if (prefix) {
+    chunk->data[0] = '\n';
+  }
+  if (length) {
+    NK_MEMCPY(chunk->data + prefix, text, length);
+  }
+
+  if (context->copy_last) {
+    nk_text_selection_copy_chunk_at(ctx, context->copy_last)->next = offset;
+  } else {
+    context->copy_first = offset;
+  }
+  context->copy_last    = offset;
+  context->copy_length += chunk->length;
+}
+
+NK_INTERN void
+nk_text_selection_copy_finish(struct nk_context *ctx, struct nk_text_selection_context *context)
+{
+  struct nk_text_selection_copy_result *result;
+  nk_size                               chunk_offset = context->copy_first;
+  int                                   text_offset  = 0;
+
+  if (!chunk_offset || !ctx->clip.copy) {
+    return;
+  }
+
+  result = nk_command_buffer_push(&ctx->current->buffer, NK_COMMAND_NOP, offsetof(struct nk_text_selection_copy_result, data) + context->copy_length);
+  if (!result) {
+    return;
+  }
+
+  while (chunk_offset) {
+    struct nk_text_selection_copy_chunk *chunk = nk_text_selection_copy_chunk_at(ctx, chunk_offset);
+    NK_MEMCPY(result->data + text_offset, chunk->data, chunk->length);
+    text_offset  += chunk->length;
+    chunk_offset  = chunk->next;
+  }
+  ctx->clip.copy(ctx->clip.userdata, result->data, context->copy_length);
+}
+
+NK_INTERN unsigned int
+nk_text_selection_widget_begin(struct nk_context *ctx, struct nk_text_selection_context *context)
+{
+  if (context->frame != ctx->seq) {
+    context->widget_count = context->widget_index;
+    context->frame        = ctx->seq;
+    context->widget_index = 0;
+    context->copy_first   = 0;
+    context->copy_last    = 0;
+    context->copy_length  = 0;
+    if (nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT)) {
+      context->selection.active   = nk_false;
+      context->selection.dragging = nk_false;
+    } else if (!ctx->input.mouse.buttons[NK_BUTTON_LEFT].down && !nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT)) {
+      context->selection.dragging = nk_false;
+    }
+  }
+  return ++context->widget_index;
+}
+
+NK_INTERN void
+nk_text_selection_keyboard(struct nk_context *ctx, const struct nk_text_shape *shape, struct nk_text_selection_context *context, unsigned int widget)
+{
+  struct nk_input          *input     = &ctx->input;
+  struct nk_text_selection *selection = &context->selection;
+  nk_bool                   shift;
+
+  if (!selection->active || context->cursor_widget != widget || context->keyboard_frame == ctx->seq) {
+    return;
+  }
+
+  shift = input->keyboard.keys[NK_KEY_SHIFT].down;
+  if (nk_input_is_key_pressed(input, NK_KEY_TEXT_SELECT_ALL)) {
+    context->keyboard_frame    = ctx->seq;
+    context->anchor_widget     = 1;
+    context->cursor_widget     = context->widget_count;
+    selection->anchor          = 0;
+    selection->cursor          = NK_SINT_MAX;
+    selection->anchor_affinity = NK_TEXT_AFFINITY_LEADING;
+    selection->affinity        = NK_TEXT_AFFINITY_TRAILING;
+  } else if (nk_input_is_key_pressed(input, NK_KEY_LEFT)) {
+    context->keyboard_frame = ctx->seq;
+    if (!shift && !nk_text_selection_context_empty(context)) {
+      nk_text_selection_context_collapse(context, shape, -1);
+    } else {
+      struct nk_text_cursor cursor;
+      cursor.source_offset = selection->cursor;
+      cursor.affinity      = (enum nk_text_affinity)selection->affinity;
+      cursor               = nk_text_shape_cursor_move(shape, cursor, -1);
+
+      if (cursor.source_offset == selection->cursor && widget > 1) {
+        context->cursor_widget = widget - 1;
+        selection->cursor      = NK_SINT_MAX;
+        selection->affinity    = NK_TEXT_AFFINITY_TRAILING;
+      } else {
+        selection->cursor   = cursor.source_offset;
+        selection->affinity = (unsigned char)cursor.affinity;
+      }
+
+      if (!shift) {
+        context->anchor_widget     = context->cursor_widget;
+        selection->anchor          = selection->cursor;
+        selection->anchor_affinity = selection->affinity;
+      }
+    }
+  } else if (nk_input_is_key_pressed(input, NK_KEY_RIGHT)) {
+    context->keyboard_frame = ctx->seq;
+    if (!shift && !nk_text_selection_context_empty(context)) {
+      nk_text_selection_context_collapse(context, shape, 1);
+    } else {
+      struct nk_text_cursor cursor;
+      cursor.source_offset = selection->cursor;
+      cursor.affinity      = (enum nk_text_affinity)selection->affinity;
+      cursor               = nk_text_shape_cursor_move(shape, cursor, 1);
+
+      if (cursor.source_offset == selection->cursor && widget < context->widget_count) {
+        context->cursor_widget = widget + 1;
+        selection->cursor      = 0;
+        selection->affinity    = NK_TEXT_AFFINITY_LEADING;
+      } else {
+        selection->cursor   = cursor.source_offset;
+        selection->affinity = (unsigned char)cursor.affinity;
+      }
+
+      if (!shift) {
+        context->anchor_widget     = context->cursor_widget;
+        selection->anchor          = selection->cursor;
+        selection->anchor_affinity = selection->affinity;
+      }
+    }
+  } else if (nk_input_is_key_pressed(input, NK_KEY_TEXT_WORD_LEFT)) {
+    int cursor = selection->cursor;
+
+    context->keyboard_frame = ctx->seq;
+    selection->cursor       = nk_text_shape_boundary_previous(shape, selection->cursor, NK_TEXT_BOUNDARY_WORD);
+    selection->affinity     = selection->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
+    if (selection->cursor == cursor && widget > 1) {
+      context->cursor_widget = widget - 1;
+      selection->cursor      = NK_SINT_MAX;
+      selection->affinity    = NK_TEXT_AFFINITY_TRAILING;
+    }
+
+    if (!shift) {
+      context->anchor_widget     = context->cursor_widget;
+      selection->anchor          = selection->cursor;
+      selection->anchor_affinity = selection->affinity;
+    }
+  } else if (nk_input_is_key_pressed(input, NK_KEY_TEXT_WORD_RIGHT)) {
+    int cursor = selection->cursor;
+    context->keyboard_frame = ctx->seq;
+    selection->cursor       = nk_text_shape_boundary_next(shape, selection->cursor, NK_TEXT_BOUNDARY_WORD);
+    selection->affinity     = selection->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
+
+    if (selection->cursor == cursor && widget < context->widget_count) {
+      context->cursor_widget = widget + 1;
+      selection->cursor      = 0;
+      selection->affinity    = NK_TEXT_AFFINITY_LEADING;
+    }
+
+    if (!shift) {
+      context->anchor_widget     = context->cursor_widget;
+      selection->anchor          = selection->cursor;
+      selection->anchor_affinity = selection->affinity;
+    }
+  }
+}
+
+NK_INTERN nk_bool
+nk_text_selection_panel_accepts_input(struct nk_context *ctx, enum nk_widget_layout_states widget_state)
+{
+  return widget_state != NK_WIDGET_INVALID &&
+         widget_state != NK_WIDGET_DISABLED &&
+         !(ctx->current->layout->flags & NK_WINDOW_ROM) &&
+         !(ctx->current->layout->flags & NK_WINDOW_NO_INPUT) &&
+         !ctx->current->widgets_disabled;
+}
+
+NK_INTERN nk_bool
+nk_text_selectable_widget(struct nk_context *ctx, const char *str, int len, nk_flags align, struct nk_color color, struct nk_text_selection_context *selection_context)
+{
+  struct nk_window             *win;
+  struct nk_style              *style;
+  struct nk_text_shape         *shape;
+  struct nk_text_selection     *selection;
+  struct nk_text                text;
+  struct nk_rect                bounds;
+  struct nk_rect                label;
+  enum nk_widget_layout_states  widget_state;
+  unsigned int                  widget;
+  unsigned int                  old_anchor_widget;
+  unsigned int                  old_cursor_widget;
+  nk_bool                       selected_widget;
+  int                           selected_begin = 0;
+  int                           selected_end   = 0;
+  int                           old_anchor;
+  int                           old_cursor;
+
+  widget            = nk_text_selection_widget_begin(ctx, selection_context);
+  selection         = &selection_context->selection;
+  old_anchor_widget = selection_context->anchor_widget;
+  old_cursor_widget = selection_context->cursor_widget;
+  old_anchor        = selection->anchor;
+  old_cursor        = selection->cursor;
+
+  win             = ctx->current;
+  style           = &ctx->style;
+  widget_state    = nk_widget(&bounds, ctx);
+  text.padding    = style->text.padding;
+  text.background = style->window.background;
+  text.text       = nk_rgb_factor(color, style->text.color_factor);
+
+  shape = nk_text_shape_build_default(ctx, style->font, style->font_size, str, len);
+  label = nk_widget_text_layout(ctx, bounds, &text, align, (shape ? shape->advance.x : 0.0f) + 2 * text.padding.x);
+
+  if (widget == selection_context->anchor_widget) {
+    selection->anchor = NK_CLAMP(0, selection->anchor, len);
+    if (shape && selection->anchor > 0 && selection->anchor < len) {
+      selection->anchor = nk_text_shape_boundary_previous(shape, selection->anchor + 1, NK_TEXT_BOUNDARY_GRAPHEME);
+    }
+  }
+
+  if (widget == selection_context->cursor_widget) {
+    selection->cursor = NK_CLAMP(0, selection->cursor, len);
+    if (shape && selection->cursor > 0 && selection->cursor < len) {
+      selection->cursor = nk_text_shape_boundary_previous(shape, selection->cursor + 1, NK_TEXT_BOUNDARY_GRAPHEME);
+    }
+  }
+
+  if (widget_state != NK_WIDGET_INVALID) {
+    struct nk_input *input             = &ctx->input;
+    nk_bool          pressed           = nk_input_is_mouse_pressed(input, NK_BUTTON_LEFT);
+    nk_bool          released          = nk_input_is_mouse_released(input, NK_BUTTON_LEFT);
+    struct nk_vec2   position          = released ? input->mouse.buttons[NK_BUTTON_LEFT].clicked_pos : input->mouse.pos;
+    nk_bool          pressed_on_widget = pressed && nk_input_has_mouse_click_down_in_rect(input, NK_BUTTON_LEFT, bounds, nk_true);
+    nk_bool          on_widget         = NK_INBOX(position.x, position.y, bounds.x, bounds.y, bounds.w, bounds.h);
+    nk_bool          panel_input       = nk_text_selection_panel_accepts_input(ctx, widget_state);
+
+    if (pressed_on_widget && panel_input && shape) {
+      struct nk_text_cursor cursor;
+
+      cursor = nk_text_shape_hit_test(shape, input->mouse.buttons[NK_BUTTON_LEFT].clicked_pos.x - label.x);
+      selection->anchor                = cursor.source_offset;
+      selection->cursor                = cursor.source_offset;
+      selection->affinity              = (unsigned char)cursor.affinity;
+      selection->anchor_affinity       = (unsigned char)cursor.affinity;
+      selection->active                = nk_true;
+      selection->dragging              = nk_true;
+      selection_context->anchor_widget = widget;
+      selection_context->cursor_widget = widget;
+    }
+
+    if (!pressed && selection->active && selection->dragging && panel_input && on_widget && (input->mouse.buttons[NK_BUTTON_LEFT].down || released) && shape) {
+      struct nk_text_cursor cursor;
+
+      cursor                           = nk_text_shape_hit_test(shape, position.x - label.x);
+      selection_context->cursor_widget = widget;
+      selection->cursor                = cursor.source_offset;
+      selection->affinity              = (unsigned char)cursor.affinity;
+
+      if (released) {
+        selection->dragging = nk_false;
+      }
+    }
+
+    if (shape) {
+      nk_text_selection_keyboard(ctx, shape, selection_context, widget);
+    }
+  }
+
+  selected_widget = nk_text_selection_widget_range(selection_context, widget, len, &selected_begin, &selected_end);
+  if (selected_widget && nk_input_is_key_pressed(&ctx->input, NK_KEY_COPY) && ctx->clip.copy) {
+    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin);
+    if (widget == NK_MAX(selection_context->anchor_widget, selection_context->cursor_widget)) {
+      nk_text_selection_copy_finish(ctx, selection_context);
+    }
+  }
+
+  nk_draw_text(&win->buffer, label, str, len, style->font, text.background, text.text);
+  if (shape && selected_widget) {
+    if (selected_begin != selected_end) {
+      struct nk_text_selection_iterator iterator;
+      struct nk_text_selection_span     span;
+      nk_text_selection_iterator_begin(&iterator, shape, selected_begin, selected_end);
+      while (nk_text_selection_iterator_next(&iterator, &span)) {
+        struct nk_rect selected = nk_rect(label.x + span.x, label.y, span.width, label.h);
+        struct nk_rect old_clip = win->buffer.clip;
+        struct nk_rect selected_clip;
+
+        nk_fill_rect(&win->buffer, selected, 0, style->edit.selected_normal);
+        nk_unify(&selected_clip, &old_clip, selected.x, selected.y, selected.x + selected.w, selected.y + selected.h);
+        nk_push_scissor(&win->buffer, selected_clip);
+        nk_draw_text(&win->buffer, label, str, len, style->font, style->edit.selected_normal, style->edit.selected_text_normal);
+        nk_push_scissor(&win->buffer, old_clip);
+      }
+    } else if (nk_text_selection_context_empty(selection_context) && selection_context->cursor_widget == widget) {
+      struct nk_text_cursor cursor = nk_text_shape_cursor_at(shape, selection->cursor, (enum nk_text_affinity)selection->affinity);
+      nk_fill_rect(&win->buffer, nk_rect(label.x + cursor.x, label.y, 1.0f, label.h), 0, style->edit.cursor_normal);
+    }
+  }
+  return old_anchor_widget != selection_context->anchor_widget ||
+         old_cursor_widget != selection_context->cursor_widget ||
+         old_anchor != selection->anchor || old_cursor != selection->cursor;
+}
+
+NK_INTERN int
+nk_text_wrap_draw_end(const char *text, struct nk_text_wrap_line line)
+{
+  while (line.source_end > line.source_begin && (text[line.source_end - 1] == '\r' || text[line.source_end - 1] == '\n')) {
+    line.source_end -= 1;
+  }
+  return line.source_end;
+}
+
+NK_INTERN nk_bool
+nk_text_selectable_wrap_hit_test(struct nk_context *ctx, const struct nk_text_shape *shape,
+                                 const char *str, struct nk_rect bounds, struct nk_vec2 position,
+                                 struct nk_text_cursor *cursor)
+{
+  struct nk_style             *style = &ctx->style;
+  struct nk_text_wrap_iterator iterator;
+  struct nk_text_wrap_line     wrapped;
+  struct nk_rect               line;
+  struct nk_rect               target_bounds;
+  nk_bool                      found = nk_false;
+  float                        bottom;
+
+  cursor->source_offset = 0;
+  cursor->affinity      = NK_TEXT_AFFINITY_LEADING;
+  if (!shape->source_len) {
+    return nk_true;
+  }
+
+  line.x = bounds.x + style->text.padding.x;
+  line.y = bounds.y + style->text.padding.y;
+  line.w = NK_MAX(1.0f, bounds.w - 2.0f * style->text.padding.x);
+  line.h = style->font_size + 2.0f * style->text.padding.y;
+  bottom = bounds.y + bounds.h - style->text.padding.y;
+
+  nk_text_wrap_iterator_begin(&iterator, shape, line.w);
+  while (line.y + line.h <= bottom && nk_text_wrap_iterator_next(&iterator, &wrapped)) {
+    found         = nk_true;
+    target_bounds = line;
+    if (position.y < line.y + line.h) {
+      break;
+    }
+    line.y += line.h;
+  }
+
+  if (found) {
+    int                   draw_end;
+    struct nk_text_shape *line_shape;
+
+    draw_end   = nk_text_wrap_draw_end(str, wrapped);
+    line_shape = nk_text_shape_build_default(ctx, style->font, style->font_size, str + wrapped.source_begin, draw_end - wrapped.source_begin);
+    if (line_shape) {
+      struct nk_text_cursor line_cursor;
+
+      line_cursor           = nk_text_shape_hit_test(line_shape, position.x - target_bounds.x);
+      cursor->source_offset = wrapped.source_begin + line_cursor.source_offset;
+      cursor->affinity      = line_cursor.affinity;
+    }
+  }
+  return found;
+}
+
+NK_INTERN nk_bool
+nk_text_shape_is_cached(struct nk_context *ctx, const struct nk_text_shape *shape,
+                        const struct nk_user_font *font, float font_height, const char *text, int len)
+{
+  struct nk_text_request      request;
+  struct nk_text_cache_entry *entry;
+
+  NK_MEMSET(&request, 0, sizeof(request));
+  request.source      = text;
+  request.source_len  = len;
+  request.font        = font;
+  request.font_height = font_height;
+  entry = nk_text_cache_find(ctx, &request, nk_text_request_hash(&request));
+  return entry && entry->shape == shape;
+}
+
+NK_INTERN void
+nk_text_selectable_wrap_draw(struct nk_context *ctx, const struct nk_text_shape *shape,
+                             const char *str, struct nk_rect bounds, struct nk_color color,
+                             struct nk_text_selection_context *selection_context,
+                             nk_bool selected_widget, int selected_begin, int selected_end,
+                             unsigned int widget, nk_bool shape_cached)
+{
+  struct nk_window             *win       = ctx->current;
+  struct nk_style              *style     = &ctx->style;
+  struct nk_text_selection     *selection = &selection_context->selection;
+  struct nk_text_wrap_iterator  iterator;
+  struct nk_text_wrap_line      wrapped;
+  struct nk_rect                line;
+  int                           source_len = shape->source_len;
+  float                         bottom;
+
+  line.x = bounds.x + style->text.padding.x;
+  line.y = bounds.y + style->text.padding.y;
+  line.w = NK_MAX(1.0f, bounds.w - 2.0f * style->text.padding.x);
+  line.h = style->font_size + 2.0f * style->text.padding.y;
+  bottom = bounds.y + bounds.h - style->text.padding.y;
+
+  nk_text_wrap_iterator_begin(&iterator, shape, line.w);
+  while (line.y + line.h <= bottom && nk_text_wrap_iterator_next(&iterator, &wrapped)) {
+    int                   draw_end;
+    int                   source_begin;
+    int                   line_len;
+    struct nk_text_shape *line_shape = 0;
+
+    draw_end     = nk_text_wrap_draw_end(str, wrapped);
+    source_begin = wrapped.source_begin;
+    line_len     = draw_end - source_begin;
+
+    nk_push_draw_text(&win->buffer, line, str + source_begin, line_len, style->font, style->font_size, style->window.background, color);
+
+    if (selected_widget && shape_cached) {
+      line_shape = nk_text_shape_build_default(ctx, style->font, style->font_size, str + source_begin, line_len);
+    }
+
+    if (line_shape) {
+      int line_begin = NK_CLAMP(source_begin, selected_begin, draw_end) - source_begin;
+      int line_end   = NK_CLAMP(source_begin, selected_end, draw_end) - source_begin;
+      if (line_begin != line_end) {
+        struct nk_text_selection_iterator selection_iterator;
+        struct nk_text_selection_span     span;
+        nk_text_selection_iterator_begin(&selection_iterator, line_shape, line_begin, line_end);
+        while (nk_text_selection_iterator_next(&selection_iterator, &span)) {
+          struct nk_rect selected;
+          struct nk_rect old_clip;
+          struct nk_rect selected_clip;
+
+          selected = nk_rect(line.x + span.x, line.y, span.width, line.h);
+          old_clip = win->buffer.clip;
+
+          nk_fill_rect(&win->buffer, selected, 0, style->edit.selected_normal);
+          nk_unify(&selected_clip, &old_clip, selected.x, selected.y, selected.x + selected.w, selected.y + selected.h);
+          nk_push_scissor(&win->buffer, selected_clip);
+          nk_draw_text(&win->buffer, line, str + source_begin, line_len, style->font, style->edit.selected_normal, style->edit.selected_text_normal);
+          nk_push_scissor(&win->buffer, old_clip);
+        }
+      }
+    }
+
+    if (line_shape && nk_text_selection_context_empty(selection_context) &&
+        selection_context->cursor_widget == widget &&
+        selection->cursor >= source_begin &&
+        (selection->cursor < wrapped.source_end || wrapped.source_end == source_len ||
+         (selection->cursor == wrapped.source_end && selection->affinity == NK_TEXT_AFFINITY_TRAILING &&
+          !(wrapped.break_flags & NK_TEXT_BOUNDARY_LINE_HARD)))) {
+      struct nk_text_cursor cursor;
+
+      cursor = nk_text_shape_cursor_at(line_shape, NK_CLAMP(0, selection->cursor - source_begin, line_len), (enum nk_text_affinity)selection->affinity);
+      nk_fill_rect(&win->buffer, nk_rect(line.x + cursor.x, line.y, 1.0f, line.h), 0, style->edit.cursor_normal);
+    }
+    line.y += line.h;
+  }
+}
+
+NK_INTERN nk_bool
+nk_text_selectable_wrap_widget(struct nk_context *ctx, const char *str, int len, struct nk_color color,
+                               struct nk_text_selection_context *selection_context)
+{
+  struct nk_style             *style     = &ctx->style;
+  struct nk_text_shape        *shape;
+  struct nk_text_selection    *selection = &selection_context->selection;
+  struct nk_rect               bounds;
+  enum nk_widget_layout_states widget_state;
+  unsigned int                 widget;
+  unsigned int                 old_anchor_widget;
+  unsigned int                 old_cursor_widget;
+  nk_bool                      selected_widget;
+  nk_bool                      shape_invalidated = nk_false;
+  nk_bool                      shape_cached;
+  int                          selected_begin = 0;
+  int                          selected_end   = 0;
+  int                          old_anchor;
+  int                          old_cursor;
+
+  widget            = nk_text_selection_widget_begin(ctx, selection_context);
+  old_anchor_widget = selection_context->anchor_widget;
+  old_cursor_widget = selection_context->cursor_widget;
+  old_anchor        = selection->anchor;
+  old_cursor        = selection->cursor;
+  widget_state      = nk_widget(&bounds, ctx);
+  shape             = nk_text_shape_build_default(ctx, style->font, style->font_size, str, len);
+  shape_cached      = shape && nk_text_shape_is_cached(ctx, shape, style->font, style->font_size, str, len);
+
+  if (widget == selection_context->anchor_widget) {
+    selection->anchor = NK_CLAMP(0, selection->anchor, len);
+    if (shape && selection->anchor > 0 && selection->anchor < len) {
+      selection->anchor = nk_text_shape_boundary_previous(shape, selection->anchor + 1, NK_TEXT_BOUNDARY_GRAPHEME);
+    }
+  }
+
+  if (widget == selection_context->cursor_widget) {
+    selection->cursor = NK_CLAMP(0, selection->cursor, len);
+    if (shape && selection->cursor > 0 && selection->cursor < len) {
+      selection->cursor = nk_text_shape_boundary_previous(shape, selection->cursor + 1, NK_TEXT_BOUNDARY_GRAPHEME);
+    }
+  }
+
+  if (widget_state != NK_WIDGET_INVALID && shape) {
+    struct nk_input *input             = &ctx->input;
+    nk_bool          pressed           = nk_input_is_mouse_pressed(input, NK_BUTTON_LEFT);
+    nk_bool          released          = nk_input_is_mouse_released(input, NK_BUTTON_LEFT);
+    struct nk_vec2   position          = released ? input->mouse.buttons[NK_BUTTON_LEFT].clicked_pos : input->mouse.pos;
+    nk_bool          pressed_on_widget = pressed && nk_input_has_mouse_click_down_in_rect(input, NK_BUTTON_LEFT, bounds, nk_true);
+    nk_bool          on_widget         = NK_INBOX(position.x, position.y, bounds.x, bounds.y, bounds.w, bounds.h);
+    nk_bool          panel_input       = nk_text_selection_panel_accepts_input(ctx, widget_state);
+
+    if (pressed_on_widget && panel_input) {
+      struct nk_text_cursor cursor;
+      nk_text_selectable_wrap_hit_test(ctx, shape, str, bounds, input->mouse.buttons[NK_BUTTON_LEFT].clicked_pos, &cursor);
+      shape_invalidated                = nk_true;
+      selection->anchor                = cursor.source_offset;
+      selection->cursor                = cursor.source_offset;
+      selection->affinity              = (unsigned char)cursor.affinity;
+      selection->anchor_affinity       = (unsigned char)cursor.affinity;
+      selection->active                = nk_true;
+      selection->dragging              = nk_true;
+      selection_context->anchor_widget = widget;
+      selection_context->cursor_widget = widget;
+    }
+
+    if (!pressed && selection->active && selection->dragging && panel_input && on_widget && (input->mouse.buttons[NK_BUTTON_LEFT].down || released)) {
+      struct nk_text_cursor cursor;
+
+      nk_text_selectable_wrap_hit_test(ctx, shape, str, bounds, position, &cursor);
+      shape_invalidated                = nk_true;
+      selection_context->cursor_widget = widget;
+      selection->cursor                = cursor.source_offset;
+      selection->affinity              = (unsigned char)cursor.affinity;
+      if (released) {
+        selection->dragging = nk_false;
+      }
+    }
+
+    if (shape_invalidated) {
+      shape        = nk_text_shape_build_default(ctx, style->font, style->font_size, str, len);
+      shape_cached = shape && nk_text_shape_is_cached(ctx, shape, style->font, style->font_size, str, len);
+    }
+
+    if (shape) {
+      nk_text_selection_keyboard(ctx, shape, selection_context, widget);
+    }
+  }
+
+  selected_widget = nk_text_selection_widget_range(selection_context, widget, len, &selected_begin, &selected_end);
+  if (selected_widget && nk_input_is_key_pressed(&ctx->input, NK_KEY_COPY) && ctx->clip.copy) {
+    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin);
+    if (widget == NK_MAX(selection_context->anchor_widget, selection_context->cursor_widget)) {
+      nk_text_selection_copy_finish(ctx, selection_context);
+    }
+  }
+
+  if (shape && widget_state != NK_WIDGET_INVALID) {
+    nk_text_selectable_wrap_draw(ctx, shape, str, bounds, nk_rgb_factor(color, style->text.color_factor),
+                                 selection_context, selected_widget, selected_begin, selected_end, widget,
+                                 shape_cached);
+  }
+  return old_anchor_widget != selection_context->anchor_widget ||
+         old_cursor_widget != selection_context->cursor_widget ||
+         old_anchor != selection->anchor || old_cursor != selection->cursor;
+}
+
+NK_INTERN void
+nk_text_layout_auto_height(struct nk_context *ctx, const char *str, int len)
+{
+  struct nk_panel             *layout = ctx->current->layout;
+  struct nk_text_wrap_iterator iterator;
+  struct nk_text_wrap_line     line;
+  struct nk_text_shape        *shape;
+  struct nk_vec2               padding = ctx->style.text.padding;
+  float                        width;
+  float                        line_height;
+  int                          line_count = 0;
+
+  width = nk_layout_row_calculate_usable_space(&ctx->style, layout->type, layout->bounds.w, 1);
+  width = NK_MAX(1.0f, width - 2.0f * padding.x);
+
+  shape = nk_text_shape_build_default(ctx, ctx->style.font, ctx->style.font_size, str, len);
+  if (shape) {
+    nk_text_wrap_iterator_begin(&iterator, shape, width);
+    while (nk_text_wrap_iterator_next(&iterator, &line)) {
+      line_count += 1;
+    }
+  }
+
+  line_count  = NK_MAX(1, line_count);
+  line_height = ctx->style.font_size + 2.0f * padding.y;
+  nk_layout_row_dynamic(ctx, line_height * (float)line_count + 2.0f * padding.y, 1);
+}
+
+NK_API nk_bool
+nk_text_ex(struct nk_context *ctx, const char *str, int len, const struct nk_text_options *options)
+{
+  struct nk_text_selection_context *selection;
+
+  NK_ASSERT(ctx);
+  NK_ASSERT(options);
+  if (!ctx || !options) {
+    return nk_false;
+  }
+
+  if ((options->flags & (NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_AUTO_HEIGHT)) ==
+      (NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_AUTO_HEIGHT)) {
+    nk_text_layout_auto_height(ctx, str, len);
+  }
+
+  if (options->flags & NK_TEXT_OPTION_SELECTABLE) {
+    selection = options->selection ? options->selection : nk_text_selection_panel_context(ctx);
+    if (options->flags & NK_TEXT_OPTION_WRAP) {
+      return nk_text_selectable_wrap_widget(ctx, str, len, options->color, selection);
+    }
+    return nk_text_selectable_widget(ctx, str, len, options->alignment, options->color, selection);
+  }
+
+  if (options->flags & NK_TEXT_OPTION_WRAP) {
+    nk_text_wrap_widget_colored(ctx, str, len, options->color);
+  } else {
+    nk_text_widget_colored(ctx, str, len, options->alignment, options->color);
+  }
+  return nk_false;
+}
+
+#ifdef NK_INCLUDE_STANDARD_VARARGS
+NK_API nk_bool
+nk_textfv_ex(struct nk_context *ctx, const struct nk_text_options *options, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_text_ex(ctx, buf, nk_strlen(buf), options);
+}
+
+NK_API nk_bool
+nk_textf_ex(struct nk_context *ctx, const struct nk_text_options *options, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_ex(ctx, options, fmt, args);
+  va_end(args);
+  return result;
+}
+#endif
+
+NK_API nk_bool
+nk_text_selectable_ctx(struct nk_context *ctx, const char *str, int len, nk_flags align,
+                       struct nk_text_selection_context *selection)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = align;
+  options.flags     = NK_TEXT_OPTION_SELECTABLE;
+  options.color     = ctx->style.text.color;
+  options.selection = selection;
+  return nk_text_ex(ctx, str, len, &options);
+}
+NK_API nk_bool
+nk_text_selectable_colored_ctx(struct nk_context *ctx, const char *str, int len, nk_flags align, struct nk_color color,
+                               struct nk_text_selection_context *selection)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = align;
+  options.flags     = NK_TEXT_OPTION_SELECTABLE;
+  options.color     = color;
+  options.selection = selection;
+  return nk_text_ex(ctx, str, len, &options);
+}
+NK_API nk_bool
+nk_label_selectable_ctx(struct nk_context *ctx, const char *str, nk_flags align,
+                        struct nk_text_selection_context *selection)
+{
+  return nk_text_selectable_ctx(ctx, str, nk_strlen(str), align, selection);
+}
+NK_API nk_bool
+nk_label_selectable_colored_ctx(struct nk_context *ctx, const char *str, nk_flags align, struct nk_color color,
+                                struct nk_text_selection_context *selection)
+{
+  return nk_text_selectable_colored_ctx(ctx, str, nk_strlen(str), align, color, selection);
+}
+NK_API nk_bool
+nk_text_selectable(struct nk_context *ctx, const char *str, int len, nk_flags align)
+{
+  return nk_text_selectable_ctx(ctx, str, len, align, NULL);
+}
+NK_API nk_bool
+nk_text_selectable_colored(struct nk_context *ctx, const char *str, int len, nk_flags align, struct nk_color color)
+{
+  return nk_text_selectable_colored_ctx(ctx, str, len, align, color, NULL);
+}
+NK_API nk_bool
+nk_label_selectable(struct nk_context *ctx, const char *str, nk_flags align)
+{
+  return nk_text_selectable(ctx, str, nk_strlen(str), align);
+}
+NK_API nk_bool
+nk_label_selectable_colored(struct nk_context *ctx, const char *str, nk_flags align, struct nk_color color)
+{
+  return nk_text_selectable_colored(ctx, str, nk_strlen(str), align, color);
+}
+NK_API nk_bool
+nk_text_selectable_wrap_ctx(struct nk_context *ctx, const char *str, int len, struct nk_text_selection_context *selection)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = NK_TEXT_LEFT;
+  options.flags     = NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_SELECTABLE;
+  options.color     = ctx->style.text.color;
+  options.selection = selection;
+  return nk_text_ex(ctx, str, len, &options);
+}
+NK_API nk_bool
+nk_text_selectable_wrap_colored_ctx(struct nk_context *ctx, const char *str, int len, struct nk_color color, struct nk_text_selection_context *selection)
+{
+  struct nk_text_options options;
+
+  NK_MEMSET(&options, 0, sizeof(options));
+  options.alignment = NK_TEXT_LEFT;
+  options.flags     = NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_SELECTABLE;
+  options.color     = color;
+  options.selection = selection;
+  return nk_text_ex(ctx, str, len, &options);
+}
+NK_API nk_bool
+nk_label_selectable_wrap_ctx(struct nk_context *ctx, const char *str, struct nk_text_selection_context *selection)
+{
+  return nk_text_selectable_wrap_ctx(ctx, str, nk_strlen(str), selection);
+}
+NK_API nk_bool
+nk_label_selectable_colored_wrap_ctx(struct nk_context *ctx, const char *str, struct nk_color color, struct nk_text_selection_context *selection)
+{
+  return nk_text_selectable_wrap_colored_ctx(ctx, str, nk_strlen(str), color, selection);
+}
+NK_API nk_bool
+nk_text_selectable_wrap(struct nk_context *ctx, const char *str, int len)
+{
+  return nk_text_selectable_wrap_ctx(ctx, str, len, NULL);
+}
+NK_API nk_bool
+nk_text_selectable_wrap_colored(struct nk_context *ctx, const char *str, int len, struct nk_color color)
+{
+  return nk_text_selectable_wrap_colored_ctx(ctx, str, len, color, NULL);
+}
+NK_API nk_bool
+nk_label_selectable_wrap(struct nk_context *ctx, const char *str)
+{
+  return nk_text_selectable_wrap(ctx, str, nk_strlen(str));
+}
+NK_API nk_bool
+nk_label_selectable_colored_wrap(struct nk_context *ctx, const char *str, struct nk_color color)
+{
+  return nk_text_selectable_wrap_colored(ctx, str, nk_strlen(str), color);
+}
+#ifdef NK_INCLUDE_STANDARD_VARARGS
+NK_API nk_bool
+nk_labelfv_selectable_ctx(struct nk_context *ctx, nk_flags align, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_ctx(ctx, buf, align, selection);
+}
+NK_API nk_bool
+nk_labelfv_selectable_colored_ctx(struct nk_context *ctx, nk_flags align, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_colored_ctx(ctx, buf, align, color, selection);
+}
+NK_API nk_bool
+nk_labelfv_selectable(struct nk_context *ctx, nk_flags align, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable(ctx, buf, align);
+}
+NK_API nk_bool
+nk_labelfv_selectable_colored(struct nk_context *ctx, nk_flags align, struct nk_color color, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_colored(ctx, buf, align, color);
+}
+NK_API nk_bool
+nk_labelf_selectable_ctx(struct nk_context *ctx, nk_flags align, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_ctx(ctx, align, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable_colored_ctx(struct nk_context *ctx, nk_flags align, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_colored_ctx(ctx, align, color, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable(struct nk_context *ctx, nk_flags align, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable(ctx, align, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable_colored(struct nk_context *ctx, nk_flags align, struct nk_color color, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_colored(ctx, align, color, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textfv_selectable_ctx(struct nk_context *ctx, nk_flags align, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_ctx(ctx, align, selection, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable_colored_ctx(struct nk_context *ctx, nk_flags align, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_colored_ctx(ctx, align, color, selection, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable(struct nk_context *ctx, nk_flags align, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable(ctx, align, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable_colored(struct nk_context *ctx, nk_flags align, struct nk_color color, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_colored(ctx, align, color, fmt, args);
+}
+NK_API nk_bool
+nk_textf_selectable_ctx(struct nk_context *ctx, nk_flags align, struct nk_text_selection_context *selection,
+                        const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_ctx(ctx, align, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable_colored_ctx(struct nk_context *ctx, nk_flags align, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_colored_ctx(ctx, align, color, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable(struct nk_context *ctx, nk_flags align, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable(ctx, align, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable_colored(struct nk_context *ctx, nk_flags align, struct nk_color color, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_colored(ctx, align, color, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelfv_selectable_wrap_ctx(struct nk_context *ctx, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_wrap_ctx(ctx, buf, selection);
+}
+NK_API nk_bool
+nk_labelfv_selectable_colored_wrap_ctx(struct nk_context *ctx, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_colored_wrap_ctx(ctx, buf, color, selection);
+}
+NK_API nk_bool
+nk_labelfv_selectable_wrap(struct nk_context *ctx, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_wrap(ctx, buf);
+}
+NK_API nk_bool
+nk_labelfv_selectable_colored_wrap(struct nk_context *ctx, struct nk_color color, const char *fmt, va_list args)
+{
+  char buf[256];
+  nk_strfmt(buf, NK_LEN(buf), fmt, args);
+  return nk_label_selectable_colored_wrap(ctx, buf, color);
+}
+NK_API nk_bool
+nk_labelf_selectable_wrap_ctx(struct nk_context *ctx, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_wrap_ctx(ctx, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable_colored_wrap_ctx(struct nk_context *ctx, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_colored_wrap_ctx(ctx, color, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable_wrap(struct nk_context *ctx, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_wrap(ctx, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_labelf_selectable_colored_wrap(struct nk_context *ctx, struct nk_color color, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_labelfv_selectable_colored_wrap(ctx, color, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textfv_selectable_wrap_ctx(struct nk_context *ctx, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_wrap_ctx(ctx, selection, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable_wrap_colored_ctx(struct nk_context *ctx, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_colored_wrap_ctx(ctx, color, selection, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable_wrap(struct nk_context *ctx, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_wrap(ctx, fmt, args);
+}
+NK_API nk_bool
+nk_textfv_selectable_wrap_colored(struct nk_context *ctx, struct nk_color color, const char *fmt, va_list args)
+{
+  return nk_labelfv_selectable_colored_wrap(ctx, color, fmt, args);
+}
+NK_API nk_bool
+nk_textf_selectable_wrap_ctx(struct nk_context *ctx, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_wrap_ctx(ctx, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable_wrap_colored_ctx(struct nk_context *ctx, struct nk_color color, struct nk_text_selection_context *selection, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_wrap_colored_ctx(ctx, color, selection, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable_wrap(struct nk_context *ctx, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_wrap(ctx, fmt, args);
+  va_end(args);
+  return result;
+}
+NK_API nk_bool
+nk_textf_selectable_wrap_colored(struct nk_context *ctx, struct nk_color color, const char *fmt, ...)
+{
+  nk_bool result;
+  va_list args;
+  va_start(args, fmt);
+  result = nk_textfv_selectable_wrap_colored(ctx, color, fmt, args);
+  va_end(args);
+  return result;
+}
+#endif
 
 /* ===============================================================
  *
@@ -23420,6 +25219,7 @@ nk_scrollbar_behavior(nk_flags             *state,
   unsigned int left_mouse_clicked;
   int          left_mouse_click_in_cursor;
   float        scroll_delta;
+  nk_bool      shift_down;
 
   nk_widget_state_reset(state);
   if (!in) {
@@ -23433,7 +25233,7 @@ nk_scrollbar_behavior(nk_flags             *state,
     *state = NK_WIDGET_STATE_HOVERED;
   }
 
-  nk_bool shift_down = nk_input_is_key_down(in, NK_KEY_SHIFT);
+  shift_down = nk_input_is_key_down(in, NK_KEY_SHIFT);
 
   if (o == NK_VERTICAL) {
     scroll_delta = shift_down ? 0.0f : in->mouse.scroll_delta.y;
@@ -23819,49 +25619,90 @@ NK_INTERN void
 nk_textedit_makeundo_replace(struct nk_text_edit *, int, int, int);
 #define NK_TEXT_HAS_SELECTION(s) ((s)->select_start != (s)->select_end)
 
-NK_INTERN float
-nk_textedit_get_width(const struct nk_text_edit *edit, int line_start, int char_id, const struct nk_user_font *font)
+NK_INTERN int
+nk_textedit_byte_offset(const struct nk_text_edit *edit, int rune_offset)
 {
-  int                   len     = 0;
-  nk_rune               unicode = 0;
-  const char           *begin   = nk_str_at_const(&edit->string, line_start, &unicode, &len);
-  const char           *str     = nk_str_at_const(&edit->string, line_start + char_id, &unicode, &len);
-  const char           *end     = nk_str_get_const(&edit->string) + nk_str_len_char(&edit->string);
-  const char           *line_end = begin;
-  struct nk_text_shape *shape;
+  const char *text;
+  nk_rune     rune;
+  int         len;
 
-  while (line_end < end && *line_end != '\n') {
-    line_end++;
+  text = nk_str_get_const(&edit->string);
+  if (rune_offset >= edit->string.len) {
+    return nk_str_len_char(&edit->string);
   }
-  shape = nk_text_shape_build_default(edit->context, font, edit->context->style.font_size, begin, (int)(line_end - begin));
-  return shape && str < line_end ? nk_text_shape_width(shape, (int)(str - begin), (int)(str - begin) + len) : 0.0f;
+  return (int)(nk_str_at_const(&edit->string, rune_offset, &rune, &len) - text);
+}
+
+NK_INTERN int
+nk_textedit_rune_offset(const struct nk_text_edit *edit, int byte_offset)
+{
+  return nk_utf_len(nk_str_get_const(&edit->string), byte_offset);
+}
+
+NK_INTERN struct nk_text_shape *
+nk_textedit_line_shape(struct nk_text_edit *edit, int line_start, const struct nk_user_font *font)
+{
+  const char *text;
+  const char *begin;
+  const char *line_end;
+  const char *text_end;
+
+  text = nk_str_get_const(&edit->string);
+  if (!text) {
+    return NULL;
+  }
+
+  begin    = text + nk_textedit_byte_offset(edit, line_start);
+  line_end = begin;
+  text_end = text + nk_str_len_char(&edit->string);
+
+  while (line_end < text_end && *line_end != '\n') {
+    line_end += 1;
+  }
+  return nk_text_shape_build_default(edit->context, font, edit->context->style.font_size, begin, (int)(line_end - begin));
 }
 NK_INTERN void
 nk_textedit_layout_row(struct nk_text_edit_row *r, struct nk_text_edit *edit, int line_start_id, float row_height, const struct nk_user_font *font)
 {
-  int                  l;
-  int                  glyphs = 0;
-  nk_rune              unicode;
-  const char          *remaining;
-  int                  len  = nk_str_len_char(&edit->string);
-  const char          *end  = nk_str_get_const(&edit->string) + len;
-  const char          *text = nk_str_at_const(&edit->string, line_start_id, &unicode, &l);
-  const struct nk_vec2 size = nk_text_calculate_text_bounds(edit->context, font, text, (int)(end - text), row_height, &remaining, 0, &glyphs, NK_STOP_ON_NEW_LINE);
+  int            l;
+  int            glyphs = 0;
+  nk_rune        unicode;
+  const char    *remaining;
+  int            len;
+  const char    *end;
+  const char    *text;
+  struct nk_vec2 size;
+
+  len = nk_str_len_char(&edit->string);
+  end = nk_str_get_const(&edit->string);
 
   r->x0               = 0.0f;
-  r->x1               = size.x;
-  r->baseline_y_delta = size.y;
+  r->x1               = 0.0f;
+  r->baseline_y_delta = row_height;
   r->ymin             = 0.0f;
-  r->ymax             = size.y;
-  r->num_chars        = glyphs;
+  r->ymax             = row_height;
+  r->num_chars        = 0;
+
+  if (!end || line_start_id >= edit->string.len) {
+    return;
+  }
+
+  end += len;
+  text = nk_str_at_const(&edit->string, line_start_id, &unicode, &l);
+  size = nk_text_calculate_text_bounds(edit->context, font, text, (int)(end - text), row_height,
+                                       &remaining, 0, &glyphs, NK_STOP_ON_NEW_LINE);
+
+  r->x1        = size.x;
+  r->num_chars = glyphs;
 }
 NK_INTERN int
-nk_textedit_locate_coord(struct nk_text_edit *edit, float x, float y, const struct nk_user_font *font, float row_height)
+nk_textedit_locate_coord(struct nk_text_edit *edit, float x, float y, const struct nk_user_font *font,
+                         float row_height, enum nk_text_affinity *affinity)
 {
   struct nk_text_edit_row r;
   int                     n      = edit->string.len;
-  float                   base_y = 0, prev_x;
-  int                     i      = 0, k;
+  float                   base_y = 0;
+  int                     i      = 0;
 
   r.x0 = r.x1 = 0;
   r.ymin = r.ymax = 0;
@@ -23871,10 +25712,12 @@ nk_textedit_locate_coord(struct nk_text_edit *edit, float x, float y, const stru
   while (i < n) {
     nk_textedit_layout_row(&r, edit, i, row_height, font);
     if (r.num_chars <= 0) {
+      *affinity = NK_TEXT_AFFINITY_TRAILING;
       return n;
     }
 
     if (i == 0 && y < base_y + r.ymin) {
+      *affinity = NK_TEXT_AFFINITY_LEADING;
       return 0;
     }
 
@@ -23888,35 +25731,27 @@ nk_textedit_locate_coord(struct nk_text_edit *edit, float x, float y, const stru
 
   /* below all text, return 'after' last character */
   if (i >= n) {
+    *affinity = NK_TEXT_AFFINITY_TRAILING;
     return n;
   }
 
   /* check if it's before the beginning of the line */
   if (x < r.x0) {
+    *affinity = NK_TEXT_AFFINITY_LEADING;
     return i;
   }
 
-  /* check if it's before the end of the line */
   if (x < r.x1) {
-    /* search characters in row for one that straddles 'x' */
-    k      = i;
-    prev_x = r.x0;
-    for (i = 0; i < r.num_chars; ++i) {
-      float w = nk_textedit_get_width(edit, k, i, font);
-      if (x < prev_x + w) {
-        if (x < prev_x + w / 2) {
-          return k + i;
-        } else {
-          return k + i + 1;
-        }
-      }
-      prev_x += w;
+    struct nk_text_shape *shape = nk_textedit_line_shape(edit, i, font);
+    if (shape) {
+      struct nk_text_cursor cursor = nk_text_shape_hit_test(shape, x - r.x0);
+      int line_byte_offset = nk_textedit_byte_offset(edit, i);
+      *affinity = cursor.affinity;
+      return nk_textedit_rune_offset(edit, line_byte_offset + cursor.source_offset);
     }
-    /* shouldn't happen, but if it does, fall through to end-of-line case */
   }
 
-  /* if the last character is a newline, return that.
-   * otherwise return 'after' the last character */
+  *affinity = NK_TEXT_AFFINITY_TRAILING;
   if (nk_str_rune_at(&edit->string, i + r.num_chars - 1) == '\n') {
     return i + r.num_chars - 1;
   } else {
@@ -23928,79 +25763,62 @@ nk_textedit_click(struct nk_text_edit *state, float x, float y, const struct nk_
 {
   /* API click: on mouse down, move the cursor to the clicked location,
    * and reset the selection */
-  state->cursor          = nk_textedit_locate_coord(state, x, y, font, row_height);
-  state->select_start    = state->cursor;
-  state->select_end      = state->cursor;
-  state->has_preferred_x = 0;
+  enum nk_text_affinity affinity;
+  state->cursor                = nk_textedit_locate_coord(state, x, y, font, row_height, &affinity);
+  state->cursor_affinity       = (unsigned char)affinity;
+  state->select_start          = state->cursor;
+  state->select_end            = state->cursor;
+  state->select_start_affinity = state->cursor_affinity;
+  state->has_preferred_x       = 0;
 }
 NK_LIB void
 nk_textedit_drag(struct nk_text_edit *state, float x, float y, const struct nk_user_font *font, float row_height)
 {
   /* API drag: on mouse drag, move the cursor and selection endpoint
    * to the clicked location */
-  int p = nk_textedit_locate_coord(state, x, y, font, row_height);
+  enum nk_text_affinity affinity;
+  int p = nk_textedit_locate_coord(state, x, y, font, row_height, &affinity);
   if (state->select_start == state->select_end) {
-    state->select_start = state->cursor;
+    state->select_start          = state->cursor;
+    state->select_start_affinity = state->cursor_affinity;
   }
-  state->cursor = state->select_end = p;
+  state->cursor          = state->select_end = p;
+  state->cursor_affinity = (unsigned char)affinity;
 }
 NK_INTERN void
-nk_textedit_find_charpos(struct nk_text_find *find, struct nk_text_edit *state, int n, int single_line, const struct nk_user_font *font, float row_height)
+nk_textedit_find_charpos(struct nk_text_find *find, struct nk_text_edit *state, int n, int single_line,
+                         const struct nk_user_font *font, float row_height, enum nk_text_affinity affinity)
 {
-  /* find the x/y location of a character, and remember info about the previous
-   * row in case we get a move-up event (for page up, we'll have to rescan) */
   struct nk_text_edit_row r;
-  int                     prev_start = 0;
-  int                     z          = state->string.len;
-  int                     i          = 0, first;
+  int                     previous = 0;
+  int                     first    = 0;
 
   nk_zero_struct(r);
-  if (n == z) {
-    /* if it's at the end, then find the last line -- simpler than trying to
-    explicitly handle this case in the regular code */
-    nk_textedit_layout_row(&r, state, 0, row_height, font);
-    if (single_line) {
-      find->first_char = 0;
-      find->length     = z;
-    } else {
-      while (i < z) {
-        prev_start  = i;
-        i          += r.num_chars;
-        nk_textedit_layout_row(&r, state, i, row_height, font);
-      }
+  find->y = 0.0f;
+  while (1) {
+    nk_bool ends_with_newline;
 
-      find->first_char = i;
-      find->length     = r.num_chars;
-    }
-    find->x          = r.x1;
-    find->y          = r.ymin;
-    find->height     = r.ymax - r.ymin;
-    find->prev_first = prev_start;
-    return;
-  }
-
-  /* search rows to find the one that straddles character n */
-  find->y = 0;
-
-  for (;;) {
-    nk_textedit_layout_row(&r, state, i, row_height, font);
-    if (n < i + r.num_chars) {
+    nk_textedit_layout_row(&r, state, first, row_height, font);
+    ends_with_newline = r.num_chars > 0 && nk_str_rune_at(&state->string, first + r.num_chars - 1) == '\n';
+    if (single_line || n < first + r.num_chars ||
+        (n == first + r.num_chars && !ends_with_newline) || !r.num_chars) {
       break;
     }
-    prev_start  = i;
-    i          += r.num_chars;
-    find->y    += r.baseline_y_delta;
+    previous = first;
+    first    += r.num_chars;
+    find->y  += r.baseline_y_delta;
   }
 
-  find->first_char = first = i;
-  find->length             = r.num_chars;
-  find->height             = r.ymax - r.ymin;
-  find->prev_first         = prev_start;
+  find->first_char = first;
+  find->length     = r.num_chars;
+  find->height     = r.ymax - r.ymin;
+  find->prev_first = previous;
 
-  /* now scan to find xpos */
-  find->x = r.x0;
-  for (i = 0; first + i < n; ++i) {
-    find->x += nk_textedit_get_width(state, first, i, font);
+  {
+    struct nk_text_shape *shape = nk_textedit_line_shape(state, first, font);
+    int                   line_byte_offset = nk_textedit_byte_offset(state, first);
+    int                   byte_offset      = nk_textedit_byte_offset(state, n) - line_byte_offset;
+    find->x = shape ? nk_text_shape_cursor_at(shape, byte_offset, affinity).x : r.x0;
   }
 }
 NK_INTERN void
@@ -24012,14 +25830,17 @@ nk_textedit_clamp(struct nk_text_edit *state)
     if (state->select_start > n) {
       state->select_start = n;
     }
+
     if (state->select_end > n) {
       state->select_end = n;
     }
+
     /* if clamping forced them to be equal, move the cursor to match */
     if (state->select_start == state->select_end) {
       state->cursor = state->select_start;
     }
   }
+
   if (state->cursor > n) {
     state->cursor = n;
   }
@@ -24040,12 +25861,14 @@ nk_textedit_delete_selection(struct nk_text_edit *state)
   if (NK_TEXT_HAS_SELECTION(state)) {
     if (state->select_start < state->select_end) {
       nk_textedit_delete(state, state->select_start, state->select_end - state->select_start);
-      state->select_end = state->cursor = state->select_start;
+      state->select_end      = state->cursor = state->select_start;
+      state->cursor_affinity = state->select_start_affinity;
     } else {
       nk_textedit_delete(state, state->select_end, state->select_start - state->select_end);
       state->select_start = state->cursor = state->select_end;
     }
-    state->has_preferred_x = 0;
+    state->select_start_affinity = state->cursor_affinity;
+    state->has_preferred_x       = 0;
   }
 }
 NK_INTERN void
@@ -24053,9 +25876,12 @@ nk_textedit_sortselection(struct nk_text_edit *state)
 {
   /* canonicalize the selection so start <= end */
   if (state->select_end < state->select_start) {
-    int temp            = state->select_end;
-    state->select_end   = state->select_start;
-    state->select_start = temp;
+    int           temp           = state->select_end;
+    unsigned char temp_affinity  = state->cursor_affinity;
+    state->select_end            = state->select_start;
+    state->cursor_affinity       = state->select_start_affinity;
+    state->select_start          = temp;
+    state->select_start_affinity = temp_affinity;
   }
 }
 NK_INTERN void
@@ -24065,6 +25891,7 @@ nk_textedit_move_to_first(struct nk_text_edit *state)
   if (NK_TEXT_HAS_SELECTION(state)) {
     nk_textedit_sortselection(state);
     state->cursor          = state->select_start;
+    state->cursor_affinity = state->select_start_affinity;
     state->select_end      = state->select_start;
     state->has_preferred_x = 0;
   }
@@ -24078,6 +25905,7 @@ nk_textedit_move_to_last(struct nk_text_edit *state)
     nk_textedit_clamp(state);
     state->cursor          = state->select_end;
     state->select_start    = state->select_end;
+    state->select_start_affinity = state->cursor_affinity;
     state->has_preferred_x = 0;
   }
 }
@@ -24099,7 +25927,7 @@ nk_is_word_boundary(struct nk_text_edit *state, int idx)
 #endif
 }
 NK_INTERN int
-nk_textedit_move_to_word_previous(struct nk_text_edit *state)
+nk_textedit_move_to_word_previous_fallback(struct nk_text_edit *state)
 {
   int c = state->cursor - 1;
   if (c > 0) {
@@ -24117,7 +25945,7 @@ nk_textedit_move_to_word_previous(struct nk_text_edit *state)
   return c;
 }
 NK_INTERN int
-nk_textedit_move_to_word_next(struct nk_text_edit *state)
+nk_textedit_move_to_word_next_fallback(struct nk_text_edit *state)
 {
   const int len = state->string.len;
   int       c   = state->cursor;
@@ -24134,12 +25962,89 @@ nk_textedit_move_to_word_next(struct nk_text_edit *state)
 
   return c;
 }
+NK_INTERN int
+nk_textedit_move_to_boundary(struct nk_text_edit *state, const struct nk_user_font *font, nk_flags flags, nk_bool next)
+{
+  const char           *text = nk_str_get_const(&state->string);
+  int                   len  = nk_str_len_char(&state->string);
+  int                   byte_offset;
+  struct nk_text_shape *shape;
+
+  if (!len) {
+    return 0;
+  }
+
+  shape = nk_text_shape_build_default(state->context, font, state->context->style.font_size, text, len);
+  if (!shape) {
+    if (flags == NK_TEXT_BOUNDARY_WORD) {
+      return next ? nk_textedit_move_to_word_next_fallback(state) : nk_textedit_move_to_word_previous_fallback(state);
+    }
+    return NK_CLAMP(0, state->cursor + (next ? 1 : -1), state->string.len);
+  }
+
+  byte_offset = nk_textedit_byte_offset(state, state->cursor);
+  byte_offset = next ? nk_text_shape_boundary_next(shape, byte_offset, flags)
+                     : nk_text_shape_boundary_previous(shape, byte_offset, flags);
+  return nk_textedit_rune_offset(state, byte_offset);
+}
+NK_INTERN int
+nk_textedit_move_visual(struct nk_text_edit *state, const struct nk_user_font *font, float row_height, int direction)
+{
+  struct nk_text_find   find;
+  struct nk_text_shape *shape;
+  struct nk_text_cursor cursor;
+  int                   line_byte_offset;
+
+  nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                           (enum nk_text_affinity)state->cursor_affinity);
+  shape = nk_textedit_line_shape(state, find.first_char, font);
+  if (!shape) {
+    return nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_GRAPHEME, direction > 0);
+  }
+
+  line_byte_offset     = nk_textedit_byte_offset(state, find.first_char);
+  cursor.source_offset = nk_textedit_byte_offset(state, state->cursor) - line_byte_offset;
+  cursor.affinity      = (enum nk_text_affinity)state->cursor_affinity;
+  cursor               = nk_text_shape_cursor_move(shape, cursor, direction);
+  state->cursor_affinity = (unsigned char)cursor.affinity;
+  return nk_textedit_rune_offset(state, line_byte_offset + cursor.source_offset);
+}
+NK_INTERN void
+nk_textedit_collapse_visual(struct nk_text_edit *state, const struct nk_user_font *font, float row_height, int direction)
+{
+  struct nk_text_find start;
+  struct nk_text_find end;
+  nk_bool             use_start;
+
+  nk_textedit_find_charpos(&start, state, state->select_start, state->single_line, font, row_height,
+                           (enum nk_text_affinity)state->select_start_affinity);
+  nk_textedit_find_charpos(&end, state, state->select_end, state->single_line, font, row_height,
+                           (enum nk_text_affinity)state->cursor_affinity);
+
+  if (start.y == end.y) {
+    use_start = direction < 0 ? start.x < end.x : start.x > end.x;
+  } else {
+    use_start = direction < 0 ? state->select_start < state->select_end : state->select_start > state->select_end;
+  }
+
+  if (use_start) {
+    state->cursor          = state->select_start;
+    state->cursor_affinity = state->select_start_affinity;
+  } else {
+    state->cursor = state->select_end;
+  }
+  state->select_start          = state->cursor;
+  state->select_end            = state->cursor;
+  state->select_start_affinity = state->cursor_affinity;
+  state->has_preferred_x       = 0;
+}
 NK_INTERN void
 nk_textedit_prep_selection_at_cursor(struct nk_text_edit *state)
 {
   /* update selection and cursor to match each other */
   if (!NK_TEXT_HAS_SELECTION(state)) {
     state->select_start = state->select_end = state->cursor;
+    state->select_start_affinity = state->cursor_affinity;
   } else {
     state->cursor = state->select_end;
   }
@@ -24177,6 +26082,7 @@ nk_textedit_paste(struct nk_text_edit *state, char const *ctext, int len)
   if (nk_str_insert_text_char(&state->string, state->cursor, text, len)) {
     nk_textedit_makeundo_insert(state, state->cursor, glyphs);
     state->cursor          += glyphs;
+    state->cursor_affinity  = NK_TEXT_AFFINITY_TRAILING;
     state->has_preferred_x  = 0;
     return 1;
   }
@@ -24221,6 +26127,7 @@ nk_textedit_text(struct nk_text_edit *state, const char *text, int total_len)
       }
       if (nk_str_insert_text_utf8(&state->string, state->cursor, text + text_len, 1)) {
         ++state->cursor;
+        state->cursor_affinity = NK_TEXT_AFFINITY_TRAILING;
         state->has_preferred_x = 0;
       }
     } else {
@@ -24228,6 +26135,7 @@ nk_textedit_text(struct nk_text_edit *state, const char *text, int total_len)
       if (nk_str_insert_text_utf8(&state->string, state->cursor, text + text_len, 1)) {
         nk_textedit_makeundo_insert(state, state->cursor, 1);
         state->cursor          = NK_MIN(state->cursor + 1, state->string.len);
+        state->cursor_affinity = NK_TEXT_AFFINITY_TRAILING;
         state->has_preferred_x = 0;
       }
     }
@@ -24282,18 +26190,16 @@ retry:
       nk_textedit_clamp(state);
       nk_textedit_prep_selection_at_cursor(state);
       /* move selection left */
-      if (state->select_end > 0) {
-        --state->select_end;
-      }
+      state->select_end = nk_textedit_move_visual(state, font, row_height, -1);
       state->cursor          = state->select_end;
       state->has_preferred_x = 0;
     } else {
       /* if currently there's a selection,
        * move cursor to start of selection */
       if (NK_TEXT_HAS_SELECTION(state)) {
-        nk_textedit_move_to_first(state);
-      } else if (state->cursor > 0) {
-        --state->cursor;
+        nk_textedit_collapse_visual(state, font, row_height, -1);
+      } else {
+        state->cursor = nk_textedit_move_visual(state, font, row_height, -1);
       }
       state->has_preferred_x = 0;
     }
@@ -24303,7 +26209,7 @@ retry:
     if (shift_mod) {
       nk_textedit_prep_selection_at_cursor(state);
       /* move selection right */
-      ++state->select_end;
+      state->select_end = nk_textedit_move_visual(state, font, row_height, 1);
       nk_textedit_clamp(state);
       state->cursor          = state->select_end;
       state->has_preferred_x = 0;
@@ -24311,9 +26217,9 @@ retry:
       /* if currently there's a selection,
        * move cursor to end of selection */
       if (NK_TEXT_HAS_SELECTION(state)) {
-        nk_textedit_move_to_last(state);
+        nk_textedit_collapse_visual(state, font, row_height, 1);
       } else {
-        ++state->cursor;
+        state->cursor = nk_textedit_move_visual(state, font, row_height, 1);
       }
       nk_textedit_clamp(state);
       state->has_preferred_x = 0;
@@ -24325,14 +26231,16 @@ retry:
       if (!NK_TEXT_HAS_SELECTION(state)) {
         nk_textedit_prep_selection_at_cursor(state);
       }
-      state->cursor     = nk_textedit_move_to_word_previous(state);
+      state->cursor     = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_false);
       state->select_end = state->cursor;
+      state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
       nk_textedit_clamp(state);
     } else {
       if (NK_TEXT_HAS_SELECTION(state)) {
         nk_textedit_move_to_first(state);
       } else {
-        state->cursor = nk_textedit_move_to_word_previous(state);
+        state->cursor = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_false);
+        state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
         nk_textedit_clamp(state);
       }
     }
@@ -24343,23 +26251,24 @@ retry:
       if (!NK_TEXT_HAS_SELECTION(state)) {
         nk_textedit_prep_selection_at_cursor(state);
       }
-      state->cursor     = nk_textedit_move_to_word_next(state);
+      state->cursor     = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_true);
       state->select_end = state->cursor;
+      state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
       nk_textedit_clamp(state);
     } else {
       if (NK_TEXT_HAS_SELECTION(state)) {
         nk_textedit_move_to_last(state);
       } else {
-        state->cursor = nk_textedit_move_to_word_next(state);
+        state->cursor = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_true);
+        state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
         nk_textedit_clamp(state);
       }
     }
     break;
 
   case NK_KEY_DOWN: {
-    struct nk_text_find     find;
-    struct nk_text_edit_row row;
-    int                     i, sel = shift_mod;
+    struct nk_text_find find;
+    int                 sel = shift_mod;
 
     if (state->single_line) {
       /* on windows, up&down in single-line behave like left&right */
@@ -24375,27 +26284,17 @@ retry:
 
     /* compute current position of cursor point */
     nk_textedit_clamp(state);
-    nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
+    nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                             (enum nk_text_affinity)state->cursor_affinity);
 
-    /* now find character position down a row */
+    /* find the closest visual caret on the next row */
     if (find.length) {
-      float x;
+      enum nk_text_affinity affinity;
       float goal_x = state->has_preferred_x ? state->preferred_x : find.x;
-      int   start  = find.first_char + find.length;
 
-      state->cursor = start;
-      nk_textedit_layout_row(&row, state, state->cursor, row_height, font);
-      x = row.x0;
-
-      for (i = 0; i < row.num_chars && x < row.x1; ++i) {
-        float dx  = nk_textedit_get_width(state, start, i, font);
-        x        += dx;
-        if (x > goal_x) {
-          break;
-        }
-        ++state->cursor;
-      }
-      nk_textedit_clamp(state);
+      state->cursor = nk_textedit_locate_coord(state, goal_x, find.y + find.height + 0.5f,
+                                               font, row_height, &affinity);
+      state->cursor_affinity = (unsigned char)affinity;
 
       state->has_preferred_x = 1;
       state->preferred_x     = goal_x;
@@ -24406,9 +26305,8 @@ retry:
   } break;
 
   case NK_KEY_UP: {
-    struct nk_text_find     find;
-    struct nk_text_edit_row row;
-    int                     i, sel = shift_mod;
+    struct nk_text_find find;
+    int                 sel = shift_mod;
 
     if (state->single_line) {
       /* on windows, up&down become left&right */
@@ -24424,27 +26322,17 @@ retry:
 
     /* compute current position of cursor point */
     nk_textedit_clamp(state);
-    nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
+    nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                             (enum nk_text_affinity)state->cursor_affinity);
 
     /* can only go up if there's a previous row */
     if (find.prev_first != find.first_char) {
-      /* now find character position up a row */
-      float x;
+      enum nk_text_affinity affinity;
       float goal_x = state->has_preferred_x ? state->preferred_x : find.x;
 
-      state->cursor = find.prev_first;
-      nk_textedit_layout_row(&row, state, state->cursor, row_height, font);
-      x = row.x0;
-
-      for (i = 0; i < row.num_chars && x < row.x1; ++i) {
-        float dx  = nk_textedit_get_width(state, find.prev_first, i, font);
-        x        += dx;
-        if (x > goal_x) {
-          break;
-        }
-        ++state->cursor;
-      }
-      nk_textedit_clamp(state);
+      state->cursor = nk_textedit_locate_coord(state, goal_x, find.y - 0.5f,
+                                               font, row_height, &affinity);
+      state->cursor_affinity = (unsigned char)affinity;
 
       state->has_preferred_x = 1;
       state->preferred_x     = goal_x;
@@ -24463,7 +26351,8 @@ retry:
     } else {
       int n = state->string.len;
       if (state->cursor < n) {
-        nk_textedit_delete(state, state->cursor, 1);
+        int next = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_GRAPHEME, nk_true);
+        nk_textedit_delete(state, state->cursor, next - state->cursor);
       }
     }
     state->has_preferred_x = 0;
@@ -24478,8 +26367,10 @@ retry:
     } else {
       nk_textedit_clamp(state);
       if (state->cursor > 0) {
-        nk_textedit_delete(state, state->cursor - 1, 1);
-        --state->cursor;
+        int previous = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_GRAPHEME, nk_false);
+        nk_textedit_delete(state, previous, state->cursor - previous);
+        state->cursor = previous;
+        state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
       }
     }
     state->has_preferred_x = 0;
@@ -24489,9 +26380,12 @@ retry:
     if (shift_mod) {
       nk_textedit_prep_selection_at_cursor(state);
       state->cursor = state->select_end = 0;
+      state->cursor_affinity             = NK_TEXT_AFFINITY_LEADING;
       state->has_preferred_x            = 0;
     } else {
       state->cursor = state->select_start = state->select_end = 0;
+      state->cursor_affinity                                  = NK_TEXT_AFFINITY_LEADING;
+      state->select_start_affinity                            = NK_TEXT_AFFINITY_LEADING;
       state->has_preferred_x                                  = 0;
     }
     break;
@@ -24500,11 +26394,14 @@ retry:
     if (shift_mod) {
       nk_textedit_prep_selection_at_cursor(state);
       state->cursor = state->select_end = state->string.len;
+      state->cursor_affinity             = NK_TEXT_AFFINITY_TRAILING;
       state->has_preferred_x            = 0;
     } else {
-      state->cursor       = state->string.len;
-      state->select_start = state->select_end = 0;
-      state->has_preferred_x                  = 0;
+      state->cursor                = state->string.len;
+      state->cursor_affinity       = NK_TEXT_AFFINITY_TRAILING;
+      state->select_start          = state->select_end = state->cursor;
+      state->select_start_affinity = state->cursor_affinity;
+      state->has_preferred_x       = 0;
     }
     break;
 
@@ -24516,8 +26413,10 @@ retry:
       if (state->string.len && state->cursor == state->string.len) {
         --state->cursor;
       }
-      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
+      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                               (enum nk_text_affinity)state->cursor_affinity);
       state->cursor = state->select_end = find.first_char;
+      state->cursor_affinity             = NK_TEXT_AFFINITY_LEADING;
       state->has_preferred_x            = 0;
     } else {
       struct nk_text_find find;
@@ -24526,9 +26425,13 @@ retry:
       }
       nk_textedit_clamp(state);
       nk_textedit_move_to_first(state);
-      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
-      state->cursor          = find.first_char;
-      state->has_preferred_x = 0;
+      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                               (enum nk_text_affinity)state->cursor_affinity);
+      state->cursor                = find.first_char;
+      state->cursor_affinity       = NK_TEXT_AFFINITY_LEADING;
+      state->select_start          = state->select_end = state->cursor;
+      state->select_start_affinity = state->cursor_affinity;
+      state->has_preferred_x       = 0;
     }
   } break;
 
@@ -24537,24 +26440,30 @@ retry:
       struct nk_text_find find;
       nk_textedit_clamp(state);
       nk_textedit_prep_selection_at_cursor(state);
-      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
+      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                               (enum nk_text_affinity)state->cursor_affinity);
       state->has_preferred_x = 0;
       state->cursor          = find.first_char + find.length;
       if (find.length > 0 && nk_str_rune_at(&state->string, state->cursor - 1) == '\n') {
         --state->cursor;
       }
-      state->select_end = state->cursor;
+      state->select_end      = state->cursor;
+      state->cursor_affinity = NK_TEXT_AFFINITY_TRAILING;
     } else {
       struct nk_text_find find;
       nk_textedit_clamp(state);
       nk_textedit_move_to_first(state);
-      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height);
+      nk_textedit_find_charpos(&find, state, state->cursor, state->single_line, font, row_height,
+                               (enum nk_text_affinity)state->cursor_affinity);
 
       state->has_preferred_x = 0;
       state->cursor          = find.first_char + find.length;
       if (find.length > 0 && nk_str_rune_at(&state->string, state->cursor - 1) == '\n') {
         --state->cursor;
       }
+      state->cursor_affinity       = NK_TEXT_AFFINITY_TRAILING;
+      state->select_start          = state->select_end = state->cursor;
+      state->select_start_affinity = state->cursor_affinity;
     }
   } break;
 
@@ -24572,10 +26481,11 @@ retry:
       old_cursor = state->cursor;
 
       if (old_cursor > 0) {
-        int new_cursor = nk_textedit_move_to_word_previous(state);
+        int new_cursor = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_false);
         if (new_cursor < old_cursor) {
           nk_textedit_delete(state, new_cursor, old_cursor - new_cursor);
           state->cursor = new_cursor;
+          state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
         }
       }
     }
@@ -24597,12 +26507,13 @@ retry:
       nk_textedit_clamp(state);
       old_cursor = state->cursor;
 
-      new_cursor = nk_textedit_move_to_word_next(state);
+      new_cursor = nk_textedit_move_to_boundary(state, font, NK_TEXT_BOUNDARY_WORD, nk_true);
       nk_textedit_clamp(state);
 
       if (new_cursor > old_cursor) {
         nk_textedit_delete(state, old_cursor, new_cursor - old_cursor);
         state->cursor = old_cursor;
+        state->cursor_affinity = state->cursor ? NK_TEXT_AFFINITY_TRAILING : NK_TEXT_AFFINITY_LEADING;
       }
     }
 
@@ -24870,6 +26781,8 @@ nk_textedit_clear_state(struct nk_text_edit *state, enum nk_text_edit_type type,
   state->has_preferred_x                  = 0;
   state->preferred_x                      = 0;
   state->cursor_at_end_of_line            = 0;
+  state->cursor_affinity                  = NK_TEXT_AFFINITY_LEADING;
+  state->select_start_affinity            = NK_TEXT_AFFINITY_LEADING;
   state->initialized                      = 1;
   state->single_line                      = (unsigned char)(type == NK_TEXT_EDIT_SINGLE_LINE);
   state->mode                             = NK_TEXT_EDIT_MODE_VIEW;
@@ -24919,8 +26832,11 @@ NK_API void
 nk_textedit_select_all(struct nk_text_edit *state)
 {
   NK_ASSERT(state);
-  state->select_start = 0;
-  state->select_end   = state->string.len;
+  state->select_start          = 0;
+  state->select_end            = state->string.len;
+  state->cursor                = state->select_end;
+  state->select_start_affinity = NK_TEXT_AFFINITY_LEADING;
+  state->cursor_affinity       = NK_TEXT_AFFINITY_TRAILING;
 }
 NK_API void
 nk_textedit_free(struct nk_text_edit *state)
@@ -25104,6 +27020,62 @@ nk_edit_draw_text(struct nk_command_buffer   *out,
       }
       nk_widget_text(out, label, line, (int)((text + text_len) - line), &txt, NK_TEXT_LEFT, font);
     }
+  }
+}
+NK_INTERN void
+nk_edit_draw_text_selection(struct nk_command_buffer *out, const struct nk_style_edit *style,
+                            float pos_x, float pos_y, struct nk_text_edit *edit, float row_height,
+                            const struct nk_user_font *font, struct nk_color background, struct nk_color foreground,
+                            struct nk_color selected_background, struct nk_color selected_foreground)
+{
+  const char *text            = nk_str_get_const(&edit->string);
+  int         text_len        = nk_str_len_char(&edit->string);
+  int         selection_begin = nk_textedit_byte_offset(edit, NK_MIN(edit->select_start, edit->select_end));
+  int         selection_end   = nk_textedit_byte_offset(edit, NK_MAX(edit->select_start, edit->select_end));
+  int         line_begin      = 0;
+  int         line_idx        = 0;
+
+  nk_edit_draw_text(out, style, pos_x, pos_y, 0, text, text_len, row_height, font, background, foreground, nk_false);
+  while (line_begin < text_len && selection_begin != selection_end) {
+    struct nk_text_selection_iterator iterator;
+    struct nk_text_selection_span     span;
+    struct nk_text_shape             *shape;
+    int                               line_end = line_begin;
+    int                               select_begin;
+    int                               select_end;
+
+    while (line_end < text_len && text[line_end] != '\n') {
+      line_end += 1;
+    }
+
+    select_begin = NK_CLAMP(line_begin, selection_begin, line_end) - line_begin;
+    select_end   = NK_CLAMP(line_begin, selection_end,   line_end) - line_begin;
+    shape        = nk_text_shape_build_default(out->context, font, out->context->style.font_size,
+                                               text + line_begin, line_end - line_begin);
+
+    if (shape && select_begin < select_end) {
+      nk_text_selection_iterator_begin(&iterator, shape, select_begin, select_end);
+      while (nk_text_selection_iterator_next(&iterator, &span)) {
+        struct nk_rect selection = nk_rect(pos_x + span.x, pos_y + line_idx * row_height, span.width, row_height);
+        struct nk_rect old_clip  = out->clip;
+        struct nk_rect span_clip;
+        struct nk_text selected;
+
+        nk_fill_rect(out, selection, 0, selected_background);
+        nk_unify(&span_clip, &old_clip, selection.x, selection.y, selection.x + selection.w, selection.y + selection.h);
+        nk_push_scissor(out, span_clip);
+
+        selected.padding    = nk_vec2(0, 0);
+        selected.background = selected_background;
+        selected.text       = selected_foreground;
+        nk_draw_text(out, nk_rect(pos_x, selection.y, shape->advance.x, row_height),
+                     text + line_begin, line_end - line_begin, font, selected.background, selected.text);
+        nk_push_scissor(out, old_clip);
+      }
+    }
+
+    line_begin = line_end + 1;
+    line_idx  += 1;
   }
 }
 NK_LIB nk_flags
@@ -25336,103 +27308,31 @@ nk_do_edit(nk_flags                   *state,
     if (edit->active) {
       int            total_lines = 1;
       struct nk_vec2 text_size   = nk_vec2(0, 0);
+      struct nk_vec2 cursor_pos = nk_vec2(0, 0);
 
-      /* text pointer positions */
-      const char *cursor_ptr       = 0;
-      const char *select_begin_ptr = 0;
-      const char *select_end_ptr   = 0;
-
-      /* 2D pixel positions */
-      struct nk_vec2 cursor_pos             = nk_vec2(0, 0);
-      struct nk_vec2 selection_offset_start = nk_vec2(0, 0);
-      struct nk_vec2 selection_offset_end   = nk_vec2(0, 0);
-
-      int selection_begin = NK_MIN(edit->select_start, edit->select_end);
-      int selection_end   = NK_MAX(edit->select_start, edit->select_end);
-
-      /* calculate total line count + total space + cursor/selection position */
-      float line_width = 0.0f;
       if (text && len) {
-        /* utf8 encoding */
-        int     glyph_len = 0;
-        nk_rune unicode   = 0;
-        int     text_len  = 0;
-        int     glyphs    = 0;
-        int     row_begin = 0;
+        int line_begin = 0;
+        int line_end;
 
-        glyph_len  = nk_utf_decode(text, &unicode, len);
-        line_width = 0;
-
-        /* iterate all lines */
-        while ((text_len < len) && glyph_len) {
-          /* set cursor 2D position and line */
-          if (!cursor_ptr && glyphs == edit->cursor) {
-            int            glyph_offset;
-            struct nk_vec2 out_offset;
-            struct nk_vec2 row_size;
-            const char    *remaining;
-
-            /* calculate 2d position */
-            cursor_pos.y = (float)(total_lines - 1) * row_height;
-            row_size     = nk_text_calculate_text_bounds(out->context, font, text + row_begin, text_len - row_begin, row_height, &remaining, &out_offset, &glyph_offset, NK_STOP_ON_NEW_LINE);
-            cursor_pos.x = row_size.x;
-            cursor_ptr   = text + text_len;
-          }
-
-          /* set start selection 2D position and line */
-          if (!select_begin_ptr && edit->select_start != edit->select_end && glyphs == selection_begin) {
-            int            glyph_offset;
-            struct nk_vec2 out_offset;
-            struct nk_vec2 row_size;
-            const char    *remaining;
-
-            /* calculate 2d position */
-            selection_offset_start.y = (float)(NK_MAX(total_lines - 1, 0)) * row_height;
-            row_size = nk_text_calculate_text_bounds(out->context, font, text + row_begin, text_len - row_begin, row_height, &remaining, &out_offset, &glyph_offset, NK_STOP_ON_NEW_LINE);
-            selection_offset_start.x = row_size.x;
-            select_begin_ptr         = text + text_len;
-          }
-
-          /* set end selection 2D position and line */
-          if (!select_end_ptr && edit->select_start != edit->select_end && glyphs == selection_end) {
-            int            glyph_offset;
-            struct nk_vec2 out_offset;
-            struct nk_vec2 row_size;
-            const char    *remaining;
-
-            /* calculate 2d position */
-            selection_offset_end.y = (float)(total_lines - 1) * row_height;
-            row_size = nk_text_calculate_text_bounds(out->context, font, text + row_begin, text_len - row_begin, row_height, &remaining, &out_offset, &glyph_offset, NK_STOP_ON_NEW_LINE);
-            selection_offset_end.x = row_size.x;
-            select_end_ptr         = text + text_len;
-          }
-          if (unicode == '\n') {
-            line_width   = nk_text_width(out->context, font, out->context->style.font_size, text + row_begin, text_len - row_begin);
-            text_size.x  = NK_MAX(text_size.x, line_width);
+        for (line_end = 0; line_end < len; ++line_end) {
+          if (text[line_end] == '\n') {
+            float width = nk_text_width(out->context, font, out->context->style.font_size,
+                                        text + line_begin, line_end - line_begin);
+            text_size.x = NK_MAX(text_size.x, width);
+            line_begin  = line_end + 1;
             total_lines += 1;
-            line_width   = 0;
-            text_len    += 1;
-            glyphs      += 1;
-            row_begin    = text_len;
-            glyph_len    = nk_utf_decode(text + text_len, &unicode, len - text_len);
-            continue;
           }
-
-          glyphs   += 1;
-          text_len += glyph_len;
-
-          glyph_len = nk_utf_decode(text + text_len, &unicode, len - text_len);
-          continue;
         }
-        line_width  = nk_text_width(out->context, font, out->context->style.font_size, text + row_begin, text_len - row_begin);
-        text_size.x = NK_MAX(text_size.x, line_width);
+        text_size.x = NK_MAX(text_size.x, nk_text_width(out->context, font, out->context->style.font_size,
+                                                        text + line_begin, len - line_begin));
         text_size.y = (float)total_lines * row_height;
-
-        /* handle case when cursor is at end of text buffer */
-        if (!cursor_ptr && edit->cursor == edit->string.len) {
-          cursor_pos.x = line_width;
-          cursor_pos.y = text_size.y - row_height;
-        }
+      }
+      {
+        struct nk_text_find cursor_find;
+        nk_textedit_find_charpos(&cursor_find, edit, edit->cursor, edit->single_line, font, row_height,
+                                 (enum nk_text_affinity)edit->cursor_affinity);
+        cursor_pos.x = cursor_find.x;
+        cursor_pos.y = cursor_find.y;
       }
       {
         /* scrollbar */
@@ -25511,7 +27411,6 @@ nk_do_edit(nk_flags                   *state,
         struct nk_color             sel_background_color;
         struct nk_color             sel_text_color;
         struct nk_color             cursor_color;
-        struct nk_color             cursor_text_color;
         const struct nk_style_item *background;
         nk_push_scissor(out, clip);
 
@@ -25522,13 +27421,11 @@ nk_do_edit(nk_flags                   *state,
           sel_text_color       = style->selected_text_hover;
           sel_background_color = style->selected_hover;
           cursor_color         = style->cursor_hover;
-          cursor_text_color    = style->cursor_text_hover;
         } else if (*state & NK_WIDGET_STATE_HOVER) {
           background           = &style->hover;
           text_color           = style->text_hover;
           sel_text_color       = style->selected_text_hover;
           sel_background_color = style->selected_hover;
-          cursor_text_color    = style->cursor_text_hover;
           cursor_color         = style->cursor_hover;
         } else {
           background           = &style->normal;
@@ -25536,7 +27433,6 @@ nk_do_edit(nk_flags                   *state,
           sel_text_color       = style->selected_text_normal;
           sel_background_color = style->selected_normal;
           cursor_color         = style->cursor_normal;
-          cursor_text_color    = style->cursor_text_normal;
         }
         if (background->type == NK_STYLE_ITEM_IMAGE) {
           background_color = nk_rgba(0, 0, 0, 0);
@@ -25544,106 +27440,20 @@ nk_do_edit(nk_flags                   *state,
           background_color = background->data.color;
         }
 
-        cursor_color      = nk_rgb_factor(cursor_color, style->color_factor);
-        cursor_text_color = nk_rgb_factor(cursor_text_color, style->color_factor);
+        cursor_color = nk_rgb_factor(cursor_color, style->color_factor);
 
-        if (edit->select_start == edit->select_end) {
-          /* no selection so just draw the complete text */
-          const char *begin = nk_str_get_const(&edit->string);
-          int         l     = nk_str_len_char(&edit->string);
-          nk_edit_draw_text(out, style, area.x - edit->scrollbar.x, area.y - edit->scrollbar.y, 0, begin, l, row_height, font, background_color, text_color, nk_false);
-        } else {
-          /* edit has selection so draw 1-3 text chunks */
-          if (edit->select_start != edit->select_end && selection_begin > 0) {
-            /* draw unselected text before selection */
-            const char *begin = nk_str_get_const(&edit->string);
-            NK_ASSERT(select_begin_ptr);
-            nk_edit_draw_text(out,
-                              style,
-                              area.x - edit->scrollbar.x,
-                              area.y - edit->scrollbar.y,
-                              0,
-                              begin,
-                              (int)(select_begin_ptr - begin),
-                              row_height,
-                              font,
-                              background_color,
-                              text_color,
-                              nk_false);
-          }
-          if (edit->select_start != edit->select_end) {
-            /* draw selected text */
-            NK_ASSERT(select_begin_ptr);
-            if (!select_end_ptr) {
-              const char *begin = nk_str_get_const(&edit->string);
-              select_end_ptr    = begin + nk_str_len_char(&edit->string);
-            }
-            nk_edit_draw_text(out,
-                              style,
-                              area.x - edit->scrollbar.x,
-                              area.y + selection_offset_start.y - edit->scrollbar.y,
-                              selection_offset_start.x,
-                              select_begin_ptr,
-                              (int)(select_end_ptr - select_begin_ptr),
-                              row_height,
-                              font,
-                              sel_background_color,
-                              sel_text_color,
-                              nk_true);
-          }
-          if ((edit->select_start != edit->select_end && selection_end < edit->string.len)) {
-            /* draw unselected text after selected text */
-            const char *begin = select_end_ptr;
-            const char *end   = nk_str_get_const(&edit->string) + nk_str_len_char(&edit->string);
-            NK_ASSERT(select_end_ptr);
-            nk_edit_draw_text(out,
-                              style,
-                              area.x - edit->scrollbar.x,
-                              area.y + selection_offset_end.y - edit->scrollbar.y,
-                              selection_offset_end.x,
-                              begin,
-                              (int)(end - begin),
-                              row_height,
-                              font,
-                              background_color,
-                              text_color,
-                              nk_true);
-          }
-        }
+        nk_edit_draw_text_selection(out, style, area.x - edit->scrollbar.x, area.y - edit->scrollbar.y,
+                                    edit, row_height, font, background_color, text_color,
+                                    sel_background_color, sel_text_color);
 
         /* cursor */
         if (edit->select_start == edit->select_end) {
-          if (edit->cursor >= nk_str_len(&edit->string) || (cursor_ptr && *cursor_ptr == '\n')) {
-            /* draw cursor at end of line */
-            struct nk_rect cursor;
-            cursor.w  = style->cursor_size;
-            cursor.h  = out->context->style.font_size;
-            cursor.x  = area.x + cursor_pos.x - edit->scrollbar.x;
-            cursor.y  = area.y + cursor_pos.y + row_height / 2.0f - cursor.h / 2.0f;
-            cursor.y -= edit->scrollbar.y;
-            nk_fill_rect(out, cursor, 0, cursor_color);
-          } else {
-            /* draw cursor inside text */
-            int            glyph_len;
-            struct nk_rect label;
-            struct nk_text txt;
-
-            nk_rune unicode;
-            NK_ASSERT(cursor_ptr);
-            glyph_len = nk_utf_decode(cursor_ptr, &unicode, 4);
-
-            label.x = area.x + cursor_pos.x - edit->scrollbar.x;
-            label.y = area.y + cursor_pos.y - edit->scrollbar.y;
-            label.w = nk_text_width(out->context, font, out->context->style.font_size, cursor_ptr, glyph_len);
-            label.h = row_height;
-
-            txt.padding    = nk_vec2(0, 0);
-            txt.background = cursor_color;
-            ;
-            txt.text = cursor_text_color;
-            nk_fill_rect(out, label, 0, cursor_color);
-            nk_widget_text(out, label, cursor_ptr, glyph_len, &txt, NK_TEXT_LEFT, font);
-          }
+          struct nk_rect cursor;
+          cursor.w  = style->cursor_size;
+          cursor.h  = out->context->style.font_size;
+          cursor.x  = area.x + cursor_pos.x - edit->scrollbar.x;
+          cursor.y  = area.y + cursor_pos.y + row_height / 2.0f - cursor.h / 2.0f - edit->scrollbar.y;
+          nk_fill_rect(out, cursor, 0, cursor_color);
         }
       }
     } else {
@@ -27014,7 +28824,15 @@ nk_combo_begin(struct nk_context *ctx, struct nk_window *win, struct nk_vec2 siz
   int               is_open   = 0;
   int               is_active = 0;
   struct nk_rect    body;
+  struct nk_rect    limits;
   nk_hash           hash;
+  float             border;
+  float             down_y;
+  float             limits_right;
+  float             limits_bottom;
+  float             room_below;
+  float             room_above;
+  nk_bool           open_up;
 
   NK_ASSERT(ctx);
   NK_ASSERT(ctx->current);
@@ -27028,26 +28846,25 @@ nk_combo_begin(struct nk_context *ctx, struct nk_window *win, struct nk_vec2 siz
   body.w = size.x;
   body.h = size.y;
 
-  float border = ctx->style.window.combo_border;
-  float down_y = header.y + header.h - border;
-
+  border = ctx->style.window.combo_border;
+  down_y = header.y + header.h - border;
   body.y = down_y;
 
-  struct nk_rect limits = ctx->window_maximize_bounds;
+  limits = ctx->window_maximize_bounds;
   if (limits.w > 0.0f && limits.h > 0.0f) {
-    float limits_right  = limits.x + limits.w;
-    float limits_bottom = limits.y + limits.h;
+    limits_right  = limits.x + limits.w;
+    limits_bottom = limits.y + limits.h;
 
     body.w = NK_MIN(body.w, limits.w);
     body.x = NK_CLAMP(limits.x, body.x, limits_right - body.w);
 
-    float room_below = limits_bottom - down_y;
-    float room_above = header.y + border - limits.y;
+    room_below = limits_bottom - down_y;
+    room_above = header.y + border - limits.y;
 
     room_below = NK_MAX(room_below, 0.0f);
     room_above = NK_MAX(room_above, 0.0f);
 
-    bool open_up = body.h > room_below && room_above > room_below;
+    open_up = body.h > room_below && room_above > room_below;
     if (open_up) {
       body.h = NK_MIN(body.h, room_above);
       body.y = header.y - body.h + border;

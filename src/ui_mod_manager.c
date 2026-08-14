@@ -35,19 +35,27 @@ ui_mod_state(mod_t *m)
 static void
 draw_key_value(struct nk_context *ctx, ui_text_span_t key, str_t value, struct nk_color value_color, bool show_tooltip)
 {
-  float width = nk_layout_widget_bounds(ctx).w;
+  struct nk_text_options key_options = {
+    .alignment = NK_TEXT_LEFT,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = ctx->style.text.color,
+  };
+  struct nk_text_options value_options = key_options;
+  float                  width         = nk_layout_widget_bounds(ctx).w;
+
+  value_options.color = value_color;
 
   nk_layout_row_begin(ctx, NK_STATIC, 20.0f, 2);
   {
     nk_layout_row_push(ctx, key.width);
-    ui_label_str(ctx, key.str, NK_TEXT_LEFT);
+    nk_text_ex(ctx, (const char *)key.str.data, (int)key.str.len, &key_options);
 
     nk_layout_row_push(ctx, width - key.width);
     {
       if (show_tooltip && nk_widget_is_hovered(ctx)) {
         nk_tooltip_text(ctx, (const char *)value.data, (int)value.len);
       }
-      ui_label_str_colored(ctx, value, NK_TEXT_LEFT, value_color);
+      nk_text_ex(ctx, (const char *)value.data, (int)value.len, &value_options);
     }
   }
   nk_layout_row_end(ctx);
@@ -56,6 +64,11 @@ draw_key_value(struct nk_context *ctx, ui_text_span_t key, str_t value, struct n
 static void
 form_key_value_begin(struct nk_context *ctx, ui_text_span_t key, str_t key_desc, struct nk_color key_color)
 {
+  struct nk_text_options options = {
+    .alignment = NK_TEXT_LEFT,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = key_color,
+  };
   float width = nk_layout_widget_bounds(ctx).w;
   float gap_x = ctx->style.window.spacing.x;
   nk_layout_row_begin(ctx, NK_STATIC, 20.0f, 2);
@@ -65,7 +78,7 @@ form_key_value_begin(struct nk_context *ctx, ui_text_span_t key, str_t key_desc,
       if (nk_widget_is_hovered(ctx)) {
         nk_tooltip_text(ctx, (const char *)key_desc.data, (int)key_desc.len);
       }
-      ui_label_str_colored(ctx, key.str, NK_TEXT_LEFT, key_color);
+      nk_text_ex(ctx, (const char *)key.str.data, (int)key.str.len, &options);
     }
 
     nk_layout_row_push(ctx, width - key.width);
@@ -423,6 +436,7 @@ form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_conso
 {
   static ui_text_span_t label_toggle_bind = {0};
   static ui_text_span_t label_auto_scroll = {0};
+  static ui_text_span_t label_wrap_lines  = {0};
   static ui_text_span_t label_position    = {0};
   static ui_text_span_t label_min_level   = {0};
   static bool           cached            = false;
@@ -430,6 +444,7 @@ form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_conso
   if (!cached) {
     label_toggle_bind = ui_text_span_make(ctx, STR_LIT("Console shortcut: "));
     label_auto_scroll = ui_text_span_make(ctx, STR_LIT("Auto-scroll: "));
+    label_wrap_lines  = ui_text_span_make(ctx, STR_LIT("Wrap lines: "));
     label_position    = ui_text_span_make(ctx, STR_LIT("Position: "));
     label_min_level   = ui_text_span_make(ctx, STR_LIT("Minimum log level: "));
 
@@ -440,11 +455,13 @@ form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_conso
 
     ui_text_cols_include(&cols, 0, label_toggle_bind);
     ui_text_cols_include(&cols, 0, label_auto_scroll);
+    ui_text_cols_include(&cols, 0, label_wrap_lines);
     ui_text_cols_include(&cols, 0, label_position);
     ui_text_cols_include(&cols, 0, label_min_level);
 
     label_toggle_bind.width = cols.width[0];
     label_auto_scroll.width = cols.width[0];
+    label_wrap_lines.width  = cols.width[0];
     label_position.width    = cols.width[0];
     label_min_level.width   = cols.width[0];
 
@@ -456,6 +473,7 @@ form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_conso
 
   form_keybind(ctx, capture, label_toggle_bind, STR_LIT("Shortcut that opens or closes the console"), STR_LIT("console.toggle_keybind"), &saved_cfg->toggle_bind, &cfg->toggle_bind);
   form_bool(ctx, label_auto_scroll, STR_LIT("Scroll to the newest message when console output changes"), &saved_cfg->auto_scroll, &cfg->auto_scroll);
+  form_bool(ctx, label_wrap_lines,  STR_LIT("Wrap long console output to the visible width"), &saved_cfg->wrap_lines, &cfg->wrap_lines);
   form_enum(ctx, label_position,  STR_LIT("Place the console at the top or bottom of the screen"), &saved_cfg->position, &cfg->position, ui_console_position_str_array());
   form_enum(ctx, label_min_level, STR_LIT("Hide messages below the selected severity"), &saved_cfg->min_level, &cfg->min_level, ui_console_log_level_str_array());
 
@@ -678,8 +696,14 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     version_text = str_push_fmt(tmp.arena, "%d.%d.%d", VERSION_ARG(m->manifest.info.version));
     status_text  = mod_status_text(m, tmp.arena);
 
+    struct nk_text_options wrapped_text = {
+      .alignment = NK_TEXT_LEFT,
+      .flags     = NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_SELECTABLE | NK_TEXT_OPTION_AUTO_HEIGHT,
+      .color     = ctx->style.text.color,
+    };
+
     nk_style_push_font_size(ctx, CONFIG_NK_FONT_HEADING_SIZE);
-    ui_label_wrap(ctx, m->manifest.info.name);
+    nk_text_ex(ctx, (const char *)m->manifest.info.name.data, (int)m->manifest.info.name.len, &wrapped_text);
     nk_style_pop_font_size(ctx);
 
     draw_spacer(ctx, 2.0f);
@@ -698,7 +722,7 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
 
     str_list_t lines = str_split_lines(tmp.arena, m->manifest.info.description);
     for (str_node_t *node = lines.first; node; node = node->next) {
-      ui_label_wrap(ctx, node->str);
+      nk_text_ex(ctx, (const char *)node->str.data, (int)node->str.len, &wrapped_text);
     }
     draw_spacer(ctx, 2.0f);
 

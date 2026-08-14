@@ -73,6 +73,33 @@ test_ui_text_profile(struct nk_context *ctx, unsigned int vw, unsigned int vh)
   nk_end(ctx);
 }
 
+static void
+test_ui_text_selection(struct nk_context *ctx, unsigned int vw, unsigned int vh)
+{
+  static const char *lines[] = {
+    "office affinity -> ffi fi fl",
+    "a\xcc\x81 combining mark, emoji \xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x8c\xb3",
+    "\xd8\xa7\xd9\x84\xd8\xb3\xd9\x84\xd8\xa7\xd9\x85 \xd8\xb9\xd9\x84\xd9\x8a\xd9\x83\xd9\x85",
+    "hello 123 - \xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d - done 456"
+  };
+  static struct nk_text_selection_context selection;
+
+  if (nk_begin(ctx, "Text selection", nk_rect(0, 0, (float)vw, (float)vh), 0)) {
+    for (int i = 0; i < COUNTOF(lines); ++i) {
+      nk_layout_row_dynamic(ctx, 24.0f, 1);
+      if (i == 1) {
+        nk_label_selectable_colored_ctx(ctx, lines[i], NK_TEXT_LEFT, nk_rgb(255, 190, 120), &selection);
+      } else {
+        nk_label_selectable_ctx(ctx, lines[i], NK_TEXT_LEFT, &selection);
+      }
+    }
+
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_labelf_selectable_ctx(ctx, NK_TEXT_LEFT, &selection, "Formatted selectable: row %d of %d", 5, 5);
+  }
+  nk_end(ctx);
+}
+
 static IDXGISwapChain         *swap_chain;
 static ID3D11Device           *device;
 static ID3D11DeviceContext    *context;
@@ -168,7 +195,7 @@ test_ui_text_shaping(struct nk_context *ctx, struct nk_runtime_fonts *fonts, str
     nk_label(ctx, "Emoji: 😀 🎉 ❤️  Icons:   󰏌", NK_TEXT_LEFT);
     #endif
 
-    struct nk_font *consolas = fonts->faces[4].font;
+    struct nk_font *consolas = nk_runtime_font(fonts, NK_RUNTIME_FONT_REGULAR);
     if (consolas) {
       nk_style_push_font(ctx, &consolas->handle);
       nk_style_push_font_size(ctx, 16.0f);
@@ -1232,6 +1259,7 @@ main(int argc, char **argv)
 
   log_init(STR_LIT(CONFIG_LOG_FILE_NAME), CONFIG_LOG_LEVEL, false);
   bool text_profile = GetEnvironmentVariableA("OVERDUB_TEXT_PROFILE", NULL, 0) != 0;
+  bool text_selection_test = GetEnvironmentVariableA("OVERDUB_TEXT_SELECTION_TEST", NULL, 0) != 0;
 
   WNDCLASSW wc = {
     .style         = CS_DBLCLKS,
@@ -1294,6 +1322,8 @@ main(int argc, char **argv)
     {"consolab.ttf", NK_RUNTIME_FONT_BOLD},
     {"consolai.ttf", NK_RUNTIME_FONT_ITALIC},
     {"consolaz.ttf", NK_RUNTIME_FONT_BOLD_ITALIC},
+    {"segoeui.ttf",  NK_RUNTIME_FONT_FALLBACK},
+    {"seguisym.ttf", NK_RUNTIME_FONT_FALLBACK},
   };
   struct nk_runtime_font_source font_sources[COUNTOF(system_fonts)];
   int                           font_source_count = 0;
@@ -1360,7 +1390,9 @@ main(int argc, char **argv)
   ui_manager_init(&globals.ui_manager, ctx, fonts.faces[0].font, g_width, g_height);
 
   // ui_mod_manager_open(&globals.ui_manager.main);
-  // ui_console_open(&globals.ui_console);
+  if (GetEnvironmentVariableA("OVERDUB_CONSOLE_TEST", NULL, 0)) {
+    ui_console_open(&globals.ui_manager.console);
+  }
 
   globals.ui_manager.main.selected = (globals.mod_manager.mod_order.want[0]);
 
@@ -1370,6 +1402,11 @@ main(int argc, char **argv)
     LOG_DEBUG("console: '%.*s'", STR_ARG(keybind_to_str(globals.ui_manager.console.cfg.toggle_bind, tmp.arena)));
   }
   scratch_end(tmp);
+
+  if (GetEnvironmentVariableA("OVERDUB_CONSOLE_TEST", NULL, 0)) {
+    LOG_INFO("Wrapped selection test: this deliberately long console entry should wrap across multiple visual lines while remaining one logical string when selected and copied. Soft wrapping must not insert line breaks into the clipboard text, and dragging may continue into the next console entry.");
+    LOG_WARN("Second selectable console entry: drag here to verify that one persistent selection can span multiple wrapped widgets.");
+  }
 
   mod_manager_start_dlls(&globals.mod_manager);
 
@@ -1415,6 +1452,8 @@ main(int argc, char **argv)
       PROF_SCOPE_BEGIN("test_ui.text_rows", text_rows);
       test_ui_text_profile(ctx, g_width, g_height);
       PROF_SCOPE_END(text_rows);
+    } else if (text_selection_test) {
+      test_ui_text_selection(ctx, g_width, g_height);
     } else {
       test_ui_overview(ctx, g_width, g_height);
     }

@@ -153,18 +153,6 @@ ui_button_str(struct nk_context *ctx, str_t str)
   return nk_button_text(ctx, (const char *)str.data, (int)str.len);
 }
 
-static inline void
-ui_label_str(struct nk_context *ctx, str_t str, nk_flags flags)
-{
-  nk_text(ctx, (const char *)str.data, (int)str.len, flags);
-}
-
-static inline void
-ui_label_str_colored(struct nk_context *ctx, str_t str, nk_flags flags, struct nk_color color)
-{
-  nk_text_colored(ctx, (const char *)str.data, (int)str.len, flags, color);
-}
-
 static inline struct nk_color
 ui_nk_style_item_color_or(struct nk_style_item item, struct nk_color fallback)
 {
@@ -194,8 +182,6 @@ ui_nk_select_fg(struct nk_context *ctx, nk_flags state, bool selected);
 bool
 ui_nk_current_panel_accepts_input(struct nk_context *ctx);
 
-bool
-ui_text_fits_width(struct nk_context *ctx, str_t text, float max_w);
 float
 ui_text_width(struct nk_context *ctx, str_t text);
 
@@ -209,8 +195,6 @@ struct ui_text_opts_s {
 };
 void
 ui_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct nk_rect bounds, str_t text, ui_text_opts_t opts);
-void
-ui_text(struct nk_context *ctx, str_t text, float text_width, nk_flags alignment, struct nk_color color);
 
 enum ui_nk_axis_e {
   UI_NK_AXIS_X,
@@ -266,11 +250,6 @@ struct ui_nk_select_row_opts_s {
 
 bool
 ui_select_row(struct nk_context *ctx, ui_nk_select_row_opts_t *opts);
-
-float
-ui_label_wrap(struct nk_context *ctx, str_t text);
-float
-ui_label_wrap_colored(struct nk_context *ctx, str_t text, struct nk_color color);
 
 void
 ui_win_clamp_bounds(struct nk_context *ctx, const char *name, struct nk_vec2 min_size, struct nk_vec2 max_size);

@@ -12,6 +12,7 @@
 #define NK_INCLUDE_FONT_BAKING
 #define NK_BUTTON_TRIGGER_ON_RELEASE
 #define NK_UINT_DRAW_INDEX
+#define NK_DEFAULT_TEXT_SELECTABLE
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,7 @@ extern "C" {
 #ifndef NK_SCROLLBAR_HIDING_TIMEOUT
 #  define NK_SCROLLBAR_HIDING_TIMEOUT 4.0f
 #endif
+
 /*
  * ==============================================================
  *
@@ -3519,31 +3521,173 @@ NK_API void
 nk_label_wrap(struct nk_context *, const char *);
 NK_API void
 nk_label_colored_wrap(struct nk_context *, const char *, struct nk_color);
+
+struct nk_text_selection {
+  int           anchor;
+  int           cursor;
+  unsigned char active;
+  unsigned char dragging;
+  unsigned char affinity;
+  unsigned char anchor_affinity;
+};
+
+struct nk_text_selection_context {
+  struct nk_text_selection selection;
+  unsigned int             anchor_widget;
+  unsigned int             cursor_widget;
+  unsigned int             widget_index;
+  unsigned int             widget_count;
+  unsigned int             frame;
+  unsigned int             keyboard_frame;
+  nk_size                  copy_first;
+  nk_size                  copy_last;
+  int                      copy_length;
+};
+
+enum nk_text_option_flags {
+  NK_TEXT_OPTION_WRAP        = NK_FLAG(0),
+  NK_TEXT_OPTION_SELECTABLE  = NK_FLAG(1),
+  /* Starts a one-column dynamic row sized to all wrapped lines. */
+  NK_TEXT_OPTION_AUTO_HEIGHT = NK_FLAG(2)
+};
+
+/* Set selection to NULL to use the current panel's selection context. */
+struct nk_text_options {
+  nk_flags                         alignment;
+  nk_flags                         flags;
+  struct nk_color                  color;
+  struct nk_text_selection_context *selection;
+};
+
+NK_API nk_bool
+nk_text_ex(struct nk_context *, const char *, int, const struct nk_text_options *);
+
+NK_API nk_bool
+nk_text_selectable(struct nk_context *, const char *, int, nk_flags align);
+NK_API nk_bool
+nk_text_selectable_colored(struct nk_context *, const char *, int, nk_flags align, struct nk_color);
+NK_API nk_bool
+nk_text_selectable_ctx(struct nk_context *, const char *, int, nk_flags align, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_text_selectable_colored_ctx(struct nk_context *, const char *, int, nk_flags align, struct nk_color, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_text_selectable_wrap(struct nk_context *, const char *, int);
+NK_API nk_bool
+nk_text_selectable_wrap_colored(struct nk_context *, const char *, int, struct nk_color);
+NK_API nk_bool
+nk_text_selectable_wrap_ctx(struct nk_context *, const char *, int, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_text_selectable_wrap_colored_ctx(struct nk_context *, const char *, int, struct nk_color, struct nk_text_selection_context *selection);
+
+NK_API nk_bool
+nk_label_selectable(struct nk_context *, const char *, nk_flags align);
+NK_API nk_bool
+nk_label_selectable_colored(struct nk_context *, const char *, nk_flags align, struct nk_color);
+NK_API nk_bool
+nk_label_selectable_ctx(struct nk_context *, const char *, nk_flags align, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_label_selectable_colored_ctx(struct nk_context *, const char *, nk_flags align, struct nk_color, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_label_selectable_wrap(struct nk_context *, const char *);
+NK_API nk_bool
+nk_label_selectable_colored_wrap(struct nk_context *, const char *, struct nk_color);
+NK_API nk_bool
+nk_label_selectable_wrap_ctx(struct nk_context *, const char *, struct nk_text_selection_context *selection);
+NK_API nk_bool
+nk_label_selectable_colored_wrap_ctx(struct nk_context *, const char *, struct nk_color, struct nk_text_selection_context *selection);
+
 NK_API void
 nk_image(struct nk_context *, struct nk_image);
 NK_API void
 nk_image_color(struct nk_context *, struct nk_image, struct nk_color);
+
 #ifdef NK_INCLUDE_STANDARD_VARARGS
+NK_API nk_bool
+nk_textf_ex(struct nk_context *, const struct nk_text_options *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_textfv_ex(struct nk_context *, const struct nk_text_options *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_textf_selectable(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_textf_selectable_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_textf_selectable_ctx(struct nk_context *, nk_flags, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_textf_selectable_colored_ctx(struct nk_context *, nk_flags, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(5);
+NK_API nk_bool
+nk_textfv_selectable(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_textfv_selectable_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+NK_API nk_bool
+nk_textfv_selectable_ctx(struct nk_context *, nk_flags, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+NK_API nk_bool
+nk_textfv_selectable_colored_ctx(struct nk_context *, nk_flags, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(5);
+NK_API nk_bool
+nk_textf_selectable_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(2);
+NK_API nk_bool
+nk_textf_selectable_wrap_colored(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_textf_selectable_wrap_ctx(struct nk_context *, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_textf_selectable_wrap_colored_ctx(struct nk_context *, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_textfv_selectable_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(2);
+NK_API nk_bool
+nk_textfv_selectable_wrap_colored(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_textfv_selectable_wrap_ctx(struct nk_context *, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_textfv_selectable_wrap_colored_ctx(struct nk_context *, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+
 NK_API void
 nk_labelf(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
 NK_API void
-nk_labelf_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...)
-  NK_PRINTF_VARARG_FUNC(4);
+nk_labelf_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
 NK_API void
 nk_labelf_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(2);
 NK_API void
-nk_labelf_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...)
-  NK_PRINTF_VARARG_FUNC(3);
+nk_labelf_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
 NK_API void
 nk_labelfv(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
 NK_API void
-nk_labelfv_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list)
-  NK_PRINTF_VALIST_FUNC(4);
+nk_labelfv_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
 NK_API void
 nk_labelfv_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(2);
 NK_API void
-nk_labelfv_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list)
-  NK_PRINTF_VALIST_FUNC(3);
+nk_labelfv_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_labelf_selectable(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_labelf_selectable_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_labelf_selectable_ctx(struct nk_context *, nk_flags, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_labelf_selectable_colored_ctx(struct nk_context *, nk_flags, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(5);
+NK_API nk_bool
+nk_labelfv_selectable(struct nk_context *, nk_flags, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_labelfv_selectable_colored(struct nk_context *, nk_flags, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+NK_API nk_bool
+nk_labelfv_selectable_ctx(struct nk_context *, nk_flags, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+NK_API nk_bool
+nk_labelfv_selectable_colored_ctx(struct nk_context *, nk_flags, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(5);
+NK_API nk_bool
+nk_labelf_selectable_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(2);
+NK_API nk_bool
+nk_labelf_selectable_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_labelf_selectable_wrap_ctx(struct nk_context *, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(3);
+NK_API nk_bool
+nk_labelf_selectable_colored_wrap_ctx(struct nk_context *, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(4);
+NK_API nk_bool
+nk_labelfv_selectable_wrap(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(2);
+NK_API nk_bool
+nk_labelfv_selectable_colored_wrap(struct nk_context *, struct nk_color, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_labelfv_selectable_wrap_ctx(struct nk_context *, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(3);
+NK_API nk_bool
+nk_labelfv_selectable_colored_wrap_ctx(struct nk_context *, struct nk_color, struct nk_text_selection_context *, NK_PRINTF_FORMAT_STRING const char *, va_list) NK_PRINTF_VALIST_FUNC(4);
+
 NK_API void
 nk_value_bool(struct nk_context *, const char *prefix, int);
 NK_API void
@@ -3591,20 +3735,13 @@ nk_button_symbol_styled(struct nk_context *, const struct nk_style_button *, enu
 NK_API nk_bool
 nk_button_image_styled(struct nk_context *, const struct nk_style_button *, struct nk_image img);
 NK_API nk_bool
-nk_button_symbol_text_styled(
-  struct nk_context *, const struct nk_style_button *, enum nk_symbol_type, const char *, int, nk_flags alignment);
+nk_button_symbol_text_styled(struct nk_context *, const struct nk_style_button *, enum nk_symbol_type, const char *, int, nk_flags alignment);
 NK_API nk_bool
-nk_button_symbol_label_styled(struct nk_context            *ctx,
-                              const struct nk_style_button *style,
-                              enum nk_symbol_type           symbol,
-                              const char                   *title,
-                              nk_flags                      align);
+nk_button_symbol_label_styled(struct nk_context *ctx, const struct nk_style_button *style, enum nk_symbol_type symbol, const char *title, nk_flags align);
 NK_API nk_bool
-nk_button_image_label_styled(
-  struct nk_context *, const struct nk_style_button *, struct nk_image img, const char *, nk_flags text_alignment);
+nk_button_image_label_styled(struct nk_context *, const struct nk_style_button *, struct nk_image img, const char *, nk_flags text_alignment);
 NK_API nk_bool
-nk_button_image_text_styled(
-  struct nk_context *, const struct nk_style_button *, struct nk_image img, const char *, int, nk_flags alignment);
+nk_button_image_text_styled(struct nk_context *, const struct nk_style_button *, struct nk_image img, const char *, int, nk_flags alignment);
 NK_API void
 nk_button_set_behavior(struct nk_context *, enum nk_button_behavior);
 NK_API nk_bool
@@ -3621,8 +3758,7 @@ nk_check_label(struct nk_context *, const char *, nk_bool active);
 NK_API nk_bool
 nk_check_text(struct nk_context *, const char *, int, nk_bool active);
 NK_API nk_bool
-nk_check_text_align(
-  struct nk_context *, const char *, int, nk_bool active, nk_flags widget_alignment, nk_flags text_alignment);
+nk_check_text_align(struct nk_context *, const char *, int, nk_bool active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API unsigned
 nk_check_flags_label(struct nk_context *, const char *, unsigned int flags, unsigned int value);
 NK_API unsigned
@@ -3630,17 +3766,11 @@ nk_check_flags_text(struct nk_context *, const char *, int, unsigned int flags, 
 NK_API nk_bool
 nk_checkbox_label(struct nk_context *, const char *, nk_bool *active);
 NK_API nk_bool
-nk_checkbox_label_align(
-  struct nk_context *ctx, const char *label, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
+nk_checkbox_label_align(struct nk_context *ctx, const char *label, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API nk_bool
 nk_checkbox_text(struct nk_context *, const char *, int, nk_bool *active);
 NK_API nk_bool
-nk_checkbox_text_align(struct nk_context *ctx,
-                       const char        *text,
-                       int                len,
-                       nk_bool           *active,
-                       nk_flags           widget_alignment,
-                       nk_flags           text_alignment);
+nk_checkbox_text_align(struct nk_context *ctx, const char *text, int len, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API nk_bool
 nk_checkbox_flags_label(struct nk_context *, const char *, unsigned int *flags, unsigned int value);
 NK_API nk_bool
@@ -3653,31 +3783,19 @@ nk_checkbox_flags_text(struct nk_context *, const char *, int, unsigned int *fla
 NK_API nk_bool
 nk_radio_label(struct nk_context *, const char *, nk_bool *active);
 NK_API nk_bool
-nk_radio_label_align(
-  struct nk_context *ctx, const char *label, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
+nk_radio_label_align(struct nk_context *ctx, const char *label, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API nk_bool
 nk_radio_text(struct nk_context *, const char *, int, nk_bool *active);
 NK_API nk_bool
-nk_radio_text_align(struct nk_context *ctx,
-                    const char        *text,
-                    int                len,
-                    nk_bool           *active,
-                    nk_flags           widget_alignment,
-                    nk_flags           text_alignment);
+nk_radio_text_align(struct nk_context *ctx, const char *text, int len, nk_bool *active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API nk_bool
 nk_option_label(struct nk_context *, const char *, nk_bool active);
 NK_API nk_bool
-nk_option_label_align(
-  struct nk_context *ctx, const char *label, nk_bool active, nk_flags widget_alignment, nk_flags text_alignment);
+nk_option_label_align(struct nk_context *ctx, const char *label, nk_bool active, nk_flags widget_alignment, nk_flags text_alignment);
 NK_API nk_bool
 nk_option_text(struct nk_context *, const char *, int, nk_bool active);
 NK_API nk_bool
-nk_option_text_align(struct nk_context *ctx,
-                     const char        *text,
-                     int                len,
-                     nk_bool            is_active,
-                     nk_flags           widget_alignment,
-                     nk_flags           text_alignment);
+nk_option_text_align(struct nk_context *ctx, const char *text, int len, nk_bool is_active, nk_flags widget_alignment, nk_flags text_alignment);
 /* =============================================================================
  *
  *                                  SELECTABLE
@@ -4736,6 +4854,49 @@ struct nk_text_shape {
   struct nk_vec2           advance;
 };
 
+enum nk_text_affinity {
+  NK_TEXT_AFFINITY_LEADING,
+  NK_TEXT_AFFINITY_TRAILING
+};
+
+struct nk_text_cursor {
+  int                   source_offset;
+  float                 x;
+  enum nk_text_affinity affinity;
+};
+
+struct nk_text_selection_span {
+  float x;
+  float width;
+};
+
+struct nk_text_selection_iterator {
+  const struct nk_text_shape *shape;
+  int                         source_begin;
+  int                         source_end;
+  int                         run_idx;
+  int                         glyph_idx;
+  float                       pen_x;
+  float                       pending_x;
+  float                       pending_width;
+  nk_bool                     has_pending;
+};
+
+struct nk_text_wrap_line {
+  int      source_begin;
+  int      source_end;
+  float    width;
+  nk_flags break_flags;
+};
+
+struct nk_text_wrap_iterator {
+  const struct nk_text_shape *shape;
+  float                       max_width;
+  int                         source_offset;
+  int                         cluster_idx;
+  int                         boundary_idx;
+};
+
 #define NK_TEXT_TAG(A, B, C, D)    \
   (((nk_uint)(nk_byte)(A) << 24) | \
    ((nk_uint)(nk_byte)(B) << 16) | \
@@ -4819,6 +4980,24 @@ NK_API struct nk_text_shape *
 nk_text_shape_build(struct nk_context *ctx, const struct nk_text_request *request);
 NK_API float
 nk_text_shape_width(const struct nk_text_shape *shape, int source_begin, int source_end);
+NK_API int
+nk_text_shape_boundary_previous(const struct nk_text_shape *shape, int source_offset, nk_flags flags);
+NK_API int
+nk_text_shape_boundary_next(const struct nk_text_shape *shape, int source_offset, nk_flags flags);
+NK_API struct nk_text_cursor
+nk_text_shape_cursor_at(const struct nk_text_shape *shape, int source_offset, enum nk_text_affinity affinity);
+NK_API struct nk_text_cursor
+nk_text_shape_hit_test(const struct nk_text_shape *shape, float x);
+NK_API struct nk_text_cursor
+nk_text_shape_cursor_move(const struct nk_text_shape *shape, struct nk_text_cursor cursor, int direction);
+NK_API void
+nk_text_selection_iterator_begin(struct nk_text_selection_iterator *iterator, const struct nk_text_shape *shape, int source_begin, int source_end);
+NK_API nk_bool
+nk_text_selection_iterator_next(struct nk_text_selection_iterator *iterator, struct nk_text_selection_span *span);
+NK_API void
+nk_text_wrap_iterator_begin(struct nk_text_wrap_iterator *iterator, const struct nk_text_shape *shape, float max_width);
+NK_API nk_bool
+nk_text_wrap_iterator_next(struct nk_text_wrap_iterator *iterator, struct nk_text_wrap_line *line);
 /** Returns a cached width, storing only the request key and width until a full shape is needed. */
 NK_API float
 nk_text_width(struct nk_context *ctx, const struct nk_user_font *font, float height, const char *text, int len);
@@ -5235,7 +5414,8 @@ struct nk_text_edit {
   unsigned char             has_preferred_x;
   unsigned char             single_line;
   unsigned char             active;
-  unsigned char             padding1;
+  unsigned char             cursor_affinity;
+  unsigned char             select_start_affinity;
   float                     preferred_x;
   struct nk_text_undo_state undo;
 };
@@ -6488,25 +6668,28 @@ struct nk_menu_state {
 };
 
 struct nk_panel {
-  enum nk_panel_type        type;
-  nk_flags                  flags;
-  struct nk_rect            bounds;
-  nk_uint                  *offset_x;
-  nk_uint                  *offset_y;
-  nk_uint                  *prev_max_x;
-  nk_uint                  *prev_max_y;
-  nk_uint                  *scroll_flags;
-  float                     at_x, at_y, max_x;
-  float                     footer_height;
-  float                     header_height;
-  float                     border;
-  unsigned int              has_scrolling;
-  struct nk_rect            clip;
-  struct nk_menu_state      menu;
-  struct nk_row_layout      row;
-  struct nk_chart           chart;
-  struct nk_command_buffer *buffer;
-  struct nk_panel          *parent;
+  enum nk_panel_type               type;
+  nk_flags                         flags;
+  struct nk_rect                   bounds;
+  nk_uint                         *offset_x;
+  nk_uint                         *offset_y;
+  nk_uint                         *prev_max_x;
+  nk_uint                         *prev_max_y;
+  nk_uint                         *scroll_flags;
+  float                            at_x, at_y, max_x;
+  float                            footer_height;
+  float                            header_height;
+  float                            border;
+  unsigned int                     has_scrolling;
+  struct nk_rect                   clip;
+  struct nk_menu_state             menu;
+  struct nk_row_layout             row;
+  struct nk_chart                  chart;
+  struct nk_command_buffer        *buffer;
+  struct nk_panel                 *parent;
+  struct nk_text_selection_context text_selection;
+  nk_hash                          text_selection_scope;
+  nk_bool                          text_selection_loaded;
 };
 
 /*==============================================================

@@ -68,6 +68,7 @@ typedef struct ui_console_cfg_s ui_console_cfg_t;
 struct ui_console_cfg_s {
   keybind_t              toggle_bind;
   bool                   auto_scroll;
+  bool                   wrap_lines;
   ui_console_position_t  position;
   ui_console_log_level_t min_level;
 };

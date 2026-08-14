@@ -249,11 +249,12 @@ ui_console_init(ui_console_t *console, arena_t *arena)
   console->history         = ARENA_PUSH_ARRAY_ZERO(arena, str_t, console->history_max);
   console->history_storage = ARENA_PUSH_ARRAY_ZERO(arena, uint8_t, (uint64_t)console->history_max *(uint64_t)console->input_max);
 
-  console->cfg.toggle_bind        = keybind_parse(CONFIG_NK_CONSOLE_DEFAULT_TOGGLE_KEY, KEYBIND_NULL);
-  console->cfg.min_level             = UI_CONSOLE_LOG_DEBUG;
-  console->cfg.position              = UI_CONSOLE_POSITION_BOTTOM;
+  console->cfg.toggle_bind = keybind_parse(CONFIG_NK_CONSOLE_DEFAULT_TOGGLE_KEY, KEYBIND_NULL);
   console->cfg.auto_scroll = true;
-  console->saved_cfg                 = console->cfg;
+  console->cfg.wrap_lines  = true;
+  console->cfg.position    = UI_CONSOLE_POSITION_BOTTOM;
+  console->cfg.min_level   = UI_CONSOLE_LOG_DEBUG;
+  console->saved_cfg       = console->cfg;
 
   console->drag.height_ratio = CONFIG_NK_CONSOLE_DEFAULT_HEIGHT_RATIO;
   console->drag.dragging     = false;
@@ -281,6 +282,8 @@ ui_console_load_cfg(ui_console_t *console, str_list_t lines)
       console->cfg.toggle_bind = keybind_parse(value, KEYBIND_NULL);
     } else if (str_equal_icase(key, STR_LIT("auto_scroll"))) {
       console->cfg.auto_scroll = str_parse_bool(value, true);
+    } else if (str_equal_icase(key, STR_LIT("wrap_lines"))) {
+      console->cfg.wrap_lines = str_parse_bool(value, true);
     } else if (str_equal_icase(key, STR_LIT("position"))) {
       console->cfg.position = ui_console_position_from_str(value);
     } else if (str_equal_icase(key, STR_LIT("min_level"))) {
@@ -309,6 +312,7 @@ ui_console_save_cfg(ui_console_t *console, arena_t *arena, str_list_t *lines)
 
   str_list_push_fmt(arena, lines, "toggle_keybind = %.*s", STR_ARG(toggle_bind_str));
   str_list_push_fmt(arena, lines, "auto_scroll    = %.*s", STR_ARG(STR_BOOL(console->cfg.auto_scroll)));
+  str_list_push_fmt(arena, lines, "wrap_lines     = %.*s", STR_ARG(STR_BOOL(console->cfg.wrap_lines)));
   str_list_push_fmt(arena, lines, "position       = %.*s", STR_ARG(ui_console_position_to_str(console->cfg.position)));
   str_list_push_fmt(arena, lines, "min_level      = %.*s", STR_ARG(ui_console_log_level_to_str(console->cfg.min_level)));
 }
@@ -322,6 +326,10 @@ ui_console_cfg_is_dirty(ui_console_t *console)
     }
 
     if (console->cfg.auto_scroll != console->saved_cfg.auto_scroll) {
+      return true;
+    }
+
+    if (console->cfg.wrap_lines != console->saved_cfg.wrap_lines) {
       return true;
     }
 
@@ -378,6 +386,7 @@ ui_console_execute_builtin(ui_console_t *console, mod_manager_t *mod_manager, st
     }
     return true;
   }
+
   return false;
 }
 
@@ -433,9 +442,18 @@ ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
     }
 
     struct nk_color level_color = ui_console_level_color(line->level);
+    struct nk_text_options options = {
+      .alignment = NK_TEXT_LEFT,
+      .flags     = NK_TEXT_OPTION_SELECTABLE,
+      .color     = level_color,
+    };
 
-    nk_layout_row_static(ctx, CONFIG_NK_CONSOLE_LINE_HEIGHT, (int)line->row_w, 1);
-    ui_text(ctx, line->text, line->row_w, NK_TEXT_LEFT, level_color);
+    if (console->cfg.wrap_lines) {
+      options.flags |= NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_AUTO_HEIGHT;
+    } else {
+      nk_layout_row_static(ctx, CONFIG_NK_CONSOLE_LINE_HEIGHT, (int)line->row_w, 1);
+    }
+    nk_text_ex(ctx, (const char *)line->text.data, (int)line->text.len, &options);
 
     shown += 1;
   }
@@ -450,6 +468,9 @@ static void
 ui_console_draw_log_widget(ui_console_t *console, struct nk_context *ctx)
 {
   if (nk_group_scrolled_begin(ctx, &console->scroll, "console.log", 0)) {
+    if (console->cfg.wrap_lines) {
+      console->scroll.x = 0;
+    }
     ui_console_draw_lines(console, ctx);
     nk_group_scrolled_end(ctx);
   }
@@ -649,7 +670,7 @@ ui_console_update_handle(ui_console_t      *console,
 void
 ui_console_compute_row_widths(ui_console_t *console, struct nk_context *ctx)
 {
-  if (!console->lines) {
+  if (!console->lines || console->cfg.wrap_lines) {
     return;
   }
 
