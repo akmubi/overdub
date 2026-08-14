@@ -707,10 +707,10 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
       str_t outer_name = STR_LIT("(null)");
       str_t name       = STR_LIT("(null)");
       if (stack_node) {
-        if (stack_node->base.base.outer) {
-          outer_name = unreal_fname_to_str(stack_node->base.base.outer->name, tmp.arena);
+        if (stack_node->outer) {
+          outer_name = unreal_fname_to_str(stack_node->outer->name, tmp.arena);
         }
-        name = unreal_fname_to_str(stack_node->base.base.name, tmp.arena);
+        name = unreal_fname_to_str(stack_node->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Local Final Script Function (stack node named %.*s::%.*s)", opcode, STR_ARG(outer_name), STR_ARG(name));
     }
@@ -756,7 +756,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (prop) {
-        name = unreal_fname_to_str(prop->base.name, tmp.arena);
+        name = unreal_fname_to_str(prop->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Local variable named %.*s", opcode, STR_ARG(name));
     }
@@ -771,7 +771,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (prop) {
-        name = unreal_fname_to_str(prop->base.name, tmp.arena);
+        name = unreal_fname_to_str(prop->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Default variable named %.*s", opcode, STR_ARG(name));
     }
@@ -786,7 +786,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (prop) {
-        name = unreal_fname_to_str(prop->base.name, tmp.arena);
+        name = unreal_fname_to_str(prop->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Instance variable named %.*s", opcode, STR_ARG(name));
     }
@@ -801,7 +801,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (prop) {
-        name = unreal_fname_to_str(prop->base.name, tmp.arena);
+        name = unreal_fname_to_str(prop->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Local out variable named %.*s", opcode, STR_ARG(name));
     }
@@ -816,7 +816,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (prop) {
-        name = unreal_fname_to_str(prop->base.name, tmp.arena);
+        name = unreal_fname_to_str(prop->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Class sparse data variable named %.*s", opcode, STR_ARG(name));
     }
@@ -919,10 +919,10 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
       str_t outer_name = STR_LIT("None");
       str_t name       = STR_LIT("None");
       if (stack_node) {
-        if (stack_node->base.base.outer) {
-          outer_name = unreal_fname_to_str(stack_node->base.base.outer->name, tmp.arena);
+        if (stack_node->outer) {
+          outer_name = unreal_fname_to_str(stack_node->outer->name, tmp.arena);
         }
-        name = unreal_fname_to_str(stack_node->base.base.name, tmp.arena);
+        name = unreal_fname_to_str(stack_node->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Call Math (stack node %.*s::%.*s)", opcode, STR_ARG(outer_name), STR_ARG(name));
     }
@@ -940,10 +940,10 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
       str_t outer_name = STR_LIT("(null)");
       str_t name       = STR_LIT("(null)");
       if (stack_node) {
-        if (stack_node->base.base.outer) {
-          outer_name = unreal_fname_to_str(stack_node->base.base.outer->name, tmp.arena);
+        if (stack_node->outer) {
+          outer_name = unreal_fname_to_str(stack_node->outer->name, tmp.arena);
         }
-        name = unreal_fname_to_str(stack_node->base.base.name, tmp.arena);
+        name = unreal_fname_to_str(stack_node->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Final Function (stack node %.*s::%.*s)", opcode, STR_ARG(outer_name), STR_ARG(name));
     }
@@ -961,10 +961,10 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
       str_t outer_name = STR_LIT("(null)");
       str_t name       = STR_LIT("(null)");
       if (stack_node) {
-        if (stack_node->base.base.outer) {
-          outer_name = unreal_fname_to_str(stack_node->base.base.outer->name, tmp.arena);
+        if (stack_node->outer) {
+          outer_name = unreal_fname_to_str(stack_node->outer->name, tmp.arena);
         }
-        name = unreal_fname_to_str(stack_node->base.base.name, tmp.arena);
+        name = unreal_fname_to_str(stack_node->name, tmp.arena);
       }
       push_line(ctx, "$%02X: Call Multicast Delegate (signature %.*s::%.*s) delegate:", opcode, STR_ARG(outer_name), STR_ARG(name));
     }
@@ -1160,7 +1160,7 @@ process_common(disassember_ctx_t *ctx, expr_token_t opcode)
     {
       str_t name = STR_LIT("(null)");
       if (ptr) {
-        name = unreal_fname_to_str(ptr->base.name, tmp.arena);
+        name = unreal_fname_to_str(ptr->name, tmp.arena);
       }
       push_line(ctx, "$%02X: EX_PROPERTY_CONST (%p:%.*s)", opcode, ptr, STR_ARG(name));
     }

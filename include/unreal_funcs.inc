@@ -5,7 +5,6 @@
 UE_FUNC_NORMAL(get_pak_signkey_helper, void, void)
 UE_FUNC_NORMAL(setup_signed_pak_reader, void *, void *self, void *reader_archive, void *filename);
 
-UE_FUNC_NORMAL(uobject_get_world, uworld_t *, uobject_t *self)
 UE_FUNC_NORMAL(static_load_object, uobject_t *, uclass_t *obj_class, uobject_t *outer, const wchar_t *name, const wchar_t *filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx)
 UE_FUNC_NORMAL(static_construct_object, uobject_t *, fstatic_construct_obj_params_t *params)
 UE_FUNC_NORMAL(create_default_object, uobject_t *, uclass_t *self)

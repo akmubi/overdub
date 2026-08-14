@@ -179,7 +179,7 @@ uobject_class_is(uobject_t *obj, str_t cls_name)
     return false;
   }
 
-  return fname_is(obj->cls->base.base.base.name, cls_name);
+  return fname_is(obj->cls->name, cls_name);
 }
 
 static bool
@@ -189,7 +189,7 @@ ufunc_is(ufunc_t *func, str_t func_name)
     return false;
   }
 
-  return fname_is(func->base.base.base.name, func_name);
+  return fname_is(func->name, func_name);
 }
 
 static bool
@@ -299,7 +299,7 @@ tweaks_on_jbox_controller_create(uobject_t *obj, int32_t idx, void *user)
 
   tweaks_t *tweaks = &g_tweaks;
 
-  if (obj && obj->cls && unreal_fname_equal(obj->cls->base.base.base.name, tweaks->jbox.controller_cls_name, true) && !unreal_uobject_is_default(obj)) {
+  if (obj && obj->cls && unreal_fname_equal(obj->cls->name, tweaks->jbox.controller_cls_name, true) && !unreal_uobject_is_default(obj)) {
     tweaks->jbox.controller           = (jbox_controller_t *)obj;
     tweaks->jbox.should_restore_state = true;
   }

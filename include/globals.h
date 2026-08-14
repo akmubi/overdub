@@ -30,6 +30,7 @@ struct globals_s {
   fname_pool_t       *name_pool;
   uworld_t          **gworld_ptr; // points to current world
   fnative_func_ptr_t *natives;
+  uobject_vtable_t   *uobject_vtable;
 
   unreal_common_t     unreal;
   uobject_listener_t *listeners;

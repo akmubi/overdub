@@ -364,8 +364,8 @@ static inline bool
 fprop_class_is(fprop_t *prop, fname_t name)
 {
   ASSERT(prop != NULL);
-  ASSERT(prop->base.cls != NULL);
-  return unreal_fname_equal(prop->base.cls->name, name, false);
+  ASSERT(prop->cls != NULL);
+  return unreal_fname_equal(prop->cls->name, name, false);
 }
 
 static inline bool
@@ -378,7 +378,7 @@ fprop_struct_is(fprop_t *prop, fname_t name)
     return false;
   }
 
-  uobject_t *obj = (uobject_t *)&sp->script_struct->base;
+  uobject_t *obj = (uobject_t *)sp->script_struct;
   return unreal_fname_equal(obj->name, name, false);
 }
 
@@ -392,7 +392,7 @@ fprop_class_push_type_name(arena_t *arena, str_t prefix, uclass_t *cls)
 str_t
 fprop_push_type_name(arena_t *arena, fprop_t *prop)
 {
-  if (!prop || !prop->base.cls) {
+  if (!prop || !prop->cls) {
     return STR_LIT("<null>");
   }
 
@@ -467,7 +467,7 @@ fprop_push_type_name(arena_t *arena, fprop_t *prop)
       return STR_LIT("<unknown struct>");
     }
 
-    return unreal_uobject_push_name((uobject_t *)&p->script_struct->base, arena);
+    return unreal_uobject_push_name((uobject_t *)p->script_struct, arena);
   }
 
   if (fprop_class_is(prop, globals.unreal.enum_prop)) {
@@ -524,7 +524,7 @@ fprop_push_type_name(arena_t *arena, fprop_t *prop)
     return str_push_fmt(arena, "MulticastSparseDelegate<%.*s>", STR_ARG(sig));
   }
 
-  return unreal_fname_to_str(prop->base.cls->name, arena);
+  return unreal_fname_to_str(prop->cls->name, arena);
 }
 
 detail_prop_t *
@@ -577,7 +577,7 @@ detail_prop_expand_complex(search_tool_t *tool, detail_tab_t *tab, detail_prop_t
   if (fprop_class_is(prop, globals.unreal.struct_prop)) {
     fprop_struct_t *sp = (fprop_struct_t *)prop;
     if (sp->script_struct) {
-      ustruct_t *st = &sp->script_struct->base;
+      ustruct_t *st = (ustruct_t *)sp->script_struct;
       for (ffield_t *f = st->child_props; f; f = f->next) {
         fprop_t       *child_prop = (fprop_t *)f;
         detail_prop_t *child_node = detail_prop_push(tool, tab, child_prop, false, depth + 1, permanent, runtime);
@@ -628,7 +628,7 @@ detail_prop_push(search_tool_t *tool, detail_tab_t *tab, fprop_t *prop, bool is_
   detail_prop_t *node  = (runtime) ? detail_prop_alloc_runtime(tab) : ARENA_PUSH_ZERO(arena, detail_prop_t);
   if (node) {
     node->prop        = prop;
-    node->name        = ui_text_span_make(tool->ctx, unreal_fname_to_str(prop->base.name, arena));
+    node->name        = ui_text_span_make(tool->ctx, unreal_fname_to_str(prop->name, arena));
     node->type        = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, prop));
     node->offset      = prop->offset_internal;
     node->size        = prop->elem_size;
@@ -815,7 +815,7 @@ detail_func_push(search_tool_t *tool, detail_tab_t *tab, record_t *func_record, 
     node->event_graph_func_text        = ui_text_span_make(tool->ctx, str_push_fmt(arena, "%p", ufunc->event_graph_func));
     node->event_graph_call_offset_text = ui_text_span_make(tool->ctx, str_push_fmt(arena, "%p", ufunc->event_graph_call_offset));
 
-    for (ffield_t *f = ufunc->base.child_props; f; f = f->next) {
+    for (ffield_t *f = ufunc->child_props; f; f = f->next) {
       fprop_t *prop = (fprop_t *)f;
 
       if (!(prop->prop_flags & CPF_PARM)) {
@@ -1928,7 +1928,7 @@ prop_push_value_summary(search_tool_t *tool, detail_prop_t *node, arena_t *arena
         result = fint_point_push_summary(arena, addr);
       } else if (fprop_struct_is(prop, globals.unreal.int_vector)) {
         result = fint_vector_push_summary(arena, addr);
-      } else if (sp && sp->script_struct && sp->script_struct->base.child_props != NULL) {
+      } else if (sp && sp->script_struct && sp->script_struct->child_props != NULL) {
         result = STR_LIT("{...}");
       } else {
         str_t hex = prop_push_hex_summary(arena, addr, node->size);
@@ -2623,7 +2623,7 @@ detail_prop_fill_value_sparse_mcast_delegate_children(search_tool_t *tool, detai
 
   arena_t                         *arena       = tab->value_arena;
   uobject_t                       *value_owner = tab->record ? tab->record->obj : NULL;
-  detail_fscript_delegate_array_t *list        = unreal_get_mcast_sparse_delegate(value_owner, node->prop->base.name);
+  detail_fscript_delegate_array_t *list        = unreal_get_mcast_sparse_delegate(value_owner, node->prop->name);
 
   if (!list) {
     detail_prop_clear_runtime_children(tab, node);
@@ -2748,7 +2748,7 @@ detail_prop_fill_value_from_base(search_tool_t *tool, detail_tab_t *tab, detail_
     prop->value_addr     = base + prop->offset;
 
     if (prop->runtime_node) {
-      detail_prop_refresh_runtime_text(tool, tab, prop, unreal_fname_to_str(prop->prop->base.name, tab->value_arena));
+      detail_prop_refresh_runtime_text(tool, tab, prop, unreal_fname_to_str(prop->prop->name, tab->value_arena));
     }
 
     detail_prop_fill_value_direct(tool, tab, prop, depth);

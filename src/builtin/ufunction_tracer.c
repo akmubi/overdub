@@ -582,8 +582,8 @@ trace_logical_call_begin(trace_tool_t *tool, uobject_t *self, ufunc_t *func, uin
   call->self         = self;
   call->func         = func;
   call->self_fname   = self->name;
-  call->class_fname  = self->cls ? self->cls->base.base.base.name : (fname_t){0};
-  call->func_fname   = func->base.base.base.name;
+  call->class_fname  = self->cls ? self->cls->name : (fname_t){0};
+  call->func_fname   = func->name;
   call->self_kind    = uobject_kind(self);
   call->source_flags = source;
 

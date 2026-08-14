@@ -90,7 +90,7 @@ uobject_kind(uobject_t *obj)
     [UOBJECT_KIND_DATA_TABLE]        = globals.unreal.data_table,
   };
 
-  for (uclass_t *cls = obj->cls; cls; cls = (uclass_t *)cls->base.super_struct) {
+  for (uclass_t *cls = obj->cls; cls; cls = (uclass_t *)cls->super_struct) {
     for (uobject_kind_t kind = UOBJECT_KIND_PACKAGE; kind < UOBJECT_KIND_MAX; ++kind) {
       if (kind_to_uclass_map[kind] == cls) {
         return kind;

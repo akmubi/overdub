@@ -6,7 +6,8 @@
 
 #include "vendor_minhook.h"
 
-#define UE_FUNC_NORMAL(NAME, RET, ...) NAME##_fn_t NAME = NULL;
+#define UE_FUNC_NORMAL(NAME, RET, ...) \
+  NAME##_fn_t NAME = NULL;
 #define UE_FUNC_HOOKED(NAME, RET, ...) \
   NAME##_fn_t NAME        = NULL;      \
   NAME##_fn_t NAME##_real = NULL;
@@ -102,7 +103,7 @@ scan_user_module_signatures(void)
     SIG_ENTRY_NORMAL(LEA_ADDR,   globals.name_pool,                       "48 8D 05 ? ? ? ? EB ? 48 8D 0D ? ? ? ? E8 ? ? ? ? C6 05 ? ? ? ? ? 8B 80 ? ? ? ? 83 8B",                                                                                                           0x042D26E4, 0x040E9DA4),
     SIG_ENTRY_NORMAL(MOV64_ADDR, globals.gworld_ptr,                      "48 8B 05 ? ? ? ? 4C 8D 44 24 ? 48 8D 54 24 ? 48 89 44 24 ? 48 8B CB",                                                                                                                             0x047AD35A, 0x045C489A),
     SIG_ENTRY_NORMAL(LEA_ADDR,   globals.natives,                         "48 8D 05 ? ? ? ? B9 ? ? ? ? 0F 1F 40 ? 66 0F 1F 84 00 ? ? ? ? ? ? ? 48 89 50 ? 48 89 50 ? 48 8D 40 ? 48 89 50 ? 48 89 50 ? 48 89 50 ? 48 89 50 ? 48 89 50 ? 48 83 E9 ? 75 ? 8B 05 ? ? ? ? 33 C9", 0x00A062C7, 0x009BC917),
-    SIG_ENTRY_NORMAL(DIRECT,     uobject_get_world,                       "48 8B 49 ? 48 85 C9 74 ? ? ? ? 48 FF A0 ? ? ? ? 33 C0 C3 ? ? ? ? ? ? ? ? ? ? 48 83 EC",                                                                                                           0x029B06C0, 0x029345D0),
+    SIG_ENTRY_NORMAL(LEA_ADDR,   globals.uobject_vtable,                  "48 8D 05 ? ? ? ? ? ? ? 48 8B FA 48 8B D9",                                                                                                                                                        0x02A1A6E1, 0x00000000),
     SIG_ENTRY_NORMAL(DIRECT,     static_load_object,                      "4C 89 4C 24 ? 48 89 54 24 ? 48 89 4C 24 ? 55 53 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC ? 33 FF 49 8B F0",                                                                                0x02A14930, 0x02998AC0),
     SIG_ENTRY_NORMAL(DIRECT,     static_construct_object,                 "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 84 24 ? ? ? ? ? ? ? 48 8B D9",                                                          0x02A1B9F0, 0x0299FB10),
     SIG_ENTRY_NORMAL(DIRECT,     create_default_object,                   "4C 8B DC 55 57 49 8D AB ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 85 ? ? ? ? 48 83 B9 ? ? ? ? 00 48 8B F9 0F 85",                                                                  0x02896DE0, 0x0281B000),

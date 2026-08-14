@@ -36,7 +36,7 @@ record_matches_query(search_tool_t *tool, record_t *record)
 static inline bool
 fprop_class_is(fprop_t *prop, fname_t name)
 {
-  return prop && prop->base.cls && unreal_fname_equal(prop->base.cls->name, name, false);
+  return prop && prop->cls && unreal_fname_equal(prop->cls->name, name, false);
 }
 
 static bool
@@ -57,12 +57,12 @@ prop_matches_query(search_tool_t *tool, fprop_t *prop)
   }
 
   /* property name itself: Conditions, AchievementName, StatName, etc. */
-  if (query_matches_fname(prop->base.name, &tool->search.query, tool->search.ignore_case, tool->search.exact_match)) {
+  if (query_matches_fname(prop->name, &tool->search.query, tool->search.ignore_case, tool->search.exact_match)) {
     return true;
   }
 
   /* property class/type name: ArrayProperty, StructProperty, ObjectProperty, etc. */
-  if (prop->base.cls && query_matches_fname(prop->base.cls->name, &tool->search.query, tool->search.ignore_case, tool->search.exact_match)) {
+  if (prop->cls && query_matches_fname(prop->cls->name, &tool->search.query, tool->search.ignore_case, tool->search.exact_match)) {
     return true;
   }
 

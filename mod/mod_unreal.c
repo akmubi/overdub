@@ -2,6 +2,11 @@
 
 #include <string.h>
 
+#define TMAP_FNAME_UINT8PTR_KEY_EQUAL(A, B) unreal_fname_equal(A, B, false)
+#define TMAP_FNAME_UINT8PTR_KEY_HASH(KEY)   unreal_fname_hash(KEY)
+
+TMAP_DEFINE_FUNCS(unreal_tmap_fname_uint8ptr, tmap_fname_uint8ptr_t, fname_t, uint8_t *, TMAP_FNAME_UINT8PTR_KEY_EQUAL, TMAP_FNAME_UINT8PTR_KEY_HASH)
+
 unreal_cached_objects_t g_cached_objects = {0};
 
 void
@@ -92,6 +97,27 @@ unreal_fname_equal(fname_t a, fname_t b, bool ignore_num)
     return a.cmp_idx == b.cmp_idx;
   }
   return a.cmp_idx == b.cmp_idx && a.num == b.num;
+}
+
+uint32_t
+unreal_fname_hash(fname_t name)
+{
+  uint32_t block  = name.cmp_idx >> FNAME_BLOCK_OFFSET_BITS;
+  uint32_t offset = name.cmp_idx & ((1u << FNAME_BLOCK_OFFSET_BITS) - 1);
+
+  uint32_t hash = (block << (32 - FNAME_MAX_BLOCK_BITS)) +
+                  (block) +
+                  (offset << FNAME_BLOCK_OFFSET_BITS) +
+                  (offset) +
+                  (offset >> 4);
+
+  return hash + name.num;
+}
+
+bool
+unreal_fname_is_none(fname_t name)
+{
+  return name.cmp_idx == 0 && name.num == 0;
 }
 
 fname_entry_t *
@@ -418,33 +444,90 @@ unreal_fname_match_text16(fname_t name, str16_t text, bool ignore_case, bool exa
 }
 
 /* ==================================================== FSTRING ===================================================== */
+static uint32_t g_fcrc_table[256] = {
+  0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9, 0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,
+  0x2608EDB8, 0x22C9F00F, 0x2F8AD6D6, 0x2B4BCB61, 0x350C9B64, 0x31CD86D3, 0x3C8EA00A, 0x384FBDBD,
+  0x4C11DB70, 0x48D0C6C7, 0x4593E01E, 0x4152FDA9, 0x5F15ADAC, 0x5BD4B01B, 0x569796C2, 0x52568B75,
+  0x6A1936C8, 0x6ED82B7F, 0x639B0DA6, 0x675A1011, 0x791D4014, 0x7DDC5DA3, 0x709F7B7A, 0x745E66CD,
+  0x9823B6E0, 0x9CE2AB57, 0x91A18D8E, 0x95609039, 0x8B27C03C, 0x8FE6DD8B, 0x82A5FB52, 0x8664E6E5,
+  0xBE2B5B58, 0xBAEA46EF, 0xB7A96036, 0xB3687D81, 0xAD2F2D84, 0xA9EE3033, 0xA4AD16EA, 0xA06C0B5D,
+  0xD4326D90, 0xD0F37027, 0xDDB056FE, 0xD9714B49, 0xC7361B4C, 0xC3F706FB, 0xCEB42022, 0xCA753D95,
+  0xF23A8028, 0xF6FB9D9F, 0xFBB8BB46, 0xFF79A6F1, 0xE13EF6F4, 0xE5FFEB43, 0xE8BCCD9A, 0xEC7DD02D,
+  0x34867077, 0x30476DC0, 0x3D044B19, 0x39C556AE, 0x278206AB, 0x23431B1C, 0x2E003DC5, 0x2AC12072,
+  0x128E9DCF, 0x164F8078, 0x1B0CA6A1, 0x1FCDBB16, 0x018AEB13, 0x054BF6A4, 0x0808D07D, 0x0CC9CDCA,
+  0x7897AB07, 0x7C56B6B0, 0x71159069, 0x75D48DDE, 0x6B93DDDB, 0x6F52C06C, 0x6211E6B5, 0x66D0FB02,
+  0x5E9F46BF, 0x5A5E5B08, 0x571D7DD1, 0x53DC6066, 0x4D9B3063, 0x495A2DD4, 0x44190B0D, 0x40D816BA,
+  0xACA5C697, 0xA864DB20, 0xA527FDF9, 0xA1E6E04E, 0xBFA1B04B, 0xBB60ADFC, 0xB6238B25, 0xB2E29692,
+  0x8AAD2B2F, 0x8E6C3698, 0x832F1041, 0x87EE0DF6, 0x99A95DF3, 0x9D684044, 0x902B669D, 0x94EA7B2A,
+  0xE0B41DE7, 0xE4750050, 0xE9362689, 0xEDF73B3E, 0xF3B06B3B, 0xF771768C, 0xFA325055, 0xFEF34DE2,
+  0xC6BCF05F, 0xC27DEDE8, 0xCF3ECB31, 0xCBFFD686, 0xD5B88683, 0xD1799B34, 0xDC3ABDED, 0xD8FBA05A,
+  0x690CE0EE, 0x6DCDFD59, 0x608EDB80, 0x644FC637, 0x7A089632, 0x7EC98B85, 0x738AAD5C, 0x774BB0EB,
+  0x4F040D56, 0x4BC510E1, 0x46863638, 0x42472B8F, 0x5C007B8A, 0x58C1663D, 0x558240E4, 0x51435D53,
+  0x251D3B9E, 0x21DC2629, 0x2C9F00F0, 0x285E1D47, 0x36194D42, 0x32D850F5, 0x3F9B762C, 0x3B5A6B9B,
+  0x0315D626, 0x07D4CB91, 0x0A97ED48, 0x0E56F0FF, 0x1011A0FA, 0x14D0BD4D, 0x19939B94, 0x1D528623,
+  0xF12F560E, 0xF5EE4BB9, 0xF8AD6D60, 0xFC6C70D7, 0xE22B20D2, 0xE6EA3D65, 0xEBA91BBC, 0xEF68060B,
+  0xD727BBB6, 0xD3E6A601, 0xDEA580D8, 0xDA649D6F, 0xC423CD6A, 0xC0E2D0DD, 0xCDA1F604, 0xC960EBB3,
+  0xBD3E8D7E, 0xB9FF90C9, 0xB4BCB610, 0xB07DABA7, 0xAE3AFBA2, 0xAAFBE615, 0xA7B8C0CC, 0xA379DD7B,
+  0x9B3660C6, 0x9FF77D71, 0x92B45BA8, 0x9675461F, 0x8832161A, 0x8CF30BAD, 0x81B02D74, 0x857130C3,
+  0x5D8A9099, 0x594B8D2E, 0x5408ABF7, 0x50C9B640, 0x4E8EE645, 0x4A4FFBF2, 0x470CDD2B, 0x43CDC09C,
+  0x7B827D21, 0x7F436096, 0x7200464F, 0x76C15BF8, 0x68860BFD, 0x6C47164A, 0x61043093, 0x65C52D24,
+  0x119B4BE9, 0x155A565E, 0x18197087, 0x1CD86D30, 0x029F3D35, 0x065E2082, 0x0B1D065B, 0x0FDC1BEC,
+  0x3793A651, 0x3352BBE6, 0x3E119D3F, 0x3AD08088, 0x2497D08D, 0x2056CD3A, 0x2D15EBE3, 0x29D4F654,
+  0xC5A92679, 0xC1683BCE, 0xCC2B1D17, 0xC8EA00A0, 0xD6AD50A5, 0xD26C4D12, 0xDF2F6BCB, 0xDBEE767C,
+  0xE3A1CBC1, 0xE760D676, 0xEA23F0AF, 0xEEE2ED18, 0xF0A5BD1D, 0xF464A0AA, 0xF9278673, 0xFDE69BC4,
+  0x89B8FD09, 0x8D79E0BE, 0x803AC667, 0x84FBDBD0, 0x9ABC8BD5, 0x9E7D9662, 0x933EB0BB, 0x97FFAD0C,
+  0xAFB010B1, 0xAB710D06, 0xA6322BDF, 0xA2F33668, 0xBCB4666D, 0xB8757BDA, 0xB5365D03, 0xB1F740B4,
+};
 
-fstring_t
-unreal_fstring_view_from_str16(str16_t s)
-{
-  return (fstring_t){
-    .data = s.data,
-    .len  = (int32_t)s.len,
-    .max  = (int32_t)s.len,
-  };
-}
-
-str16_t
-unreal_fstring_view_to_str16(fstring_t fs)
-{
-  return str16_from_wstr_with_cap(fs.data, fs.len);
-}
 
 fstring_t
 unreal_fstring_from_str(str_t s, mod_arena_t arena)
 {
-  return unreal_fstring_view_from_str16(str16_from_str(arena, s));
+  str16_t s16 = str16_from_str(arena, s);
+  MOD_ASSERT(s16.data[s16.len] == 0); // must be null-terminated
+
+  return (fstring_t){
+    .data = s16.data,
+    .len  = (int32_t)s16.len + 1,
+    .max  = (int32_t)s16.len + 1,
+  };
 }
 
 str_t
 unreal_fstring_to_str(fstring_t fs, mod_arena_t arena)
 {
-  return str_from_str16(arena, unreal_fstring_view_to_str16(fs));
+  return str_from_str16(arena, str16_from_wstr_with_cap(fs.data, fs.len));
+}
+
+static inline uint32_t
+unreal_crc_byte(uint32_t hash, uint8_t byte)
+{
+  return ((hash >> 8) & 0x00FFFFFF) ^ g_fcrc_table[(hash ^ byte) & 0xFF];
+}
+
+static inline uint16_t
+unreal_tchar_to_upper(uint16_t c)
+{
+  return (c >= 'a' && c <= 'z') ? (uint16_t)(c - ('a' - 'A')) : c;
+}
+
+uint32_t
+unreal_fstring_hash(fstring_t str)
+{
+  if (!str.data || str.len <= 1) {
+    return 0;
+  }
+
+  int32_t  len  = str.len - 1;
+  uint32_t hash = 0;
+  for (int32_t i = 0; i < len; ++i) {
+    uint16_t ch = unreal_tchar_to_upper(str.data[i]);
+
+    hash = unreal_crc_byte(hash, (uint8_t)(ch >> 0));
+    hash = unreal_crc_byte(hash, (uint8_t)(ch >> 8));
+  }
+
+  return hash;
 }
 
 /* =================================================== FIOSTATUS ==================================================== */
@@ -560,7 +643,7 @@ bool
 unreal_uobject_is_a(uobject_t *obj, uclass_t *cls)
 {
   if (obj && cls) {
-    for (uclass_t *c = obj->cls; c; c = (uclass_t *)c->base.super_struct) {
+    for (uclass_t *c = obj->cls; c; c = (uclass_t *)c->super_struct) {
       if (c == cls) {
         return true;
       }
@@ -648,8 +731,8 @@ unreal_outer_chain_contains(uobject_t *obj, str_t str, bool ignore_case, bool ex
 bool
 unreal_super_chain_contains(uclass_t *cls, str_t str, bool ignore_case, bool exact_match)
 {
-  for (ustruct_t *s = cls ? &cls->base : NULL; s; s = s->super_struct) {
-    if (unreal_fname_match_text(s->base.base.name, str, ignore_case, exact_match)) {
+  for (ustruct_t *s = cls ? (ustruct_t *)cls : NULL; s; s = s->super_struct) {
+    if (unreal_fname_match_text(s->name, str, ignore_case, exact_match)) {
       return true;
     }
   }
@@ -1039,14 +1122,7 @@ fprop_t *
 unreal_ustruct_find_prop(ustruct_t *s, str_t name)
 {
   for (fprop_t *p = s->prop_link; p; p = p->prop_link_next) {
-    tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_INVALID);
-
-    str_t prop_name = unreal_fname_to_str(p->base.name, tmp.arena);
-    bool  found     = str_equal(prop_name, name, 0);
-
-    mod_scratch_end(tmp);
-
-    if (found) {
+    if (unreal_fname_match_text(p->name, name, false, true)) {
       return p;
     }
   }
@@ -1059,14 +1135,7 @@ unreal_ustruct_find_func(ustruct_t *s, str_t name)
 {
   for (ustruct_t *cur = s; cur; cur = cur->super_struct) {
     for (ufield_t *f = cur->children; f; f = f->next) {
-      tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_INVALID);
-
-      str_t func_name = unreal_fname_to_str(f->base.name, tmp.arena);
-      bool  found     = str_equal(func_name, name, 0);
-
-      mod_scratch_end(tmp);
-
-      if (found) {
+      if (unreal_fname_match_text(f->name, name, false, true)) {
         return (ufunc_t *)f;
       }
     }
@@ -1080,7 +1149,7 @@ unreal_ustruct_find_func_fname(ustruct_t *s, fname_t name, bool ignore_num)
 {
   for (ustruct_t *cur = s; cur; cur = cur->super_struct) {
     for (ufield_t *f = cur->children; f; f = f->next) {
-      if (unreal_fname_equal(f->base.name, name, ignore_num)) {
+      if (unreal_fname_equal(f->name, name, ignore_num)) {
         return (ufunc_t *)f;
       }
     }
@@ -1094,4 +1163,132 @@ unreal_get_mcast_sparse_delegate(uobject_t *delegate_owner, fname_t delegate_nam
 {
   const mod_host_api_t *host = mod_sdk_host();
   return (host) ? host->get_mcast_sparse_delegate(delegate_owner, delegate_name) : NULL;
+}
+
+/* =============================================== CONTAINER UTILITIES ============================================== */
+
+static uint32_t *
+unreal_tbit_array_data(tbit_array_t *bits)
+{
+  if (!bits) {
+    return NULL;
+  }
+
+  if (bits->allocator.secondary_data) {
+    return (uint32_t *)bits->allocator.secondary_data;
+  }
+
+  if (bits->num_bits > COUNTOF(bits->allocator.inline_data) * 32) {
+    MOD_ASSERT_MSG(false, "TBitArray has %d bits but no secondary allocation", bits->num_bits);
+    return NULL;
+  }
+
+  return bits->allocator.inline_data;
+}
+
+bool
+unreal_tbit_array_is_set(tbit_array_t *bits, int32_t idx)
+{
+  if (!bits || idx < 0 || idx >= bits->num_bits) {
+    return false;
+  }
+
+  uint32_t *data = unreal_tbit_array_data(bits);
+  if (!data) {
+    return false;
+  }
+
+  uint32_t bit_idx = (uint32_t)idx;
+  return (data[bit_idx >> 5] & (1u << (bit_idx & 31))) != 0;
+}
+
+int32_t
+unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx)
+{
+  if (!bits || bits->num_bits <= 0) {
+    return TSET_INVALID_ID;
+  }
+
+  if (start_idx < 0) {
+    start_idx = 0;
+  }
+
+  uint32_t *data = unreal_tbit_array_data(bits);
+  if (!data) {
+    return TSET_INVALID_ID;
+  }
+
+  for (int32_t idx = start_idx; idx < bits->num_bits; ++idx) {
+    uint32_t bit_idx = (uint32_t)idx;
+    if (data[bit_idx >> 5] & (1u << (bit_idx & 31))) {
+      return idx;
+    }
+  }
+
+  return TSET_INVALID_ID;
+}
+
+int32_t
+unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash)
+{
+  if (!hash || hash_size <= 0) {
+    return TSET_INVALID_ID;
+  }
+
+  if ((hash_size & (hash_size - 1)) != 0) {
+    MOD_ASSERT_MSG(false, "TSet hash size must be a power of two: %d", hash_size);
+    return TSET_INVALID_ID;
+  }
+
+  int32_t *data = hash->secondary_data ? (int32_t *)hash->secondary_data : hash->inline_data;
+  if (!hash->secondary_data && hash_size > COUNTOF(hash->inline_data)) {
+    MOD_ASSERT_MSG(false, "TSet hash has %d buckets but no secondary allocation", hash_size);
+    return TSET_INVALID_ID;
+  }
+
+  return data[key_hash & (uint32_t)(hash_size - 1)];
+}
+
+/* =================================================== DATA TABLE =================================================== */
+
+tmap_fname_uint8ptr_t *
+udata_table_get_row_map(udata_table_t *table)
+{
+  return (table) ? &table->row_map : NULL;
+}
+
+void
+udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data)
+{
+  if (table && row_data) {
+    table->vtable->add_row(table, row_name, row_data);
+  }
+}
+
+void
+udata_table_remove_row(udata_table_t *table, fname_t row_name)
+{
+  if (table) {
+    table->vtable->remove_row(table, row_name);
+  }
+}
+
+void
+udata_table_empty(udata_table_t *table)
+{
+  if (table) {
+    table->vtable->empty_table(table);
+  }
+}
+
+uint8_t *
+udata_table_find_row(udata_table_t *table, fname_t row_name)
+{
+  if (table && table->row_struct && !unreal_fname_is_none(row_name)) {
+    uint8_t **row_data_ptr = unreal_tmap_fname_uint8ptr_find(&table->row_map, row_name);
+    if (row_data_ptr) {
+      return *row_data_ptr;
+    }
+  }
+  return NULL;
 }
