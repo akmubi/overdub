@@ -162,17 +162,18 @@ struct trace_ui_s {
   uint32_t       page_idx;
   arena_t        page_arena;
 
-  ui_text_span_t seq;
-  ui_text_span_t time;
-  ui_text_span_t duration;
-  ui_text_span_t depth;
-  ui_text_span_t kind;
-  ui_text_span_t class_name;
-  ui_text_span_t self_name;
-  ui_text_span_t func_name;
-  ui_text_span_t kind_pe;
-  ui_text_span_t kind_invoke;
-  ui_text_span_t kind_pe_and_invoke;
+  ui_text_span_t       seq;
+  ui_text_span_t       time;
+  ui_text_span_t       duration;
+  ui_text_span_t       depth;
+  ui_text_span_t       kind;
+  ui_text_span_t       class_name;
+  ui_text_span_t       self_name;
+  ui_text_span_t       func_name;
+  ui_text_span_t       kind_pe;
+  ui_text_span_t       kind_invoke;
+  ui_text_span_t       kind_pe_and_invoke;
+  struct nk_grid_state call_grid;
 };
 
 typedef struct trace_cfg_s trace_cfg_t;
@@ -683,38 +684,43 @@ detail_copy_text(struct nk_context *ctx, str_t text)
 }
 
 static bool
-ui_detail_row(trace_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bool *maximized)
+ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_row_t row, bool *maximized)
 {
+  struct nk_grid_column  columns[NK_GRID_MAX_COLUMNS] = {0};
+  struct nk_grid_options grid_options = {0};
+  struct nk_context     *ctx;
+  struct nk_style       *style;
+  struct nk_panel       *layout;
+  struct nk_grid         grid;
+  struct nk_rect         row_bounds = {0};
+  float                  indent_w;
+  float                  symbol_w;
+  float                  gap_w;
+  bool                   expanded;
+  detail_tree_row_view_t view;
+  int i;
+
   ASSERT(tool != NULL);
   ASSERT(tool->ctx != NULL);
+  ASSERT(grid_state != NULL);
   ASSERT(row.parts != NULL);
-  ASSERT(row.count > 0);
-  if (cols) {
-    ASSERT(cols->count == row.count);
-  }
-
+  ASSERT(row.count > 0 && row.count + 1 <= NK_GRID_MAX_COLUMNS);
   if (row.has_children) {
     ASSERT(maximized != NULL);
   }
 
-  struct nk_context *ctx = tool->ctx;
+  ctx = tool->ctx;
   if (!ctx->current || !ctx->current->layout) {
     return false;
   }
 
-  detail_tree_row_view_t view = DETAIL_TREE_ROW_TEXT;
-  if (row.has_children) {
-    view = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
-  }
+  style     = &ctx->style;
+  layout    = ctx->current->layout;
+  gap_w     = ui_text_width(ctx, STR_LIT(" "));
+  indent_w  = style->tab.indent;
+  symbol_w  = NK_MAX(style->font_size, 12.0f);
+  row.depth = NK_MAX(row.depth, 0);
 
-  struct nk_style *style  = &ctx->style;
-  struct nk_panel *layout = ctx->current->layout;
-
-  float row_h = style->font_size + 2.0f * style->tab.padding.y;
-  float pad_x = style->tab.padding.x;
-  float gap_w = ui_text_width(ctx, STR_LIT(" "));
-
-  float indent_w = style->tab.indent;
   if (indent_w <= 0.0f) {
     indent_w = ui_text_width(ctx, STR_LIT("  "));
   }
@@ -723,100 +729,69 @@ ui_detail_row(trace_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, boo
     indent_w = 12.0f;
   }
 
-  float symbol_w = NK_MAX(style->font_size, 12.0f);
-  float parts_w  = 0.0f;
-
-  if (cols) {
-    for (int i = 0; i < cols->count; ++i) {
-      parts_w += cols->width[i];
-      if (i + 1 < cols->count) {
-        parts_w += gap_w;
-      }
-    }
-  } else {
-    for (int i = 0; i < row.count; ++i) {
-      parts_w += row.parts[i].text.width;
-      if (i + 1 < row.count) {
-        parts_w += gap_w;
-      }
-    }
+  columns[0].sizing = NK_GRID_COLUMN_FIXED;
+  columns[0].width  = style->tab.padding.x + (float)row.depth * indent_w + symbol_w + gap_w;
+  for (i = 0; i < row.count; ++i) {
+    columns[i + 1].sizing = NK_GRID_COLUMN_CONTENT;
   }
 
-  row.depth = NK_MAX(row.depth, 0);
+  grid_options.row_height = style->font_size + 2.0f * style->tab.padding.y;
+  grid_options.column_gap = gap_w;
+  nk_grid_begin(ctx, &grid, grid_state, columns, row.count + 1, &grid_options);
 
-  float text_cell_w = pad_x + (float)row.depth * indent_w + symbol_w + gap_w + parts_w + gap_w;
-  float row_w       = text_cell_w;
+  expanded = row.has_children ? *maximized : false;
+  view     = row.has_children ? (*maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED) : DETAIL_TREE_ROW_TEXT;
 
-  float visible_w  = NK_MAX(layout->bounds.w - 2.0f * style->window.padding.x, 1.0f);
-  float filler_w   = NK_MAX(visible_w - row_w, 0.0f);
-  bool  has_filler = AS_BOOL(filler_w > 0.5f);
-  bool  expanded   = (row.has_children) ? *maximized : false;
+  nk_layout_set_min_row_height(ctx, grid_options.row_height);
+  if (nk_grid_row_begin(&grid)) {
+    struct nk_rect               bounds;
+    enum nk_widget_layout_states layout_state;
 
-  struct nk_rect row_bounds = {0};
-
-  nk_layout_set_min_row_height(ctx, row_h);
-  nk_layout_row_begin(ctx, NK_STATIC, row_h, 1 + has_filler);
-  {
-    nk_layout_row_push(ctx, text_cell_w);
-
-    struct nk_rect               bounds       = {0};
-    enum nk_widget_layout_states layout_state = nk_widget(&bounds, ctx);
-
+    nk_grid_push_row(&grid);
+    layout_state = nk_widget(&bounds, ctx);
     if (layout_state != NK_WIDGET_INVALID) {
-      row_bounds   = bounds;
-      row_bounds.w = row_w;
+      struct nk_input          *in        = NULL;
+      nk_flags                  row_state = 0;
+      struct nk_command_buffer *out       = nk_window_get_canvas(ctx);
+      struct nk_color           bg        = row.has_children ? DETAIL_C_ROW_COLLAPSIBLE_BG : UI_C_TRANSPARENT;
+      struct nk_rect            sym;
 
-      struct nk_input *in = NULL;
-      if (layout_state != NK_WIDGET_ROM && layout_state != NK_WIDGET_DISABLED && !(layout->flags & NK_WINDOW_ROM) && !(layout->flags & NK_WINDOW_NO_INPUT) &&
+      row_bounds   = bounds;
+      row_bounds.w = grid.offsets[row.count] + grid.widths[row.count];
+
+      if (layout_state != NK_WIDGET_ROM && layout_state != NK_WIDGET_DISABLED &&
+          !(layout->flags & NK_WINDOW_ROM) && !(layout->flags & NK_WINDOW_NO_INPUT) &&
           ui_nk_current_panel_accepts_input(ctx)) {
         in = &ctx->input;
       }
 
-      nk_flags row_state = 0;
-      if (in) {
-        if (row.has_children) {
-          bool clicked = nk_button_behavior(&row_state, row_bounds, in, NK_BUTTON_DEFAULT);
-          if (clicked) {
-            *maximized = !*maximized;
-            expanded   = *maximized;
-            view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
-          }
-
-          ctx->last_widget_state = row_state;
+      if (in && row.has_children) {
+        if (nk_button_behavior(&row_state, row_bounds, in, NK_BUTTON_DEFAULT)) {
+          *maximized = !*maximized;
+          expanded   = *maximized;
+          view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
         }
+        ctx->last_widget_state = row_state;
       }
 
-      struct nk_command_buffer *out = nk_window_get_canvas(ctx);
-      struct nk_color           bg  = UI_C_TRANSPARENT;
-
-      if (row.has_children) {
-        bg = DETAIL_C_ROW_COLLAPSIBLE_BG;
+      if (row.has_children && row_state & NK_WIDGET_STATE_HOVER) {
+        bg = DETAIL_C_ROW_COLLAPSIBLE_HOVER;
       }
 
-      if (row_state & NK_WIDGET_STATE_HOVER) {
-        if (row.has_children) {
-          bg = DETAIL_C_ROW_COLLAPSIBLE_HOVER;
-        }
-      }
-
-      if (row_state & NK_WIDGET_STATE_ACTIVE) {
-        if (row.has_children) {
-          bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
-        }
+      if (row.has_children && row_state & NK_WIDGET_STATE_ACTIVE) {
+        bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
       }
 
       if (bg.a > 0) {
         nk_fill_rect(out, row_bounds, style->selectable.rounding, bg);
       }
 
-      float x = bounds.x + pad_x + (float)row.depth * indent_w;
-      float y = bounds.y + (bounds.h - symbol_w) * 0.5f;
-
-      struct nk_rect sym = nk_rect(x, y, symbol_w, symbol_w);
-
+      sym = nk_rect(bounds.x + style->tab.padding.x + (float)row.depth * indent_w,
+                    bounds.y + (bounds.h - symbol_w) * 0.5f, symbol_w, symbol_w);
       if (view != DETAIL_TREE_ROW_TEXT) {
-        enum nk_symbol_type           symbol = NK_SYMBOL_NONE;
-        const struct nk_style_button *button = NULL;
+        enum nk_symbol_type           symbol;
+        const struct nk_style_button *button;
+        nk_flags                      draw_state = 0;
 
         if (view == DETAIL_TREE_ROW_OPEN) {
           symbol = style->tab.sym_maximize;
@@ -825,30 +800,21 @@ ui_detail_row(trace_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, boo
           symbol = style->tab.sym_minimize;
           button = &style->tab.node_minimize_button;
         }
-
-        nk_flags draw_state = 0;
         nk_do_button_symbol(&draw_state, out, sym, symbol, NK_BUTTON_DEFAULT, button, NULL, style->font);
       }
 
-      x += symbol_w + gap_w;
-
-      for (int i = 0; i < row.count; ++i) {
-        float max_w = (cols) ? cols->width[i] : row.parts[i].text.width;
-        ui_text_cell_draw(ctx, out, nk_rect(x, bounds.y, max_w, bounds.h), row.parts[i], bg);
-        x += max_w;
-
-        if (i + 1 < row.count) {
-          x += gap_w;
-        }
-      }
-    }
-
-    if (has_filler) {
-      nk_layout_row_push(ctx, filler_w);
-      nk_spacer(ctx);
     }
   }
-  nk_layout_row_end(ctx);
+  for (i = 0; i < row.count; ++i) {
+    struct nk_text_options options = {
+      .alignment = row.parts[i].align,
+      .flags     = NK_TEXT_OPTION_SELECTABLE,
+      .color     = row.parts[i].fg,
+    };
+    ui_grid_str(&grid, i + 1, row.parts[i].text.str, &options);
+  }
+  nk_grid_row_end(&grid);
+  nk_grid_end(&grid);
   nk_layout_reset_min_row_height(ctx);
 
   if (nk_contextual_begin(ctx, NK_WINDOW_BORDER, nk_vec2(190.0f, 92.0f), row_bounds)) {
@@ -916,12 +882,10 @@ trace_timestamp_push(arena_t *arena, uint64_t time_us)
 }
 
 static void
-draw_detail_call(trace_tool_t *tool, ui_text_cols_t *cols, trace_call_t *call, int depth)
+draw_detail_call(trace_tool_t *tool, trace_call_t *call, int depth)
 {
   ASSERT(tool != NULL);
   ASSERT(call != NULL);
-  ASSERT(cols != NULL);
-  ASSERT(cols->count == TRACE_CALL_COL_COUNT);
 
   uint64_t capture_start_us = (tool->first_call) ? tool->first_call->start_us : 0ULL;
 
@@ -955,55 +919,13 @@ draw_detail_call(trace_tool_t *tool, ui_text_cols_t *cols, trace_call_t *call, i
       .copy_text    = STR_NULL,
     };
 
-    maximized = ui_detail_row(tool, cols, row, row.has_children ? &call->maximized : NULL);
+    maximized = ui_detail_row(tool, &tool->ui.call_grid, row, row.has_children ? &call->maximized : NULL);
   }
   scratch_end(tmp);
 
   if (maximized) {
-    ui_text_cols_t child_cols = {0};
-    ui_text_cols_reset(&child_cols, TRACE_CALL_COL_COUNT);
-
-    ui_text_cols_include(&child_cols, 0, tool->ui.seq);
-    ui_text_cols_include(&child_cols, 1, tool->ui.time);
-    ui_text_cols_include(&child_cols, 2, tool->ui.duration);
-    ui_text_cols_include(&child_cols, 3, tool->ui.depth);
-    ui_text_cols_include(&child_cols, 4, tool->ui.kind);
-    ui_text_cols_include(&child_cols, 5, tool->ui.class_name);
-    ui_text_cols_include(&child_cols, 6, tool->ui.self_name);
-    ui_text_cols_include(&child_cols, 7, tool->ui.func_name);
-
-    uint32_t max_seq      = 0;
-    uint64_t max_duration = 0;
-    uint32_t max_depth    = 0;
     for (trace_call_t *child = call->first_child; child; child = child->next_sibling) {
-      max_seq      = MAX_VAL(max_seq, child->seq);
-      max_duration = MAX_VAL(max_duration, child->end_us - child->start_us);
-      max_depth    = MAX_VAL(max_depth, child->depth);
-
-      trace_call_cache_names(tool, child);
-
-      ui_text_cols_include(&child_cols, 4, trace_call_hook_kind_text(tool, child));
-      ui_text_cols_include(&child_cols, 5, child->class_name);
-      ui_text_cols_include(&child_cols, 6, child->self_name);
-      ui_text_cols_include(&child_cols, 7, child->func_name);
-    }
-
-    tmp_arena_t tmp = scratch_begin(NULL);
-    {
-      ui_text_span_t seq_text      = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%u", max_seq));
-      ui_text_span_t duration_text = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%llu", max_duration));
-      ui_text_span_t time_text     = ui_text_span_make(tool->ctx, STR_LIT("00:00:00.000"));
-      ui_text_span_t depth_text    = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%u", max_depth));
-
-      ui_text_cols_include(&child_cols, 0, seq_text);
-      ui_text_cols_include(&child_cols, 1, time_text);
-      ui_text_cols_include(&child_cols, 2, duration_text);
-      ui_text_cols_include(&child_cols, 3, depth_text);
-    }
-    scratch_end(tmp);
-
-    for (trace_call_t *child = call->first_child; child; child = child->next_sibling) {
-      draw_detail_call(tool, &child_cols, child, depth + 1);
+      draw_detail_call(tool, child, depth + 1);
     }
   }
 }
@@ -1299,53 +1221,11 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
     nk_layout_row_dynamic(ctx, results_h, 1);
     if (nk_group_begin(ctx, "ufunction_trace_calls", NK_WINDOW_BORDER)) {
       if (call_root_count > 0) {
-        ui_text_cols_t cols = {0};
-        ui_text_cols_reset(&cols, TRACE_CALL_COL_COUNT);
-
-        ui_text_cols_include(&cols, 0, tool->ui.seq);
-        ui_text_cols_include(&cols, 1, tool->ui.time);
-        ui_text_cols_include(&cols, 2, tool->ui.duration);
-        ui_text_cols_include(&cols, 3, tool->ui.depth);
-        ui_text_cols_include(&cols, 4, tool->ui.kind);
-        ui_text_cols_include(&cols, 5, tool->ui.class_name);
-        ui_text_cols_include(&cols, 6, tool->ui.self_name);
-        ui_text_cols_include(&cols, 7, tool->ui.func_name);
-
         uint32_t first_idx = tool->ui.page_idx * page_size;
         uint32_t last_idx  = MIN_VAL(first_idx + page_size, call_root_count);
 
         trace_call_t *first_call = trace_call_root_at(tool, first_idx);
         trace_call_t *last_call  = trace_call_root_at(tool, last_idx);
-
-        uint32_t max_seq      = 0;
-        uint64_t max_duration = 0;
-        uint32_t max_depth    = 0;
-        for (trace_call_t *call = first_call; call != NULL && call != last_call; call = call->next_sibling) {
-          max_seq      = MAX_VAL(max_seq, call->seq);
-          max_duration = MAX_VAL(max_duration, call->end_us - call->start_us);
-          max_depth    = MAX_VAL(max_depth, call->depth);
-
-          trace_call_cache_names(tool, call);
-
-          ui_text_cols_include(&cols, 4, trace_call_hook_kind_text(tool, call));
-          ui_text_cols_include(&cols, 5, call->class_name);
-          ui_text_cols_include(&cols, 6, call->self_name);
-          ui_text_cols_include(&cols, 7, call->func_name);
-        }
-
-        tmp_arena_t tmp = scratch_begin(NULL);
-        {
-          ui_text_span_t seq_text      = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%u", max_seq));
-          ui_text_span_t time_text     = ui_text_span_make(tool->ctx, STR_LIT("00:00:00.000"));
-          ui_text_span_t duration_text = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%llu", max_duration));
-          ui_text_span_t depth_text    = ui_text_span_make(tool->ctx, str_push_fmt(tmp.arena, "%u", max_depth));
-
-          ui_text_cols_include(&cols, 0, seq_text);
-          ui_text_cols_include(&cols, 1, time_text);
-          ui_text_cols_include(&cols, 2, duration_text);
-          ui_text_cols_include(&cols, 3, depth_text);
-        }
-        scratch_end(tmp);
 
         ui_text_cell_t header_parts[] = {
           UI_TEXT_CELL(tool->ui.seq, UI_C_TEXT),
@@ -1365,10 +1245,10 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
           .has_children = false,
           .copy_text    = STR_NULL,
         };
-        ui_detail_row(tool, &cols, row, NULL);
+        ui_detail_row(tool, &tool->ui.call_grid, row, NULL);
 
         for (trace_call_t *call = first_call; call != NULL && call != last_call; call = call->next_sibling) {
-          draw_detail_call(tool, &cols, call, 0);
+          draw_detail_call(tool, call, 0);
         }
       }
       nk_group_end(ctx);

@@ -19584,6 +19584,239 @@ nk_layout_space_rect_to_local(const struct nk_context *ctx, struct nk_rect ret)
   ret.y += -layout->at_y + (float)*layout->offset_y;
   return ret;
 }
+
+NK_API void
+nk_grid_state_reset(struct nk_grid_state *state)
+{
+  NK_ASSERT(state);
+  NK_MEMSET(state, 0, sizeof(*state));
+}
+
+NK_INTERN float
+nk_grid_column_width(const struct nk_grid_column *column, float width)
+{
+  width = NK_MAX(width, column->min_width);
+  if (column->max_width > 0.0f) {
+    width = NK_MIN(width, column->max_width);
+  }
+  return width;
+}
+
+NK_INTERN void
+nk_grid_solve(struct nk_grid *grid)
+{
+  float used_width;
+  float remaining;
+  int   column;
+  int   pass;
+
+  used_width = grid->padding_x * 2.0f + grid->column_gap * (float)NK_MAX(0, grid->column_count - 1);
+  for (column = 0; column < grid->column_count; ++column) {
+    const struct nk_grid_column *config = &grid->columns[column];
+    float                        width;
+
+    if (config->sizing == NK_GRID_COLUMN_FIXED) {
+      width = config->width;
+    } else if (config->sizing == NK_GRID_COLUMN_CONTENT) {
+      width = grid->state->content_widths[column];
+    } else {
+      width = config->min_width;
+    }
+
+    grid->widths[column] = nk_grid_column_width(config, width);
+    used_width          += grid->widths[column];
+  }
+
+  remaining = NK_MAX(0.0f, grid->available_width - used_width);
+  for (pass = 0; pass < grid->column_count && remaining > 0.0f; ++pass) {
+    float weight_sum  = 0.0f;
+    float distributed = 0.0f;
+
+    for (column = 0; column < grid->column_count; ++column) {
+      const struct nk_grid_column *config = &grid->columns[column];
+      if (config->sizing == NK_GRID_COLUMN_FLEX && (config->max_width <= 0.0f || grid->widths[column] < config->max_width)) {
+        weight_sum += config->width > 0.0f ? config->width : 1.0f;
+      }
+    }
+
+    if (weight_sum == 0.0f) {
+      break;
+    }
+
+    for (column = 0; column < grid->column_count; ++column) {
+      const struct nk_grid_column *config = &grid->columns[column];
+      float                        weight;
+      float                        add;
+
+      if (config->sizing != NK_GRID_COLUMN_FLEX || (config->max_width > 0.0f && grid->widths[column] >= config->max_width)) {
+        continue;
+      }
+
+      weight = config->width > 0.0f ? config->width : 1.0f;
+      add    = remaining * weight / weight_sum;
+      if (config->max_width > 0.0f) {
+        add = NK_MIN(add, config->max_width - grid->widths[column]);
+      }
+
+      grid->widths[column] += add;
+      distributed          += add;
+    }
+
+    if (distributed == 0.0f) {
+      break;
+    }
+    remaining -= distributed;
+  }
+
+  used_width = grid->padding_x * 2.0f;
+  for (column = 0; column < grid->column_count; ++column) {
+    grid->offsets[column] = used_width;
+    used_width           += grid->widths[column] + grid->column_gap;
+  }
+
+  if (grid->column_count) {
+    used_width -= grid->column_gap;
+  }
+
+  grid->row_width = NK_MAX(grid->available_width, used_width);
+}
+
+NK_API void
+nk_grid_begin(struct nk_context *ctx, struct nk_grid *grid, struct nk_grid_state *state, const struct nk_grid_column *columns, int column_count, const struct nk_grid_options *options)
+{
+  NK_ASSERT(ctx);
+  NK_ASSERT(grid);
+  NK_ASSERT(state);
+  NK_ASSERT(columns);
+  NK_ASSERT(options);
+  NK_ASSERT(column_count > 0 && column_count <= NK_GRID_MAX_COLUMNS);
+
+  if (state->column_count != column_count || state->generation != options->generation || state->font != ctx->style.font || state->font_size != ctx->style.font_size) {
+    nk_grid_state_reset(state);
+    state->column_count = column_count;
+    state->generation   = options->generation;
+    state->font         = ctx->style.font;
+    state->font_size    = ctx->style.font_size;
+  }
+
+  NK_MEMSET(grid, 0, sizeof(*grid));
+  grid->ctx             = ctx;
+  grid->state           = state;
+  grid->columns         = columns;
+  grid->column_count    = column_count;
+  grid->row_height      = options->row_height;
+  grid->column_gap      = options->column_gap;
+  grid->padding_x       = options->padding_x;
+  grid->available_width = NK_MAX(0.0f, nk_layout_widget_bounds(ctx).w);
+  nk_grid_solve(grid);
+}
+
+NK_API void
+nk_grid_end(struct nk_grid *grid)
+{
+  NK_ASSERT(grid);
+  NK_ASSERT(!grid->row_active);
+  grid->ctx = NULL;
+}
+
+NK_API nk_bool
+nk_grid_row_begin(struct nk_grid *grid)
+{
+  struct nk_rect row;
+  struct nk_rect clip;
+
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx);
+  NK_ASSERT(!grid->row_active);
+
+  nk_layout_space_begin(grid->ctx, NK_STATIC, grid->row_height, NK_SINT_MAX);
+  grid->row_active = nk_true;
+  nk_layout_space_push(grid->ctx, nk_rect(0.0f, 0.0f, grid->row_width, grid->row_height));
+  nk_spacer(grid->ctx);
+
+  row               = nk_layout_space_rect_to_screen(grid->ctx, nk_rect(0.0f, 0.0f, grid->row_width, grid->row_height));
+  clip              = grid->ctx->current->layout->clip;
+  grid->row_visible = NK_INTERSECT(row.x, row.y, row.w, row.h, clip.x, clip.y, clip.w, clip.h);
+  return grid->row_visible;
+}
+
+NK_API void
+nk_grid_row_end(struct nk_grid *grid)
+{
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx);
+  NK_ASSERT(grid->row_active);
+  nk_layout_space_end(grid->ctx);
+  grid->row_active  = nk_false;
+  grid->row_visible = nk_false;
+}
+
+NK_API void
+nk_grid_push_row(struct nk_grid *grid)
+{
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx && grid->row_active);
+  nk_layout_space_push(grid->ctx, nk_rect(0.0f, 0.0f, grid->row_width, grid->row_height));
+}
+
+NK_API struct nk_rect
+nk_grid_cell_bounds(struct nk_grid *grid, int column, struct nk_vec2 intrinsic_size)
+{
+  struct nk_rect bounds;
+
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx && grid->row_active);
+  NK_ASSERT(column >= 0 && column < grid->column_count);
+
+  if (grid->row_visible && grid->columns[column].sizing == NK_GRID_COLUMN_CONTENT) {
+    float width = nk_grid_column_width(&grid->columns[column], intrinsic_size.x);
+    grid->state->content_widths[column] = NK_MAX(grid->state->content_widths[column], width);
+  }
+
+  bounds = nk_rect(grid->offsets[column], 0.0f, grid->widths[column], grid->row_height);
+  return nk_layout_space_rect_to_screen(grid->ctx, bounds);
+}
+
+NK_API void
+nk_grid_push(struct nk_grid *grid, int column, struct nk_vec2 intrinsic_size)
+{
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx && grid->row_active);
+  NK_ASSERT(column >= 0 && column < grid->column_count);
+
+  nk_grid_cell_bounds(grid, column, intrinsic_size);
+  nk_layout_space_push(grid->ctx, nk_rect(grid->offsets[column], 0.0f, grid->widths[column], grid->row_height));
+}
+
+NK_INTERN nk_bool
+nk_text_selection_widget_clipped(struct nk_context *ctx, const char *text, int len,
+                                 const struct nk_text_options *options, struct nk_rect bounds);
+
+NK_API nk_bool
+nk_grid_text(struct nk_grid *grid, int column, const char *text, int len, const struct nk_text_options *options)
+{
+  struct nk_rect bounds;
+  float width;
+
+  NK_ASSERT(grid);
+  NK_ASSERT(grid->ctx);
+  NK_ASSERT(text || len == 0);
+  NK_ASSERT(options);
+
+  if (!text) {
+    text = "";
+  }
+
+  if (!grid->row_visible) {
+    bounds = nk_grid_cell_bounds(grid, column, nk_vec2(0.0f, grid->ctx->style.font_size));
+    return nk_text_selection_widget_clipped(grid->ctx, text, len, options, bounds);
+  }
+
+  width = len > 0 ? nk_text_width(grid->ctx, grid->ctx->style.font, grid->ctx->style.font_size, text, len) : 0.0f;
+  nk_grid_push(grid, column, nk_vec2(width, grid->ctx->style.font_size));
+  return nk_text_ex(grid->ctx, text, len, options);
+}
+
 NK_LIB void
 nk_panel_alloc_row(const struct nk_context *ctx, struct nk_window *win)
 {
@@ -21488,7 +21721,8 @@ nk_text_selection_widget_range(struct nk_text_selection_context *context, unsign
 }
 
 NK_INTERN void
-nk_text_selection_copy_append(struct nk_context *ctx, struct nk_text_selection_context *context, const char *text, int length)
+nk_text_selection_copy_append(struct nk_context *ctx, struct nk_text_selection_context *context,
+                              const char *text, int length, struct nk_rect bounds)
 {
   int                                  prefix = context->copy_first ? 1 : 0;
   nk_size                              size   = offsetof(struct nk_text_selection_copy_chunk, data) + prefix + length;
@@ -21504,7 +21738,8 @@ nk_text_selection_copy_append(struct nk_context *ctx, struct nk_text_selection_c
   chunk->next   = 0;
   chunk->length = prefix + length;
   if (prefix) {
-    chunk->data[0] = '\n';
+    nk_bool same_row = bounds.y < context->copy_bounds.y + context->copy_bounds.h && context->copy_bounds.y < bounds.y + bounds.h;
+    chunk->data[0]   = same_row ? '\t' : '\n';
   }
   if (length) {
     NK_MEMCPY(chunk->data + prefix, text, length);
@@ -21517,6 +21752,7 @@ nk_text_selection_copy_append(struct nk_context *ctx, struct nk_text_selection_c
   }
   context->copy_last    = offset;
   context->copy_length += chunk->length;
+  context->copy_bounds  = bounds;
 }
 
 NK_INTERN void
@@ -21562,6 +21798,30 @@ nk_text_selection_widget_begin(struct nk_context *ctx, struct nk_text_selection_
     }
   }
   return ++context->widget_index;
+}
+
+NK_INTERN nk_bool
+nk_text_selection_widget_clipped(struct nk_context *ctx, const char *text, int len,
+                                 const struct nk_text_options *options, struct nk_rect bounds)
+{
+  struct nk_text_selection_context *context;
+  unsigned int                      widget;
+  int                               selected_begin;
+  int                               selected_end;
+
+  if (!(options->flags & NK_TEXT_OPTION_SELECTABLE)) {
+    return nk_false;
+  }
+
+  context = options->selection ? options->selection : nk_text_selection_panel_context(ctx);
+  widget  = nk_text_selection_widget_begin(ctx, context);
+  if (nk_text_selection_widget_range(context, widget, len, &selected_begin, &selected_end) && nk_input_is_key_pressed(&ctx->input, NK_KEY_COPY) && ctx->clip.copy) {
+    nk_text_selection_copy_append(ctx, context, text + selected_begin, selected_end - selected_begin, bounds);
+    if (widget == NK_MAX(context->anchor_widget, context->cursor_widget)) {
+      nk_text_selection_copy_finish(ctx, context);
+    }
+  }
+  return nk_false;
 }
 
 NK_INTERN void
@@ -21775,7 +22035,7 @@ nk_text_selectable_widget(struct nk_context *ctx, const char *str, int len, nk_f
 
   selected_widget = nk_text_selection_widget_range(selection_context, widget, len, &selected_begin, &selected_end);
   if (selected_widget && nk_input_is_key_pressed(&ctx->input, NK_KEY_COPY) && ctx->clip.copy) {
-    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin);
+    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin, bounds);
     if (widget == NK_MAX(selection_context->anchor_widget, selection_context->cursor_widget)) {
       nk_text_selection_copy_finish(ctx, selection_context);
     }
@@ -22054,7 +22314,7 @@ nk_text_selectable_wrap_widget(struct nk_context *ctx, const char *str, int len,
 
   selected_widget = nk_text_selection_widget_range(selection_context, widget, len, &selected_begin, &selected_end);
   if (selected_widget && nk_input_is_key_pressed(&ctx->input, NK_KEY_COPY) && ctx->clip.copy) {
-    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin);
+    nk_text_selection_copy_append(ctx, selection_context, str + selected_begin, selected_end - selected_begin, bounds);
     if (widget == NK_MAX(selection_context->anchor_widget, selection_context->cursor_widget)) {
       nk_text_selection_copy_finish(ctx, selection_context);
     }
@@ -27193,8 +27453,19 @@ nk_do_edit(nk_flags                   *state,
           continue; /* special case */
         }
         if (nk_input_is_key_pressed(in, (enum nk_keys)i)) {
+          int   old_cursor     = edit->cursor;
+          int   old_length     = edit->string.len;
+          short old_undo_point = edit->undo.undo_point;
+          short old_redo_point = edit->undo.redo_point;
+
           nk_textedit_key(edit, (enum nk_keys)i, shift_mod, font, row_height);
-          cursor_follow = nk_true;
+          if ((i != NK_KEY_TEXT_SELECT_ALL) &&
+              (edit->cursor          != old_cursor     ||
+               edit->string.len      != old_length     ||
+               edit->undo.undo_point != old_undo_point ||
+               edit->undo.redo_point != old_redo_point)) {
+            cursor_follow = nk_true;
+          }
         }
       }
       if (old_mode != edit->mode) {

@@ -179,11 +179,11 @@ struct detail_enum_entry_s {
 
 typedef struct detail_enum_s detail_enum_t;
 struct detail_enum_s {
-  record_t      *record;
-  ui_text_span_t cpp_type;
-  ui_text_span_t enum_name_col;
-  ui_text_span_t enum_value_col;
-  ui_text_cols_t cols;
+  record_t            *record;
+  ui_text_span_t       cpp_type;
+  ui_text_span_t       enum_name_col;
+  ui_text_span_t       enum_value_col;
+  struct nk_grid_state grid;
 
   detail_enum_entry_t *first_entry;
   detail_enum_entry_t *last_entry;
@@ -221,6 +221,15 @@ struct detail_tab_s {
   ui_text_span_t no_entries;
   ui_text_span_t no_params;
   ui_text_span_t owner_hbar;
+
+  struct nk_grid_state header_grid;
+  struct nk_grid_state package_grid;
+  struct nk_grid_state prop_grid;
+  struct nk_grid_state instance_grid;
+  struct nk_grid_state func_owner_grid;
+  struct nk_grid_state func_name_grid;
+  struct nk_grid_state param_grid;
+  struct nk_grid_state single_grid;
 
   bool layout_prop_maximized;
   bool layout_func_maximized;
@@ -391,6 +400,7 @@ struct tool_ui_s {
   bool closed;
 
   ui_nk_splitter_state_t results_split;
+  struct nk_grid_state   results_grid;
 
   uint32_t page_index;
 };

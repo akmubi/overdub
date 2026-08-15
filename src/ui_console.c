@@ -453,8 +453,8 @@ ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
     } else {
       nk_layout_row_static(ctx, CONFIG_NK_CONSOLE_LINE_HEIGHT, (int)line->row_w, 1);
     }
-    nk_text_ex(ctx, (const char *)line->text.data, (int)line->text.len, &options);
 
+    ui_str_ex(ctx, line->text, &options);
     shown += 1;
   }
 

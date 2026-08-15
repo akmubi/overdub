@@ -3543,6 +3543,7 @@ struct nk_text_selection_context {
   nk_size                  copy_first;
   nk_size                  copy_last;
   int                      copy_length;
+  struct nk_rect           copy_bounds;
 };
 
 enum nk_text_option_flags {
@@ -3562,6 +3563,75 @@ struct nk_text_options {
 
 NK_API nk_bool
 nk_text_ex(struct nk_context *, const char *, int, const struct nk_text_options *);
+
+#ifndef NK_GRID_MAX_COLUMNS
+#  define NK_GRID_MAX_COLUMNS 16
+#endif
+
+enum nk_grid_column_sizing {
+  NK_GRID_COLUMN_FIXED,
+  NK_GRID_COLUMN_CONTENT,
+  NK_GRID_COLUMN_FLEX
+};
+
+struct nk_grid_column {
+  enum nk_grid_column_sizing sizing;
+  float                      width;
+  float                      min_width;
+  float                      max_width;
+};
+
+struct nk_grid_options {
+  float   row_height;
+  float   column_gap;
+  float   padding_x;
+  nk_uint generation; /* change this to discard widths collected for an older data set or configuration */
+};
+
+/* Content widths only grow from visible cells and are reused by later frames */
+struct nk_grid_state {
+  const struct nk_user_font *font;
+  float                      font_size;
+  nk_uint                    generation;
+  int                        column_count;
+  float                      content_widths[NK_GRID_MAX_COLUMNS];
+};
+
+struct nk_grid {
+  struct nk_context           *ctx;
+  struct nk_grid_state        *state;
+  const struct nk_grid_column *columns;
+  int                          column_count;
+  float                        row_height;
+  float                        column_gap;
+  float                        padding_x;
+  float                        available_width;
+  float                        row_width;
+  float                        widths[NK_GRID_MAX_COLUMNS];
+  float                        offsets[NK_GRID_MAX_COLUMNS];
+  nk_bool                      row_active;
+  nk_bool                      row_visible;
+};
+
+NK_API void
+nk_grid_state_reset(struct nk_grid_state *);
+NK_API void
+nk_grid_begin(struct nk_context *, struct nk_grid *, struct nk_grid_state *, const struct nk_grid_column *, int,
+              const struct nk_grid_options *);
+NK_API void
+nk_grid_end(struct nk_grid *);
+NK_API nk_bool
+nk_grid_row_begin(struct nk_grid *);
+NK_API void
+nk_grid_row_end(struct nk_grid *);
+NK_API void
+nk_grid_push_row(struct nk_grid *);
+NK_API struct nk_rect
+nk_grid_cell_bounds(struct nk_grid *, int column, struct nk_vec2 intrinsic_size);
+NK_API void
+nk_grid_push(struct nk_grid *, int column, struct nk_vec2 intrinsic_size);
+NK_API nk_bool
+nk_grid_text(struct nk_grid *, int column, const char *, int, const struct nk_text_options *);
 
 NK_API nk_bool
 nk_text_selectable(struct nk_context *, const char *, int, nk_flags align);

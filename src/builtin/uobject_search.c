@@ -76,59 +76,40 @@ ui_checkbox(struct nk_context *ctx, const char *label, bool *v)
   return changed;
 }
 
-static float
-ui_uobject_row_width(struct nk_context *ctx, str_t text)
-{
-  if (!ctx) {
-    return 0.0f;
-  }
-
-  float gutter_w = 3.0f;
-  float pad_x    = 10.0f;
-  float text_w   = ui_text_width(ctx, text);
-
-  return gutter_w + pad_x + text_w;
-}
-
 static bool
-ui_uobject_row(struct nk_context *ctx, float row_h, ui_text_cols_t *cols, ui_text_cell_t type_cell, ui_text_cell_t full_name_cell)
+ui_uobject_row(struct nk_context *ctx, struct nk_grid *grid, ui_text_cell_t type_cell, ui_text_cell_t full_name_cell)
 {
   ASSERT(ctx != NULL);
-  ASSERT(cols != NULL);
-  ASSERT(cols->count == 2);
+  ASSERT(grid != NULL);
 
-  float pad_x       = 10.0f;
-  float gap_x       = 6.0f;
-  float type_w      = cols->width[0];
-  float full_name_w = cols->width[1];
-  float row_w       = pad_x + type_w + gap_x + full_name_w;
-  float max_row_w   = NK_MAX(ctx->current->layout->bounds.w, row_w);
+  struct nk_text_options type_options = {
+    .alignment = type_cell.align,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = type_cell.fg,
+  };
+
+  struct nk_text_options full_name_options = {
+    .alignment = full_name_cell.align,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = full_name_cell.fg,
+  };
 
   bool clicked = false;
-  nk_layout_row_begin(ctx, NK_STATIC, row_h, 1);
-  {
+  if (nk_grid_row_begin(grid)) {
     ui_nk_item_t item = {0};
-    nk_layout_row_push(ctx, row_w);
+    nk_grid_push_row(grid);
     if (ui_nk_item_begin(ctx, &item)) {
       clicked = ui_nk_selectable_behavior(ctx, &item);
 
       struct nk_command_buffer *out = nk_window_get_canvas(ctx);
+      struct nk_color           bg  = ui_nk_select_bg(ctx, item.widget_state, false);
 
-      struct nk_color bg = ui_nk_select_bg(ctx, item.widget_state, false);
-
-      float x = item.bounds.x;
-      float y = item.bounds.y;
-      float h = item.bounds.h;
-
-      nk_fill_rect(out, nk_rect(x, y, max_row_w, h), ctx->style.selectable.rounding, bg);
-
-      ui_text_cell_draw(ctx, out, nk_rect(x, y, type_w, h), type_cell, bg);
-      x += type_w + gap_x;
-
-      ui_text_cell_draw(ctx, out, nk_rect(x, y, full_name_w, h), full_name_cell, bg);
+      nk_fill_rect(out, item.bounds, ctx->style.selectable.rounding, bg);
     }
   }
-  nk_layout_row_end(ctx);
+  ui_grid_str(grid, 0, type_cell.text.str,      &type_options);
+  ui_grid_str(grid, 1, full_name_cell.text.str, &full_name_options);
+  nk_grid_row_end(grid);
   return clicked;
 }
 
@@ -402,51 +383,42 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
     split_track.h              = panel_area_h;
 
     if (nk_group_begin(ctx, "uobject_search.results_scroll", 0)) {
-      ui_text_cols_t cols = {0};
-      ui_text_cols_reset(&cols, 2);
+      static const struct nk_grid_column columns[] = {
+        {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 160.0f},
+        {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 320.0f},
+      };
 
-      PROF_SCOPE_BEGIN("uobject.width_pass", width_pass);
-      for (uint32_t i = start_idx; i < end_idx; ++i) {
-        uint32_t slot = tool->search.visible.slots[i];
-        if (slot >= tool->cache.record_cap) {
-          continue;
+      struct nk_grid_options grid_options = {
+        .row_height = 20.0f,
+        .column_gap = 6.0f,
+      };
+
+      struct nk_grid grid = {0};
+      nk_grid_begin(ctx, &grid, &tool->ui.results_grid, columns, 2, &grid_options);
+      {
+        PROF_SCOPE_BEGIN("uobject.row_pass", row_pass);
+        for (uint32_t i = start_idx; i < end_idx; ++i) {
+          uint32_t slot = tool->search.visible.slots[i];
+          if (slot >= tool->cache.record_cap) {
+            continue;
+          }
+
+          record_t *record = &tool->cache.records[slot];
+          if (!record_has_flag(record, RECORD_FLAG_LIVE) || str_is_empty(record->full_name.str)) {
+            continue;
+          }
+
+          record_t *type_record = record_from_slot(tool, record->type_slot);
+          ASSERT(type_record != NULL);
+          ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
+
+          if (ui_uobject_row(ctx, &grid, UI_TEXT_CELL(type_record->name, uobject_kind_color(record->kind)), UI_TEXT_CELL(record->full_name, UI_C_TEXT))) {
+            detail_tab_open(tool, record, false);
+          }
         }
-
-        record_t *record = record_from_slot(tool, slot);
-        if (!record_has_flag(record, RECORD_FLAG_LIVE) || str_is_empty(record->full_name.str)) {
-          continue;
-        }
-
-        record_t *type_record = record_from_slot(tool, record->type_slot);
-        ASSERT(type_record != NULL);
-        ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
-
-        ui_text_cols_include(&cols, 0, type_record->name);
-        ui_text_cols_include(&cols, 1, record->full_name);
+        PROF_SCOPE_END(row_pass);
       }
-      PROF_SCOPE_END(width_pass);
-
-      PROF_SCOPE_BEGIN("uobject.row_pass", row_pass);
-      for (uint32_t i = start_idx; i < end_idx; ++i) {
-        uint32_t slot = tool->search.visible.slots[i];
-        if (slot >= tool->cache.record_cap) {
-          continue;
-        }
-
-        record_t *record = &tool->cache.records[slot];
-        if (!record_has_flag(record, RECORD_FLAG_LIVE) || str_is_empty(record->full_name.str)) {
-          continue;
-        }
-
-        record_t *type_record = record_from_slot(tool, record->type_slot);
-        ASSERT(type_record != NULL);
-        ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
-
-        if (ui_uobject_row(ctx, 20.0f, &cols, UI_TEXT_CELL(type_record->name, uobject_kind_color(record->kind)), UI_TEXT_CELL(record->full_name, UI_C_TEXT))) {
-          detail_tab_open(tool, record, false);
-        }
-      }
-      PROF_SCOPE_END(row_pass);
+      nk_grid_end(&grid);
       nk_group_end(ctx);
     }
 

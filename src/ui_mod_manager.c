@@ -33,113 +33,131 @@ ui_mod_state(mod_t *m)
 }
 
 static void
-draw_key_value(struct nk_context *ctx, ui_text_span_t key, str_t value, struct nk_color value_color, bool show_tooltip)
+key_value_begin(struct nk_context *ctx, struct nk_grid *grid, struct nk_grid_state *state, str_t key,
+                str_t key_desc, struct nk_color key_color, float gap_x)
 {
-  struct nk_text_options key_options = {
-    .alignment = NK_TEXT_LEFT,
-    .flags     = NK_TEXT_OPTION_SELECTABLE,
-    .color     = ctx->style.text.color,
+  static const struct nk_grid_column columns[] = {
+    {.sizing = NK_GRID_COLUMN_CONTENT},
+    {.sizing = NK_GRID_COLUMN_FLEX, .width = 1.0f},
   };
-  struct nk_text_options value_options = key_options;
-  float                  width         = nk_layout_widget_bounds(ctx).w;
 
-  value_options.color = value_color;
+  struct nk_grid_options grid_options = {
+    .row_height = 20.0f,
+    .column_gap = gap_x,
+  };
 
-  nk_layout_row_begin(ctx, NK_STATIC, 20.0f, 2);
-  {
-    nk_layout_row_push(ctx, key.width);
-    nk_text_ex(ctx, (const char *)key.str.data, (int)key.str.len, &key_options);
-
-    nk_layout_row_push(ctx, width - key.width);
-    {
-      if (show_tooltip && nk_widget_is_hovered(ctx)) {
-        nk_tooltip_text(ctx, (const char *)value.data, (int)value.len);
-      }
-      nk_text_ex(ctx, (const char *)value.data, (int)value.len, &value_options);
-    }
-  }
-  nk_layout_row_end(ctx);
-}
-
-static void
-form_key_value_begin(struct nk_context *ctx, ui_text_span_t key, str_t key_desc, struct nk_color key_color)
-{
-  struct nk_text_options options = {
+  struct nk_text_options key_options = {
     .alignment = NK_TEXT_LEFT,
     .flags     = NK_TEXT_OPTION_SELECTABLE,
     .color     = key_color,
   };
-  float width = nk_layout_widget_bounds(ctx).w;
-  float gap_x = ctx->style.window.spacing.x;
-  nk_layout_row_begin(ctx, NK_STATIC, 20.0f, 2);
-  {
-    nk_layout_row_push(ctx, key.width + gap_x);
-    {
-      if (nk_widget_is_hovered(ctx)) {
-        nk_tooltip_text(ctx, (const char *)key_desc.data, (int)key_desc.len);
-      }
-      nk_text_ex(ctx, (const char *)key.str.data, (int)key.str.len, &options);
-    }
 
-    nk_layout_row_push(ctx, width - key.width);
+  nk_grid_begin(ctx, grid, state, columns, 2, &grid_options);
+  if (nk_grid_row_begin(grid)) {
+    struct nk_rect key_bounds = nk_grid_cell_bounds(grid, 0, nk_vec2(0.0f, 0.0f));
+    if (!str_is_empty(key_desc) && ui_nk_current_panel_accepts_input(ctx) && nk_input_is_mouse_hovering_rect(&ctx->input, key_bounds)) {
+      nk_tooltip_text(ctx, (const char *)key_desc.data, (int)key_desc.len);
+    }
   }
+  ui_grid_str(grid, 0, key, &key_options);
+  nk_grid_push(grid, 1, nk_vec2(0.0f, 0.0f));
 }
 
 static void
-form_key_value_end(struct nk_context *ctx)
+key_value_end(struct nk_grid *grid)
 {
-  nk_layout_row_end(ctx);
+  nk_grid_row_end(grid);
+  nk_grid_end(grid);
+}
+
+static void
+draw_key_value(struct nk_context *ctx, struct nk_grid_state *state, str_t key, str_t value,
+               struct nk_color value_color, bool show_tooltip)
+{
+  struct nk_grid         grid;
+  struct nk_text_options value_options = {
+    .alignment = NK_TEXT_LEFT,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = value_color,
+  };
+
+  key_value_begin(ctx, &grid, state, key, STR_NULL, ctx->style.text.color, ctx->style.window.spacing.x);
+  if (show_tooltip && nk_widget_is_hovered(ctx)) {
+    nk_tooltip_text(ctx, (const char *)value.data, (int)value.len);
+  }
+
+  ui_str_ex(ctx, value, &value_options);
+  key_value_end(&grid);
+}
+
+static void
+form_key_value_begin(struct nk_context *ctx, struct nk_grid *grid, struct nk_grid_state *state,
+                     str_t key, str_t key_desc, struct nk_color key_color)
+{
+  float gap_x = ctx->style.window.spacing.x;
+  key_value_begin(ctx, grid, state, key, key_desc, key_color, gap_x * 2.0f);
+}
+
+static void
+form_key_value_end(struct nk_grid *grid)
+{
+  key_value_end(grid);
 }
 
 static bool
-form_bool(struct nk_context *ctx, ui_text_span_t label, str_t desc, bool *old, bool *v)
+form_bool(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc, bool *old, bool *v)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
   bool before = *v;
   bool dirty  = (old) ? (*old != *v) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     int tmp = *v ? 1 : 0;
     if (nk_checkbox_label(ctx, "", &tmp)) {
       *v = (tmp != 0);
     }
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return (*v != before);
 }
 
 static bool
-form_int(struct nk_context *ctx, ui_text_span_t label, str_t desc, int *old, int *v, int min_v, int max_v, int step)
+form_int(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc,
+         int *old, int *v, int min_v, int max_v, int step)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
   int  before = *v;
   bool dirty  = (old) ? (*old != *v) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     nk_property_int(ctx, "#", min_v, v, max_v, step, 1);
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return (*v != before);
 }
 
 static bool
-form_float(struct nk_context *ctx, ui_text_span_t label, str_t desc, float *old, float *v, float min_v, float max_v, float step)
+form_float(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc,
+           float *old, float *v, float min_v, float max_v, float step)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
   float before = *v;
   bool  dirty  = (old) ? !float_equal(*old, *v, min_v, step) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     *v = nk_propertyf(ctx, "#", min_v, *v, max_v, step, step);
 
@@ -149,21 +167,23 @@ form_float(struct nk_context *ctx, ui_text_span_t label, str_t desc, float *old,
       *v      = NK_CLAMP(*v, min_v, max_v);
     }
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return !float_equal(before, *v, min_v, step);
 }
 
 static bool
-form_enum(struct nk_context *ctx, ui_text_span_t label, str_t desc, int *old_idx, int *idx, str_array_t enum_vals)
+form_enum(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc,
+          int *old_idx, int *idx, str_array_t enum_vals)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(idx != NULL);
 
   int  before = *idx;
   bool dirty  = (old_idx) ? (*old_idx != *idx) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     tmp_arena_t tmp = scratch_begin(NULL);
     {
@@ -179,27 +199,28 @@ form_enum(struct nk_context *ctx, ui_text_span_t label, str_t desc, int *old_idx
     }
     scratch_end(tmp);
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return (*idx != before);
 }
 
 static bool
-form_string(struct nk_context *ctx, ui_text_span_t label, str_t desc, mod_cfg_string_t *old, mod_cfg_string_t *v)
+form_string(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc, mod_cfg_string_t *old, mod_cfg_string_t *v)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
   mod_cfg_string_t before = *v;
   bool             dirty  = (old) ? (!str_equal(mod_cfg_string_as_str(old), mod_cfg_string_as_str(v), 0)) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     int len = (int)v->len;
     nk_edit_string(ctx, NK_EDIT_FIELD, v->data, &len, sizeof(v->data), nk_filter_default);
     v->len = len;
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   bool changed = !str_equal(mod_cfg_string_as_str(&before), mod_cfg_string_as_str(v), 0);
   return changed;
@@ -258,15 +279,16 @@ mod_color_equal(mod_color_t a, mod_color_t b)
 }
 
 static bool
-form_color(struct nk_context *ctx, ui_text_span_t label, str_t desc, mod_color_t *old, mod_color_t *v)
+form_color(struct nk_context *ctx, struct nk_grid_state *state, str_t label, str_t desc, mod_color_t *old, mod_color_t *v)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
   mod_color_t before = *v;
   bool        dirty  = (old) ? (!mod_color_equal(*old, *v)) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     if (nk_combo_begin_color(ctx, mod_color_to_nk_color(*v), nk_vec2(nk_widget_width(ctx), 320.0f))) {
       mod_color_t color = *v;
@@ -300,14 +322,15 @@ form_color(struct nk_context *ctx, ui_text_span_t label, str_t desc, mod_color_t
       nk_combo_end(ctx);
     }
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return !mod_color_equal(before, *v);
 }
 
 static bool
-form_keybind(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_text_span_t label, str_t desc, str_t name, keybind_t *old, keybind_t *v)
+form_keybind(struct nk_context *ctx, struct nk_grid_state *state, ui_keybind_capture_t *capture, str_t label, str_t desc, str_t name, keybind_t *old, keybind_t *v)
 {
+  struct nk_grid grid;
   ASSERT(ctx != NULL);
   ASSERT(v != NULL);
 
@@ -315,13 +338,13 @@ form_keybind(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_text_span
   keybind_t after  = before;
   bool      dirty  = (old) ? (!keybind_equal(*old, *v)) : false;
 
-  form_key_value_begin(ctx, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
+  form_key_value_begin(ctx, &grid, state, label, desc, (dirty) ? UI_C_GOLD : UI_C_TEXT);
   {
     if (ui_keybind_capture(capture, ctx, name, v)) {
       after = *v;
     }
   }
-  form_key_value_end(ctx);
+  form_key_value_end(&grid);
 
   return !keybind_equal(before, after);
 }
@@ -329,68 +352,54 @@ form_keybind(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_text_span
 static bool
 form_blueprint_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, str_t name, mod_blueprint_cfg_t *cfg, mod_blueprint_cfg_t *saved_cfg)
 {
-  static ui_text_span_t label_auto_spawn    = {0};
-  static ui_text_span_t label_spawn_keybind = {0};
-  static bool           cached              = false;
+  static struct nk_grid_state grid_state = {0};
 
-  if (!cached) {
-    label_auto_spawn    = ui_text_span_make(ctx, STR_LIT("Auto spawn:"));
-    label_spawn_keybind = ui_text_span_make(ctx, STR_LIT("Spawn keybind:"));
-
-    ui_text_cols_t cols = {0};
-    ui_text_cols_reset(&cols, 1);
-
-    ui_text_cols_include(&cols, 0, label_auto_spawn);
-    ui_text_cols_include(&cols, 0, label_spawn_keybind);
-
-    label_auto_spawn.width    = cols.width[0];
-    label_spawn_keybind.width = cols.width[0];
-
-    cached = true;
-  }
-
-  form_bool(ctx, label_auto_spawn, STR_LIT("Automatically spawn this blueprint actor"), &saved_cfg->auto_spawn, &cfg->auto_spawn);
-  form_keybind(ctx, capture, label_spawn_keybind, STR_LIT("Keybind used for manual spawn"), name, &saved_cfg->spawn_keybind, &cfg->spawn_keybind);
+  form_bool   (ctx, &grid_state,          STR_LIT("Auto spawn:"),    STR_LIT("Automatically spawn this blueprint actor"),       &saved_cfg->auto_spawn,    &cfg->auto_spawn);
+  form_keybind(ctx, &grid_state, capture, STR_LIT("Spawn keybind:"), STR_LIT("Keybind used for manual spawn"),            name, &saved_cfg->spawn_keybind, &cfg->spawn_keybind);
 
   return mod_blueprint_cfg_is_dirty(cfg, saved_cfg);
 }
 
 static bool
-form_option_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_text_span_t label, mod_option_info_t *info, mod_option_cfg_t *cfg, mod_option_cfg_t *saved_cfg)
+form_option_cfg(struct nk_context *ctx, struct nk_grid_state *state, ui_keybind_capture_t *capture,
+                str_t label, mod_option_info_t *info, mod_option_cfg_t *cfg, mod_option_cfg_t *saved_cfg)
 {
   switch (info->type) {
   case MOD_OPTION_BOOL: {
-    form_bool(ctx, label, info->description, &saved_cfg->boolean, &cfg->boolean);
+    form_bool(ctx, state, label, info->description, &saved_cfg->boolean, &cfg->boolean);
     break;
   }
 
   case MOD_OPTION_INT: {
-    form_int(ctx, label, info->description, &saved_cfg->integer, &cfg->integer, info->val.integer.min_val, info->val.integer.max_val, info->val.integer.step);
+    form_int(ctx, state, label, info->description, &saved_cfg->integer, &cfg->integer,
+             info->val.integer.min_val, info->val.integer.max_val, info->val.integer.step);
     break;
   }
 
   case MOD_OPTION_FLOAT: {
-    form_float(ctx, label, info->description, &saved_cfg->floating, &cfg->floating, info->val.floating.min_val, info->val.floating.max_val, info->val.floating.step);
+    form_float(ctx, state, label, info->description, &saved_cfg->floating, &cfg->floating,
+               info->val.floating.min_val, info->val.floating.max_val, info->val.floating.step);
     break;
   }
 
   case MOD_OPTION_ENUM: {
-    form_enum(ctx, label, info->description, &saved_cfg->enum_item_id, &cfg->enum_item_id, info->val.enumeration.values);
+    form_enum(ctx, state, label, info->description, &saved_cfg->enum_item_id, &cfg->enum_item_id,
+              info->val.enumeration.values);
     break;
   }
 
   case MOD_OPTION_STRING: {
-    form_string(ctx, label, info->description, &saved_cfg->string, &cfg->string);
+    form_string(ctx, state, label, info->description, &saved_cfg->string, &cfg->string);
     break;
   }
 
   case MOD_OPTION_COLOR: {
-    form_color(ctx, label, info->description, &saved_cfg->color, &cfg->color);
+    form_color(ctx, state, label, info->description, &saved_cfg->color, &cfg->color);
     break;
   }
 
   case MOD_OPTION_KEYBIND: {
-    form_keybind(ctx, capture, label, info->description, info->id, &saved_cfg->keybind, &cfg->keybind);
+    form_keybind(ctx, state, capture, label, info->description, info->id, &saved_cfg->keybind, &cfg->keybind);
     break;
   }
   }
@@ -400,33 +409,13 @@ form_option_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_text_s
 static bool
 form_manager_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, mod_manager_t *manager)
 {
-  static ui_text_span_t label_mod_dir   = {0};
-  static ui_text_span_t label_ui_toggle = {0};
-  static bool           cached          = false;
-
-  if (!cached) {
-    label_mod_dir   = ui_text_span_make(ctx, STR_LIT("Mod directory: "));
-    label_ui_toggle = ui_text_span_make(ctx, STR_LIT("Mod manager shortcut: "));
-
-    /* align labels */
-
-    ui_text_cols_t cols = {0};
-    ui_text_cols_reset(&cols, 1);
-
-    ui_text_cols_include(&cols, 0, label_mod_dir);
-    ui_text_cols_include(&cols, 0, label_ui_toggle);
-
-    label_mod_dir.width   = cols.width[0];
-    label_ui_toggle.width = cols.width[0];
-
-    cached = true;
-  }
+  static struct nk_grid_state grid_state = {0};
 
   mod_manager_cfg_t *cfg       = &manager->cfg;
   mod_manager_cfg_t *saved_cfg = &manager->saved_cfg;
 
-  form_string(ctx, label_mod_dir, STR_LIT("Directory containing installed mods"), &saved_cfg->root_mod_dir, &cfg->root_mod_dir);
-  form_keybind(ctx, capture, label_ui_toggle, STR_LIT("Shortcut that opens or closes the mod manager"), STR_LIT("mod_manager.toggle_keybind"), &saved_cfg->overlay_toggle, &cfg->overlay_toggle);
+  form_string (ctx, &grid_state,          STR_LIT("Mod directory: "),        STR_LIT("Directory containing installed mods"),                                                  &saved_cfg->root_mod_dir,   &cfg->root_mod_dir);
+  form_keybind(ctx, &grid_state, capture, STR_LIT("Mod manager shortcut: "), STR_LIT("Shortcut that opens or closes the mod manager"), STR_LIT("mod_manager.toggle_keybind"), &saved_cfg->overlay_toggle, &cfg->overlay_toggle);
 
   return mod_manager_cfg_is_dirty(cfg, saved_cfg);
 }
@@ -434,48 +423,16 @@ form_manager_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, mod_mana
 static bool
 form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_console_t *console)
 {
-  static ui_text_span_t label_toggle_bind = {0};
-  static ui_text_span_t label_auto_scroll = {0};
-  static ui_text_span_t label_wrap_lines  = {0};
-  static ui_text_span_t label_position    = {0};
-  static ui_text_span_t label_min_level   = {0};
-  static bool           cached            = false;
-
-  if (!cached) {
-    label_toggle_bind = ui_text_span_make(ctx, STR_LIT("Console shortcut: "));
-    label_auto_scroll = ui_text_span_make(ctx, STR_LIT("Auto-scroll: "));
-    label_wrap_lines  = ui_text_span_make(ctx, STR_LIT("Wrap lines: "));
-    label_position    = ui_text_span_make(ctx, STR_LIT("Position: "));
-    label_min_level   = ui_text_span_make(ctx, STR_LIT("Minimum log level: "));
-
-    /* align labels */
-
-    ui_text_cols_t cols = {0};
-    ui_text_cols_reset(&cols, 1);
-
-    ui_text_cols_include(&cols, 0, label_toggle_bind);
-    ui_text_cols_include(&cols, 0, label_auto_scroll);
-    ui_text_cols_include(&cols, 0, label_wrap_lines);
-    ui_text_cols_include(&cols, 0, label_position);
-    ui_text_cols_include(&cols, 0, label_min_level);
-
-    label_toggle_bind.width = cols.width[0];
-    label_auto_scroll.width = cols.width[0];
-    label_wrap_lines.width  = cols.width[0];
-    label_position.width    = cols.width[0];
-    label_min_level.width   = cols.width[0];
-
-    cached = true;
-  }
+  static struct nk_grid_state grid_state = {0};
 
   ui_console_cfg_t *cfg       = &console->cfg;
   ui_console_cfg_t *saved_cfg = &console->saved_cfg;
 
-  form_keybind(ctx, capture, label_toggle_bind, STR_LIT("Shortcut that opens or closes the console"), STR_LIT("console.toggle_keybind"), &saved_cfg->toggle_bind, &cfg->toggle_bind);
-  form_bool(ctx, label_auto_scroll, STR_LIT("Scroll to the newest message when console output changes"), &saved_cfg->auto_scroll, &cfg->auto_scroll);
-  form_bool(ctx, label_wrap_lines,  STR_LIT("Wrap long console output to the visible width"), &saved_cfg->wrap_lines, &cfg->wrap_lines);
-  form_enum(ctx, label_position,  STR_LIT("Place the console at the top or bottom of the screen"), &saved_cfg->position, &cfg->position, ui_console_position_str_array());
-  form_enum(ctx, label_min_level, STR_LIT("Hide messages below the selected severity"), &saved_cfg->min_level, &cfg->min_level, ui_console_log_level_str_array());
+  form_keybind(ctx, &grid_state, capture, STR_LIT("Console shortcut: "),  STR_LIT("Shortcut that opens or closes the console"), STR_LIT("console.toggle_keybind"), &saved_cfg->toggle_bind, &cfg->toggle_bind);
+  form_bool   (ctx, &grid_state,          STR_LIT("Auto-scroll: "),       STR_LIT("Scroll to the newest message when console output changes"),                     &saved_cfg->auto_scroll, &cfg->auto_scroll);
+  form_bool   (ctx, &grid_state,          STR_LIT("Wrap lines: "),        STR_LIT("Wrap long console output to the visible width"),                                &saved_cfg->wrap_lines,  &cfg->wrap_lines);
+  form_enum   (ctx, &grid_state,          STR_LIT("Position: "),          STR_LIT("Place the console at the top or bottom of the screen"),                         &saved_cfg->position,    &cfg->position,  ui_console_position_str_array());
+  form_enum   (ctx, &grid_state,          STR_LIT("Minimum log level: "), STR_LIT("Hide messages below the selected severity"),                                    &saved_cfg->min_level,   &cfg->min_level, ui_console_log_level_str_array());
 
   return ui_console_cfg_is_dirty(console);
 }
@@ -661,13 +618,9 @@ ui_draw_badges_flow(struct nk_context *ctx, ui_badge_t *badges, int count, float
 static void
 draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
-  static ui_text_span_t label_state = {0};
-  static bool           cached      = false;
+  static struct nk_grid_state grid_state = {0};
 
-  if (!cached) {
-    label_state = ui_text_span_make(ctx, STR_LIT("State:"));
-    cached      = true;
-  }
+  (void)ui;
 
   tmp_arena_t tmp = scratch_begin(NULL);
   {
@@ -703,7 +656,7 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     };
 
     nk_style_push_font_size(ctx, CONFIG_NK_FONT_HEADING_SIZE);
-    nk_text_ex(ctx, (const char *)m->manifest.info.name.data, (int)m->manifest.info.name.len, &wrapped_text);
+    ui_str_ex(ctx, m->manifest.info.name, &wrapped_text);
     nk_style_pop_font_size(ctx);
 
     draw_spacer(ctx, 2.0f);
@@ -717,12 +670,12 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     ui_draw_badges_flow(ctx, badges, COUNTOF(badges), 18.0f);
 
     draw_spacer(ctx, 2.0f);
-    draw_key_value(ctx, label_state, status_text, status_fg, false);
+    draw_key_value(ctx, &grid_state, STR_LIT("State:"), status_text, status_fg, false);
     draw_spacer(ctx, 2.0f);
 
     str_list_t lines = str_split_lines(tmp.arena, m->manifest.info.description);
     for (str_node_t *node = lines.first; node; node = node->next) {
-      nk_text_ex(ctx, (const char *)node->str.data, (int)node->str.len, &wrapped_text);
+      ui_str_ex(ctx, node->str, &wrapped_text);
     }
     draw_spacer(ctx, 2.0f);
 
@@ -770,6 +723,7 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
 static void
 draw_config_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
+  static struct nk_grid_state option_grid_state = {0};
   tmp_arena_t tmp = scratch_begin(NULL);
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Config", &ui->inspector.options_open)) {
     if (m->has_code && m->dll.funcs.draw_config) {
@@ -778,24 +732,11 @@ draw_config_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
       bool dirty = false;
 
       if (m->has_options) {
-        float max_width = 0.0f;
-        for (int i = 0; i < m->option_count; ++i) {
-          mod_option_info_t *info = &m->manifest.options[i];
-
-          float width = ui_text_width(ctx, info->label);
-          max_width   = MAX_VAL(max_width, width);
-        }
-
         for (int i = 0; i < m->option_count; ++i) {
           mod_option_info_t    *info = &m->manifest.options[i];
           mod_option_runtime_t *rt   = &m->options[i];
 
-          ui_text_span_t label = {
-            .str   = info->label,
-            .width = max_width,
-          };
-
-          dirty |= form_option_cfg(ctx, ui->keybind_capture, label, info, &rt->cfg, &rt->saved_cfg);
+          dirty |= form_option_cfg(ctx, &option_grid_state, ui->keybind_capture, info->label, info, &rt->cfg, &rt->saved_cfg);
         }
       }
 
@@ -862,50 +803,25 @@ draw_config_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
 static void
 draw_code_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
-  static ui_text_span_t label_path   = {0};
-  static ui_text_span_t label_state  = {0};
-  static ui_text_span_t label_active = {0};
-  static ui_text_span_t label_error  = {0};
-  static bool           cached       = false;
-
-  if (!cached) {
-    label_path   = ui_text_span_make(ctx, STR_LIT("Path:"));
-    label_state  = ui_text_span_make(ctx, STR_LIT("State:"));
-    label_active = ui_text_span_make(ctx, STR_LIT("Running:"));
-    label_error  = ui_text_span_make(ctx, STR_LIT("Error:"));
-
-    /* align labels */
-
-    ui_text_cols_t runtime_cols = {0};
-    ui_text_cols_reset(&runtime_cols, 1);
-
-    ui_text_cols_include(&runtime_cols, 0, label_state);
-    ui_text_cols_include(&runtime_cols, 0, label_active);
-    ui_text_cols_include(&runtime_cols, 0, label_error);
-
-    label_state.width  = runtime_cols.width[0];
-    label_active.width = runtime_cols.width[0];
-    label_error.width  = runtime_cols.width[0];
-
-    cached = true;
-  }
+  static struct nk_grid_state info_grid    = {0};
+  static struct nk_grid_state runtime_grid = {0};
 
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Code", &ui->inspector.code_open)) {
     if (!m->dll.is_builtin) {
       if (nk_tree_state_push(ctx, NK_TREE_NODE, "DLL info", &ui->inspector.code_dll_info_open)) {
-        draw_key_value(ctx, label_path, m->manifest.dll.path, UI_C_TEXT, false);
+        draw_key_value(ctx, &info_grid, STR_LIT("Path:"), m->manifest.dll.path, UI_C_TEXT, false);
         nk_tree_pop(ctx);
       }
     }
 
     if (nk_tree_state_push(ctx, NK_TREE_NODE, "Runtime", &ui->inspector.code_runtime_open)) {
-      draw_key_value(ctx, label_state, mod_dll_state_to_str(m->dll.state), UI_C_TEXT, false);
-      draw_key_value(ctx, label_active, STR_BOOL(m->dll.active), (m->dll.active) ? UI_C_GREEN : UI_C_RED, false);
+      draw_key_value(ctx, &runtime_grid, STR_LIT("State:"),   mod_dll_state_to_str(m->dll.state), UI_C_TEXT,                               false);
+      draw_key_value(ctx, &runtime_grid, STR_LIT("Running:"), STR_BOOL(m->dll.active),            (m->dll.active) ? UI_C_GREEN : UI_C_RED, false);
 
       if (m->dll.err_stage != MOD_DLL_ERROR_NONE) {
         str_t err_msg = err_msg_as_str(m->dll.err_msg);
         if (!str_is_empty(err_msg)) {
-          draw_key_value(ctx, label_error, err_msg, UI_C_RED, false);
+          draw_key_value(ctx, &runtime_grid, STR_LIT("Error:"), err_msg, UI_C_RED, false);
         }
       }
 
@@ -956,62 +872,21 @@ static void
 draw_assets_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
   (void)manager;
-
-  static ui_text_span_t label_pak         = {0};
-  static ui_text_span_t label_utoc        = {0};
-  static ui_text_span_t label_ucas        = {0};
-  static ui_text_span_t label_mount_state = {0};
-  static ui_text_span_t label_priority    = {0};
-  static ui_text_span_t label_error       = {0};
-  static bool           cached            = false;
-
-  if (!cached) {
-    label_pak         = ui_text_span_make(ctx, STR_LIT("PAK:"));
-    label_utoc        = ui_text_span_make(ctx, STR_LIT("UTOC:"));
-    label_ucas        = ui_text_span_make(ctx, STR_LIT("UCAS:"));
-    label_mount_state = ui_text_span_make(ctx, STR_LIT("Mount state:"));
-    label_priority    = ui_text_span_make(ctx, STR_LIT("Priority:"));
-    label_error       = ui_text_span_make(ctx, STR_LIT("Error:"));
-
-    /* align labels */
-
-    ui_text_cols_t info_cols = {0};
-    ui_text_cols_reset(&info_cols, 1);
-
-    ui_text_cols_include(&info_cols, 0, label_pak);
-    ui_text_cols_include(&info_cols, 0, label_utoc);
-    ui_text_cols_include(&info_cols, 0, label_ucas);
-
-    label_pak.width  = info_cols.width[0];
-    label_utoc.width = info_cols.width[0];
-    label_ucas.width = info_cols.width[0];
-
-    ui_text_cols_t runtime_cols = {0};
-    ui_text_cols_reset(&runtime_cols, 1);
-
-    ui_text_cols_include(&runtime_cols, 0, label_mount_state);
-    ui_text_cols_include(&runtime_cols, 0, label_priority);
-    ui_text_cols_include(&runtime_cols, 0, label_error);
-
-    label_mount_state.width = runtime_cols.width[0];
-    label_priority.width    = runtime_cols.width[0];
-    label_error.width       = runtime_cols.width[0];
-
-    cached = true;
-  }
+  static struct nk_grid_state info_grid    = {0};
+  static struct nk_grid_state runtime_grid = {0};
 
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Assets", &ui->inspector.assets_open)) {
     if (nk_tree_state_push(ctx, NK_TREE_NODE, "Asset files", &ui->inspector.assets_info_open)) {
       if (!str_is_empty(m->manifest.asset.pak_path)) {
-        draw_key_value(ctx, label_pak, m->manifest.asset.pak_path, UI_C_TEXT, true);
+        draw_key_value(ctx, &info_grid, STR_LIT("PAK:"), m->manifest.asset.pak_path, UI_C_TEXT, true);
       }
 
       if (!str_is_empty(m->manifest.asset.utoc_path)) {
-        draw_key_value(ctx, label_utoc, m->manifest.asset.utoc_path, UI_C_TEXT, true);
+        draw_key_value(ctx, &info_grid, STR_LIT("UTOC:"), m->manifest.asset.utoc_path, UI_C_TEXT, true);
       }
 
       if (!str_is_empty(m->manifest.asset.ucas_path)) {
-        draw_key_value(ctx, label_ucas, m->manifest.asset.ucas_path, UI_C_TEXT, true);
+        draw_key_value(ctx, &info_grid, STR_LIT("UCAS:"), m->manifest.asset.ucas_path, UI_C_TEXT, true);
       }
       nk_tree_pop(ctx);
     }
@@ -1019,12 +894,12 @@ draw_assets_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
     if (nk_tree_state_push(ctx, NK_TREE_NODE, "Runtime", &ui->inspector.assets_runtime_open)) {
       tmp_arena_t tmp = scratch_begin(NULL);
       {
-        draw_key_value(ctx, label_mount_state, mod_asset_state_to_str(m->asset.state), UI_C_TEXT, false);
-        draw_key_value(ctx, label_priority, str_push_fmt(tmp.arena, "%d", m->asset.priority), UI_C_TEXT, false);
+        draw_key_value(ctx, &runtime_grid, STR_LIT("Mount state:"), mod_asset_state_to_str(m->asset.state), UI_C_TEXT, false);
+        draw_key_value(ctx, &runtime_grid, STR_LIT("Priority:"), str_push_fmt(tmp.arena, "%d", m->asset.priority), UI_C_TEXT, false);
         if (m->asset.state == MOD_ASSET_STATE_ERROR) {
           str_t err_msg = err_msg_as_str(m->asset.last_error);
           if (!str_is_empty(err_msg)) {
-            draw_key_value(ctx, label_error, err_msg, UI_C_RED, false);
+            draw_key_value(ctx, &runtime_grid, STR_LIT("Error:"), err_msg, UI_C_RED, false);
           }
         }
       }
@@ -1040,52 +915,8 @@ draw_assets_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
 static void
 draw_blueprints_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
-  static ui_text_span_t label_class_path      = {0};
-  static ui_text_span_t label_context         = {0};
-  static ui_text_span_t label_custom_context  = {0};
-  static ui_text_span_t label_default_keybind = {0};
-  static ui_text_span_t label_active          = {0};
-  static ui_text_span_t label_actor           = {0};
-  static ui_text_span_t label_error           = {0};
-  static bool           cached                = false;
-
-  if (!cached) {
-    label_class_path      = ui_text_span_make(ctx, STR_LIT("Class path:"));
-    label_context         = ui_text_span_make(ctx, STR_LIT("Spawn context:"));
-    label_custom_context  = ui_text_span_make(ctx, STR_LIT("Custom class:"));
-    label_default_keybind = ui_text_span_make(ctx, STR_LIT("Default keybind:"));
-    label_active          = ui_text_span_make(ctx, STR_LIT("Active:"));
-    label_actor           = ui_text_span_make(ctx, STR_LIT("Instance:"));
-    label_error           = ui_text_span_make(ctx, STR_LIT("Error:"));
-
-    /* align labels */
-
-    ui_text_cols_t info_cols = {0};
-    ui_text_cols_reset(&info_cols, 1);
-
-    ui_text_cols_include(&info_cols, 0, label_class_path);
-    ui_text_cols_include(&info_cols, 0, label_context);
-    ui_text_cols_include(&info_cols, 0, label_custom_context);
-    ui_text_cols_include(&info_cols, 0, label_default_keybind);
-
-    label_class_path.width      = info_cols.width[0];
-    label_context.width         = info_cols.width[0];
-    label_custom_context.width  = info_cols.width[0];
-    label_default_keybind.width = info_cols.width[0];
-
-    ui_text_cols_t runtime_cols = {0};
-    ui_text_cols_reset(&runtime_cols, 1);
-
-    ui_text_cols_include(&runtime_cols, 0, label_active);
-    ui_text_cols_include(&runtime_cols, 0, label_actor);
-    ui_text_cols_include(&runtime_cols, 0, label_error);
-
-    label_active.width = runtime_cols.width[0];
-    label_actor.width  = runtime_cols.width[0];
-    label_error.width  = runtime_cols.width[0];
-
-    cached = true;
-  }
+  static struct nk_grid_state info_grid    = {0};
+  static struct nk_grid_state runtime_grid = {0};
 
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Blueprints", &ui->inspector.blueprints_open)) {
     if (nk_tree_state_push(ctx, NK_TREE_NODE, "Blueprint definition", &ui->inspector.blueprints_info_open)) {
@@ -1095,16 +926,16 @@ draw_blueprints_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manage
 
         draw_section_title(ctx, "%d. %.*s", i + 1, STR_ARG(info->id));
         {
-          draw_key_value(ctx, label_class_path, info->mod_actor_class_path, UI_C_TEXT, true);
-          draw_key_value(ctx, label_context, spawn_context_to_str(info->attach_to), UI_C_TEXT, false);
+          draw_key_value(ctx, &info_grid, STR_LIT("Class path:"), info->mod_actor_class_path, UI_C_TEXT, true);
+          draw_key_value(ctx, &info_grid, STR_LIT("Spawn context:"), spawn_context_to_str(info->attach_to), UI_C_TEXT, false);
 
           if (info->attach_to == MOD_SPAWN_CONTEXT_CUSTOM) {
-            draw_key_value(ctx, label_custom_context, info->custom_attach_class_path, UI_C_TEXT, true);
+            draw_key_value(ctx, &info_grid, STR_LIT("Custom class:"), info->custom_attach_class_path, UI_C_TEXT, true);
           }
 
           if (keybind_is_valid(info->default_spawn_keybind)) {
             str_t keybind_str = keybind_to_str(info->default_spawn_keybind, tmp.arena);
-            draw_key_value(ctx, label_default_keybind, keybind_str, UI_C_TEXT, true);
+            draw_key_value(ctx, &info_grid, STR_LIT("Default keybind:"), keybind_str, UI_C_TEXT, true);
           }
         }
         draw_spacer(ctx, 4.0f);
@@ -1123,8 +954,8 @@ draw_blueprints_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manage
         {
           tmp_arena_t tmp = scratch_begin(NULL);
           {
-            draw_key_value(ctx, label_active, STR_BOOL(rt->active), (rt->active) ? UI_C_GREEN : UI_C_RED, false);
-            draw_key_value(ctx, label_actor, str_push_fmt(tmp.arena, "%p", rt->actor), UI_C_TEXT, false);
+            draw_key_value(ctx, &runtime_grid, STR_LIT("Active:"),   STR_BOOL(rt->active),                     (rt->active) ? UI_C_GREEN : UI_C_RED, false);
+            draw_key_value(ctx, &runtime_grid, STR_LIT("Instance:"), str_push_fmt(tmp.arena, "%p", rt->actor), UI_C_TEXT,                            false);
           }
           scratch_end(tmp);
         }
@@ -1132,7 +963,7 @@ draw_blueprints_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manage
         if (rt->err_stage != MOD_BP_ERROR_NONE) {
           str_t err_msg = err_msg_as_str(rt->err_msg);
           if (!str_is_empty(err_msg)) {
-            draw_key_value(ctx, label_error, err_msg, UI_C_RED, false);
+            draw_key_value(ctx, &runtime_grid, STR_LIT("Error:"), err_msg, UI_C_RED, false);
           }
         }
 

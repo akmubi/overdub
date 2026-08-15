@@ -153,6 +153,18 @@ ui_button_str(struct nk_context *ctx, str_t str)
   return nk_button_text(ctx, (const char *)str.data, (int)str.len);
 }
 
+static inline bool
+ui_str_ex(struct nk_context *ctx, str_t str, const struct nk_text_options *opts)
+{
+  return nk_text_ex(ctx, (const char *)str.data, (int)str.len, opts);
+}
+
+static inline bool
+ui_grid_str(struct nk_grid *grid, int column, str_t str, const struct nk_text_options *opts)
+{
+  return nk_grid_text(grid, column, (const char *)str.data, (int)str.len, opts);
+}
+
 static inline struct nk_color
 ui_nk_style_item_color_or(struct nk_style_item item, struct nk_color fallback)
 {
@@ -269,8 +281,6 @@ struct ui_text_span_s {
 
 ui_text_span_t
 ui_text_span_make(struct nk_context *ctx, str_t str);
-void
-ui_text_span_align(ui_text_span_t *spans, int count);
 
 #define UI_TEXT_CELL(TEXT, COLOR, ...)                                \
   (ui_text_cell_t) {                                                  \
@@ -283,40 +293,5 @@ struct ui_text_cell_s {
   struct nk_color fg;
   nk_flags        align;
 };
-
-void
-ui_text_cell_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct nk_rect bounds, ui_text_cell_t cell, struct nk_color bg);
-void
-ui_text_cell(struct nk_context *ctx, ui_text_cell_t cell);
-
-#define UI_MAX_TEXT_COLS (8)
-
-typedef struct ui_text_cols_s ui_text_cols_t;
-struct ui_text_cols_s {
-  float width[UI_MAX_TEXT_COLS];
-  int   count;
-};
-
-static inline void
-ui_text_cols_reset(ui_text_cols_t *cols, int count)
-{
-  ASSERT(cols != NULL);
-  ASSERT(count >= 0);
-  ASSERT(count <= UI_MAX_TEXT_COLS);
-
-  mem_zero(cols, sizeof(*cols));
-  cols->count = count;
-}
-
-static inline void
-ui_text_cols_include(ui_text_cols_t *cols, int col, ui_text_span_t text)
-{
-  ASSERT(cols != NULL);
-  ASSERT(col >= 0);
-  ASSERT(col < cols->count);
-  ASSERT(col < UI_MAX_TEXT_COLS);
-
-  cols->width[col] = MAX_VAL(cols->width[col], text.width);
-}
 
 #endif /* UI_NUKLEAR_H */

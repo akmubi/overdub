@@ -41,8 +41,6 @@
 #define DETAIL_ENUM_COL_TEXT_NAME  "NAME"
 #define DETAIL_ENUM_COL_TEXT_VALUE "VALUE"
 
-#define DETAIL_PACKAGE_COL_COUNT (2)
-
 typedef struct detail_fvector2d_s detail_fvector2d_t;
 struct detail_fvector2d_s {
   float x;
@@ -961,16 +959,6 @@ detail_tab_build(search_tool_t *tool, detail_tab_t *tab)
 
     tab->enumeration->enum_name_col  = ui_text_span_make(tool->ctx, STR_LIT(DETAIL_ENUM_COL_TEXT_NAME));
     tab->enumeration->enum_value_col = ui_text_span_make(tool->ctx, STR_LIT(DETAIL_ENUM_COL_TEXT_VALUE));
-
-    ui_text_cols_reset(&tab->enumeration->cols, DETAIL_ENUM_COL_COUNT);
-
-    ui_text_cols_include(&tab->enumeration->cols, 0, tab->enumeration->enum_name_col);
-    ui_text_cols_include(&tab->enumeration->cols, 1, tab->enumeration->enum_value_col);
-
-    for (detail_enum_entry_t *entry = tab->enumeration->first_entry; entry; entry = entry->next) {
-      ui_text_cols_include(&tab->enumeration->cols, 0, entry->name);
-      ui_text_cols_include(&tab->enumeration->cols, 1, entry->value_text);
-    }
     return;
   }
 
@@ -3106,32 +3094,53 @@ detail_push_enum_dump(arena_t *arena, search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
-draw_details_header_line(search_tool_t *tool, ui_text_cols_t *cols, ui_text_cell_t key, ui_text_cell_t val, record_t *record_to_open)
+draw_details_header_line(search_tool_t *tool, struct nk_grid_state *grid_state,
+                         ui_text_cell_t key, ui_text_cell_t val, record_t *record_to_open)
 {
+  static const struct nk_grid_column columns[] = {
+    {.sizing = NK_GRID_COLUMN_CONTENT},
+    {.sizing = NK_GRID_COLUMN_CONTENT},
+  };
   ASSERT(tool != NULL);
   ASSERT(tool->ctx != NULL);
-  ASSERT(cols != NULL);
-  ASSERT(cols->count == 2);
+  ASSERT(grid_state != NULL);
 
-  struct nk_context *ctx        = tool->ctx;
-  struct nk_rect     row_bounds = {0};
+  struct nk_context     *ctx          = tool->ctx;
+  struct nk_rect         row_bounds   = {0};
+  struct nk_grid_options grid_options = {
+    .row_height = 20.0f,
+    .column_gap = ctx->style.window.spacing.x,
+  };
 
-  nk_layout_row_begin(ctx, NK_STATIC, 20.0f, 2);
-  {
-    nk_layout_row_push(ctx, cols->width[0]);
-    struct nk_rect key_bounds = nk_widget_bounds(ctx);
-    ui_text_cell(ctx, key);
+  struct nk_text_options key_options = {
+    .alignment = key.align,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = key.fg,
+  };
 
-    nk_layout_row_push(ctx, cols->width[1]);
-    struct nk_rect val_bounds = nk_widget_bounds(ctx);
-    ui_text_cell(ctx, val);
+  struct nk_text_options val_options = {
+    .alignment = val.align,
+    .flags     = NK_TEXT_OPTION_SELECTABLE,
+    .color     = val.fg,
+  };
+
+  struct nk_grid grid;
+
+  nk_grid_begin(ctx, &grid, grid_state, columns, 2, &grid_options);
+  if (nk_grid_row_begin(&grid)) {
+    struct nk_rect key_bounds = nk_grid_cell_bounds(&grid, 0, nk_vec2(0.0f, 0.0f));
+    struct nk_rect val_bounds = nk_grid_cell_bounds(&grid, 1, nk_vec2(0.0f, 0.0f));
 
     row_bounds.x = key_bounds.x;
     row_bounds.y = key_bounds.y;
     row_bounds.w = val_bounds.x + val_bounds.w - key_bounds.x;
     row_bounds.h = NK_MAX(key_bounds.h, val_bounds.h);
+
   }
-  nk_layout_row_end(ctx);
+  ui_grid_str(&grid, 0, key.text.str, &key_options);
+  ui_grid_str(&grid, 1, val.text.str, &val_options);
+  nk_grid_row_end(&grid);
+  nk_grid_end(&grid);
 
   if (nk_contextual_begin(ctx, NK_WINDOW_BORDER, nk_vec2(190.0f, 92.0f), row_bounds)) {
     if (!str_is_empty(val.text.str)) {
@@ -3241,75 +3250,30 @@ draw_details_header(search_tool_t *tool, detail_tab_t *tab)
       cpp_type_val = tab->enumeration->cpp_type;
     }
 
-    ui_text_cols_t cols = {0};
-    ui_text_cols_reset(&cols, 2);
-
-    /* key column */
-    ui_text_cols_include(&cols, 0, name_key);
-    ui_text_cols_include(&cols, 0, full_name_key);
-    ui_text_cols_include(&cols, 0, class_name_key);
-    ui_text_cols_include(&cols, 0, outer_name_key);
-    ui_text_cols_include(&cols, 0, flags_key);
-    ui_text_cols_include(&cols, 0, internal_idx_key);
-    ui_text_cols_include(&cols, 0, addr_key);
-
-    if (is_func) {
-      ui_text_cols_include(&cols, 0, func_flags_key);
-      ui_text_cols_include(&cols, 0, func_params_size_key);
-      ui_text_cols_include(&cols, 0, func_native_func_key);
-      ui_text_cols_include(&cols, 0, func_event_graph_func_key);
-      ui_text_cols_include(&cols, 0, func_event_graph_call_offset_key);
-    }
-
-    if (is_enum) {
-      ui_text_cols_include(&cols, 0, cpp_type_key);
-    }
-
-    /* value column */
-    ui_text_cols_include(&cols, 1, name_val);
-    ui_text_cols_include(&cols, 1, full_name_val);
-    ui_text_cols_include(&cols, 1, class_name_val);
-    ui_text_cols_include(&cols, 1, outer_name_val);
-    ui_text_cols_include(&cols, 1, flags_val);
-    ui_text_cols_include(&cols, 1, internal_idx_val);
-    ui_text_cols_include(&cols, 1, addr_val);
-
-    if (is_func) {
-      ui_text_cols_include(&cols, 1, func_flags_val);
-      ui_text_cols_include(&cols, 1, func_params_size_val);
-      ui_text_cols_include(&cols, 1, func_native_func_val);
-      ui_text_cols_include(&cols, 1, func_event_graph_func_val);
-      ui_text_cols_include(&cols, 1, func_event_graph_call_offset_val);
-    }
-
-    if (is_enum) {
-      ui_text_cols_include(&cols, 1, cpp_type_val);
-    }
-
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(name_key, UI_C_TEXT), UI_TEXT_CELL(name_val, UI_C_TEXT), NULL);
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(full_name_key, UI_C_TEXT), UI_TEXT_CELL(full_name_val, UI_C_TEXT), NULL);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(name_key, UI_C_TEXT), UI_TEXT_CELL(name_val, UI_C_TEXT), NULL);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(full_name_key, UI_C_TEXT), UI_TEXT_CELL(full_name_val, UI_C_TEXT), NULL);
 
     struct nk_color class_color = has_class ? uobject_kind_color(tab->record->kind) : UI_C_TEXT;
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(class_name_key, UI_C_TEXT), UI_TEXT_CELL(class_name_val, class_color), type_record);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(class_name_key, UI_C_TEXT), UI_TEXT_CELL(class_name_val, class_color), type_record);
 
     struct nk_color outer_color = has_outer ? uobject_kind_color(parent_record->kind) : UI_C_TEXT;
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(outer_name_key, UI_C_TEXT), UI_TEXT_CELL(outer_name_val, outer_color), parent_record);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(outer_name_key, UI_C_TEXT), UI_TEXT_CELL(outer_name_val, outer_color), parent_record);
 
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(flags_key, UI_C_TEXT), UI_TEXT_CELL(flags_val, UI_C_TEXT), NULL);
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(internal_idx_key, UI_C_TEXT), UI_TEXT_CELL(internal_idx_val, UI_C_TEXT), NULL);
-    draw_details_header_line(tool, &cols, UI_TEXT_CELL(addr_key, UI_C_TEXT), UI_TEXT_CELL(addr_val, UI_C_TEXT), NULL);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(flags_key, UI_C_TEXT), UI_TEXT_CELL(flags_val, UI_C_TEXT), NULL);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(internal_idx_key, UI_C_TEXT), UI_TEXT_CELL(internal_idx_val, UI_C_TEXT), NULL);
+    draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(addr_key, UI_C_TEXT), UI_TEXT_CELL(addr_val, UI_C_TEXT), NULL);
 
     if (is_func) {
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(func_flags_key, UI_C_TEXT), UI_TEXT_CELL(func_flags_val, UI_C_TEXT), NULL);
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(func_params_size_key, UI_C_TEXT), UI_TEXT_CELL(func_params_size_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(func_flags_key, UI_C_TEXT), UI_TEXT_CELL(func_flags_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(func_params_size_key, UI_C_TEXT), UI_TEXT_CELL(func_params_size_val, UI_C_TEXT), NULL);
 
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(func_native_func_key, UI_C_TEXT), UI_TEXT_CELL(func_native_func_val, UI_C_TEXT), NULL);
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(func_event_graph_func_key, UI_C_TEXT), UI_TEXT_CELL(func_event_graph_func_val, UI_C_TEXT), NULL);
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(func_event_graph_call_offset_key, UI_C_TEXT), UI_TEXT_CELL(func_event_graph_call_offset_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(func_native_func_key, UI_C_TEXT), UI_TEXT_CELL(func_native_func_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(func_event_graph_func_key, UI_C_TEXT), UI_TEXT_CELL(func_event_graph_func_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(func_event_graph_call_offset_key, UI_C_TEXT), UI_TEXT_CELL(func_event_graph_call_offset_val, UI_C_TEXT), NULL);
     }
 
     if (is_enum) {
-      draw_details_header_line(tool, &cols, UI_TEXT_CELL(cpp_type_key, UI_C_TEXT), UI_TEXT_CELL(cpp_type_val, UI_C_TEXT), NULL);
+      draw_details_header_line(tool, &tab->header_grid, UI_TEXT_CELL(cpp_type_key, UI_C_TEXT), UI_TEXT_CELL(cpp_type_val, UI_C_TEXT), NULL);
     }
   }
   scratch_end(tmp);
@@ -3346,140 +3310,113 @@ detail_row_push_line(arena_t *arena, ui_detail_row_t row)
 }
 
 static bool
-ui_detail_row(search_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bool *maximized)
+ui_detail_row(search_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_row_t row, bool *maximized)
 {
+  struct nk_grid_column  columns[NK_GRID_MAX_COLUMNS] = {0};
+  struct nk_grid_options grid_options = {0};
+  struct nk_context     *ctx;
+  struct nk_style       *style;
+  struct nk_panel       *layout;
+  struct nk_grid         grid;
+  struct nk_rect         row_bounds = {0};
+  float                  indent_w;
+  float                  symbol_w;
+  float                  gap_w;
+  bool                   expanded;
+  detail_tree_row_view_t view;
+  int                    i;
+
   ASSERT(tool != NULL);
   ASSERT(tool->ctx != NULL);
+  ASSERT(grid_state != NULL);
   ASSERT(row.parts != NULL);
-  ASSERT(row.count > 0);
-  if (cols) {
-    ASSERT(cols->count == row.count);
-  }
-
+  ASSERT(row.count > 0 && row.count + 1 <= NK_GRID_MAX_COLUMNS);
   if (row.has_children) {
     ASSERT(maximized != NULL);
   }
 
-  struct nk_context *ctx = tool->ctx;
+  ctx = tool->ctx;
   if (!ctx->current || !ctx->current->layout) {
     return false;
   }
 
-  detail_tree_row_view_t view = DETAIL_TREE_ROW_TEXT;
-  if (row.has_children) {
-    view = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
-  }
+  style     = &ctx->style;
+  layout    = ctx->current->layout;
+  gap_w     = ui_text_width(ctx, STR_LIT(" "));
+  indent_w  = style->tab.indent;
+  symbol_w  = NK_MAX(style->font_size, 12.0f);
+  row.depth = NK_MAX(row.depth, 0);
 
-  struct nk_style *style  = &ctx->style;
-  struct nk_panel *layout = ctx->current->layout;
-
-  float row_h = style->font_size + 2.0f * style->tab.padding.y;
-  float pad_x = style->tab.padding.x;
-  float gap_w = ui_text_width(ctx, STR_LIT(" "));
-
-  float indent_w = style->tab.indent;
   if (indent_w <= 0.0f) {
     indent_w = ui_text_width(ctx, STR_LIT("  "));
   }
-
   if (indent_w <= 0.0f) {
     indent_w = 12.0f;
   }
 
-  float symbol_w = NK_MAX(style->font_size, 12.0f);
-  float parts_w  = 0.0f;
-
-  if (cols) {
-    for (int i = 0; i < cols->count; ++i) {
-      parts_w += cols->width[i];
-      if (i + 1 < cols->count) {
-        parts_w += gap_w;
-      }
-    }
-  } else {
-    for (int i = 0; i < row.count; ++i) {
-      parts_w += row.parts[i].text.width;
-      if (i + 1 < row.count) {
-        parts_w += gap_w;
-      }
-    }
+  columns[0].sizing = NK_GRID_COLUMN_FIXED;
+  columns[0].width  = style->tab.padding.x + (float)row.depth * indent_w + symbol_w + gap_w;
+  for (i = 0; i < row.count; ++i) {
+    columns[i + 1].sizing = NK_GRID_COLUMN_CONTENT;
   }
 
-  row.depth = NK_MAX(row.depth, 0);
+  grid_options.row_height = style->font_size + 2.0f * style->tab.padding.y;
+  grid_options.column_gap = gap_w;
+  nk_grid_begin(ctx, &grid, grid_state, columns, row.count + 1, &grid_options);
 
-  float text_cell_w = pad_x + (float)row.depth * indent_w + symbol_w + gap_w + parts_w + gap_w;
-  float row_w       = text_cell_w;
+  expanded = row.has_children ? *maximized : false;
+  view     = row.has_children ? (*maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED) : DETAIL_TREE_ROW_TEXT;
 
-  float visible_w  = NK_MAX(layout->bounds.w - 2.0f * style->window.padding.x, 1.0f);
-  float filler_w   = NK_MAX(visible_w - row_w, 0.0f);
-  bool  has_filler = AS_BOOL(filler_w > 0.5f);
-  bool  expanded   = (row.has_children) ? *maximized : false;
+  nk_layout_set_min_row_height(ctx, grid_options.row_height);
+  if (nk_grid_row_begin(&grid)) {
+    struct nk_rect               bounds;
+    enum nk_widget_layout_states layout_state;
 
-  struct nk_rect row_bounds = {0};
-
-  nk_layout_set_min_row_height(ctx, row_h);
-  nk_layout_row_begin(ctx, NK_STATIC, row_h, 1 + has_filler);
-  {
-    nk_layout_row_push(ctx, text_cell_w);
-
-    struct nk_rect               bounds       = {0};
-    enum nk_widget_layout_states layout_state = nk_widget(&bounds, ctx);
-
+    nk_grid_push_row(&grid);
+    layout_state = nk_widget(&bounds, ctx);
     if (layout_state != NK_WIDGET_INVALID) {
-      row_bounds   = bounds;
-      row_bounds.w = row_w;
+      struct nk_input          *in        = NULL;
+      nk_flags                  row_state = 0;
+      struct nk_command_buffer *out       = nk_window_get_canvas(ctx);
+      struct nk_color           bg        = row.has_children ? DETAIL_C_ROW_COLLAPSIBLE_BG : UI_C_TRANSPARENT;
+      struct nk_rect            sym;
 
-      struct nk_input *in = NULL;
-      if (layout_state != NK_WIDGET_ROM && layout_state != NK_WIDGET_DISABLED && !(layout->flags & NK_WINDOW_ROM) && !(layout->flags & NK_WINDOW_NO_INPUT) &&
+      row_bounds   = bounds;
+      row_bounds.w = grid.offsets[row.count] + grid.widths[row.count];
+
+      if (layout_state != NK_WIDGET_ROM && layout_state != NK_WIDGET_DISABLED &&
+          !(layout->flags & NK_WINDOW_ROM) && !(layout->flags & NK_WINDOW_NO_INPUT) &&
           ui_nk_current_panel_accepts_input(ctx)) {
         in = &ctx->input;
       }
 
-      nk_flags row_state = 0;
-      if (in) {
-        if (row.has_children) {
-          bool clicked = nk_button_behavior(&row_state, row_bounds, in, NK_BUTTON_DEFAULT);
-          if (clicked) {
-            *maximized = !*maximized;
-            expanded   = *maximized;
-            view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
-          }
-
-          ctx->last_widget_state = row_state;
+      if (in && row.has_children) {
+        if (nk_button_behavior(&row_state, row_bounds, in, NK_BUTTON_DEFAULT)) {
+          *maximized = !*maximized;
+          expanded   = *maximized;
+          view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
         }
+        ctx->last_widget_state = row_state;
       }
 
-      struct nk_command_buffer *out = nk_window_get_canvas(ctx);
-      struct nk_color           bg  = UI_C_TRANSPARENT;
-
-      if (row.has_children) {
-        bg = DETAIL_C_ROW_COLLAPSIBLE_BG;
+      if (row.has_children && row_state & NK_WIDGET_STATE_HOVER) {
+        bg = DETAIL_C_ROW_COLLAPSIBLE_HOVER;
       }
 
-      if (row_state & NK_WIDGET_STATE_HOVER) {
-        if (row.has_children) {
-          bg = DETAIL_C_ROW_COLLAPSIBLE_HOVER;
-        }
-      }
-
-      if (row_state & NK_WIDGET_STATE_ACTIVE) {
-        if (row.has_children) {
-          bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
-        }
+      if (row.has_children && row_state & NK_WIDGET_STATE_ACTIVE) {
+        bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
       }
 
       if (bg.a > 0) {
         nk_fill_rect(out, row_bounds, style->selectable.rounding, bg);
       }
 
-      float x = bounds.x + pad_x + (float)row.depth * indent_w;
-      float y = bounds.y + (bounds.h - symbol_w) * 0.5f;
-
-      struct nk_rect sym = nk_rect(x, y, symbol_w, symbol_w);
-
+      sym = nk_rect(bounds.x + style->tab.padding.x + (float)row.depth * indent_w,
+                    bounds.y + (bounds.h - symbol_w) * 0.5f, symbol_w, symbol_w);
       if (view != DETAIL_TREE_ROW_TEXT) {
-        enum nk_symbol_type           symbol = NK_SYMBOL_NONE;
-        const struct nk_style_button *button = NULL;
+        enum nk_symbol_type           symbol;
+        const struct nk_style_button *button;
+        nk_flags                      draw_state = 0;
 
         if (view == DETAIL_TREE_ROW_OPEN) {
           symbol = style->tab.sym_maximize;
@@ -3488,30 +3425,21 @@ ui_detail_row(search_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bo
           symbol = style->tab.sym_minimize;
           button = &style->tab.node_minimize_button;
         }
-
-        nk_flags draw_state = 0;
         nk_do_button_symbol(&draw_state, out, sym, symbol, NK_BUTTON_DEFAULT, button, NULL, style->font);
       }
 
-      x += symbol_w + gap_w;
-
-      for (int i = 0; i < row.count; ++i) {
-        float max_w = (cols) ? cols->width[i] : row.parts[i].text.width;
-        ui_text_cell_draw(ctx, out, nk_rect(x, bounds.y, max_w, bounds.h), row.parts[i], bg);
-        x += max_w;
-
-        if (i + 1 < row.count) {
-          x += gap_w;
-        }
-      }
-    }
-
-    if (has_filler) {
-      nk_layout_row_push(ctx, filler_w);
-      nk_spacer(ctx);
     }
   }
-  nk_layout_row_end(ctx);
+  for (i = 0; i < row.count; ++i) {
+    struct nk_text_options options = {
+      .alignment = row.parts[i].align,
+      .flags     = NK_TEXT_OPTION_SELECTABLE,
+      .color     = row.parts[i].fg,
+    };
+    ui_grid_str(&grid, i + 1, row.parts[i].text.str, &options);
+  }
+  nk_grid_row_end(&grid);
+  nk_grid_end(&grid);
   nk_layout_reset_min_row_height(ctx);
 
   if (nk_contextual_begin(ctx, NK_WINDOW_BORDER, nk_vec2(190.0f, 92.0f), row_bounds)) {
@@ -3545,30 +3473,13 @@ ui_detail_row(search_tool_t *tool, ui_text_cols_t *cols, ui_detail_row_t row, bo
 }
 
 static void
-package_draw_children(search_tool_t *tool, record_t *record, int depth)
+package_draw_children(search_tool_t *tool, detail_tab_t *tab, record_t *record, int depth)
 {
   ASSERT(tool != NULL);
   ASSERT(tool->ctx != NULL);
+  ASSERT(tab != NULL);
   ASSERT(record != NULL);
   ASSERT(record_has_flag(record, RECORD_FLAG_LIVE));
-
-  ui_text_cols_t cols = {0};
-  ui_text_cols_reset(&cols, DETAIL_PACKAGE_COL_COUNT);
-
-  for (record_t *child_record = record_from_slot(tool, record->first_child_slot); child_record; child_record = record_from_slot(tool, child_record->next_sibling_slot)) {
-    ASSERT(record_has_flag(child_record, RECORD_FLAG_LIVE));
-
-    if (!cache_names(tool, child_record)) {
-      continue;
-    }
-
-    record_t *child_type_record = record_from_slot(tool, child_record->type_slot);
-    ASSERT(child_type_record);
-    ASSERT(record_has_flag(child_type_record, RECORD_FLAG_LIVE));
-
-    ui_text_cols_include(&cols, 0, child_type_record->name);
-    ui_text_cols_include(&cols, 1, child_record->name);
-  }
 
   for (record_t *child_record = record_from_slot(tool, record->first_child_slot); child_record; child_record = record_from_slot(tool, child_record->next_sibling_slot)) {
     ASSERT(record_has_flag(child_record, RECORD_FLAG_LIVE));
@@ -3596,9 +3507,9 @@ package_draw_children(search_tool_t *tool, record_t *record, int depth)
     };
 
     bool maximized = record_has_flag(child_record, RECORD_FLAG_MAXIMIZED);
-    if (ui_detail_row(tool, &cols, row, &maximized)) {
+    if (ui_detail_row(tool, &tab->package_grid, row, &maximized)) {
       if (child_record->first_child_slot != RECORD_SLOT_INVALID) {
-        package_draw_children(tool, child_record, depth + 1);
+        package_draw_children(tool, tab, child_record, depth + 1);
       }
     }
     record_set_flag(child_record, RECORD_FLAG_MAXIMIZED, maximized);
@@ -3621,7 +3532,7 @@ draw_package_section(search_tool_t *tool, detail_tab_t *tab)
       }
 
       if (tab->record->first_child_slot != RECORD_SLOT_INVALID) {
-        package_draw_children(tool, tab->record, 0);
+        package_draw_children(tool, tab, tab->record, 0);
       } else {
         nk_layout_row_dynamic(tool->ctx, 20.0f, 1);
         nk_label(tool->ctx, "No children", NK_TEXT_LEFT);
@@ -3633,7 +3544,7 @@ draw_package_section(search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
-draw_detail_enum_entry(search_tool_t *tool, ui_text_cols_t *cols, detail_enum_entry_t *entry)
+draw_detail_enum_entry(search_tool_t *tool, struct nk_grid_state *grid_state, detail_enum_entry_t *entry)
 {
   ASSERT(entry != NULL);
 
@@ -3650,7 +3561,7 @@ draw_detail_enum_entry(search_tool_t *tool, ui_text_cols_t *cols, detail_enum_en
     .copy_text    = entry->value_text.str,
   };
 
-  ui_detail_row(tool, cols, row, NULL);
+  ui_detail_row(tool, grid_state, row, NULL);
 }
 
 static void
@@ -3687,7 +3598,7 @@ draw_detail_enum_section(search_tool_t *tool, detail_tab_t *tab)
         .has_children   = false,
         .record_to_open = NULL,
       };
-      ui_detail_row(tool, &e->cols, header_row, NULL);
+      ui_detail_row(tool, &e->grid, header_row, NULL);
 
       if (!e->first_entry) {
         ui_text_cell_t parts[] = {
@@ -3701,10 +3612,10 @@ draw_detail_enum_section(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = NULL,
         };
-        ui_detail_row(tool, NULL, row, NULL);
+        ui_detail_row(tool, &tab->single_grid, row, NULL);
       } else {
         for (detail_enum_entry_t *entry = e->first_entry; entry; entry = entry->next) {
-          draw_detail_enum_entry(tool, &e->cols, entry);
+          draw_detail_enum_entry(tool, &e->grid, entry);
         }
       }
 
@@ -3718,13 +3629,11 @@ draw_detail_enum_section(search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
-draw_detail_prop(search_tool_t *tool, detail_tab_t *tab, ui_text_cols_t *cols, detail_prop_t *prop, int depth)
+draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_prop_t *prop, int depth)
 {
   ASSERT(tool != NULL);
-  ASSERT(tab != NULL);
   ASSERT(prop != NULL);
-  ASSERT(cols != NULL);
-  ASSERT(cols->count == DETAIL_PROP_COL_COUNT);
+  ASSERT(grid_state != NULL);
 
   struct nk_color summary_color = DETAIL_C_PROP_VALUE_TEXT;
   if (prop->is_param) {
@@ -3767,30 +3676,9 @@ draw_detail_prop(search_tool_t *tool, detail_tab_t *tab, ui_text_cols_t *cols, d
     .record_to_open = prop->record_to_open,
   };
 
-  if (ui_detail_row(tool, cols, row, has_children ? &prop->maximized : NULL)) {
-    ui_text_cols_t child_cols = {0};
-    ui_text_cols_reset(&child_cols, DETAIL_PROP_COL_COUNT);
-
-    ui_text_cols_include(&child_cols, 0, tab->offset_col);
-    ui_text_cols_include(&child_cols, 1, tab->size_col);
-    ui_text_cols_include(&child_cols, 2, tab->type_col);
-    ui_text_cols_include(&child_cols, 3, tab->name_col);
-    if (prop->first_child && prop->first_child->is_param) {
-      ui_text_cols_include(&child_cols, 4, tab->flags_col);
-    } else {
-      ui_text_cols_include(&child_cols, 4, tab->val_col);
-    }
-
+  if (ui_detail_row(tool, grid_state, row, has_children ? &prop->maximized : NULL)) {
     for (detail_prop_t *child = prop->first_child; child; child = child->next) {
-      ui_text_cols_include(&child_cols, 0, child->offset_text);
-      ui_text_cols_include(&child_cols, 1, child->size_text);
-      ui_text_cols_include(&child_cols, 2, child->type);
-      ui_text_cols_include(&child_cols, 3, child->name);
-      ui_text_cols_include(&child_cols, 4, child->summary);
-    }
-
-    for (detail_prop_t *child = prop->first_child; child; child = child->next) {
-      draw_detail_prop(tool, tab, &child_cols, child, depth + 1);
+      draw_detail_prop(tool, grid_state, child, depth + 1);
     }
   }
 }
@@ -3837,7 +3725,7 @@ draw_detail_disasm_section(search_tool_t *tool, detail_tab_t *tab)
           .color     = UI_C_TEXT,
         };
         nk_layout_row_dynamic(ctx, 18.0f, 1);
-        nk_text_ex(ctx, (const char *)node->str.data, (int)node->str.len, &options);
+        ui_str_ex(ctx, node->str, &options);
       }
 
       nk_group_end(ctx);
@@ -3882,23 +3770,6 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         detail_copy_text(tool->ctx, dump);
       }
 
-      ui_text_cols_t cols = {0};
-      ui_text_cols_reset(&cols, DETAIL_PROP_COL_COUNT);
-
-      ui_text_cols_include(&cols, 0, tab->offset_col);
-      ui_text_cols_include(&cols, 1, tab->size_col);
-      ui_text_cols_include(&cols, 2, tab->type_col);
-      ui_text_cols_include(&cols, 3, tab->name_col);
-      ui_text_cols_include(&cols, 4, tab->flags_col);
-
-      for (detail_prop_t *param = f->first_param; param; param = param->next) {
-        ui_text_cols_include(&cols, 0, param->offset_text);
-        ui_text_cols_include(&cols, 1, param->size_text);
-        ui_text_cols_include(&cols, 2, param->type);
-        ui_text_cols_include(&cols, 3, param->name);
-        ui_text_cols_include(&cols, 4, param->summary);
-      }
-
       ui_text_cell_t header_parts[] = {
         UI_TEXT_CELL(tab->offset_col, UI_C_TEXT),
         UI_TEXT_CELL(tab->size_col, UI_C_TEXT),
@@ -3914,7 +3785,7 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         .has_children   = false,
         .record_to_open = NULL,
       };
-      ui_detail_row(tool, &cols, header_row, NULL);
+      ui_detail_row(tool, &tab->param_grid, header_row, NULL);
 
       if (!f->first_param) {
         ui_text_cell_t parts[] = {
@@ -3928,10 +3799,10 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = NULL,
         };
-        ui_detail_row(tool, NULL, header_row, NULL);
+        ui_detail_row(tool, &tab->single_grid, header_row, NULL);
       } else {
         for (detail_prop_t *param = f->first_param; param; param = param->next) {
-          draw_detail_prop(tool, tab, &cols, param, 0);
+          draw_detail_prop(tool, &tab->param_grid, param, 0);
         }
       }
 
@@ -3965,28 +3836,6 @@ draw_detail_layout_section_instances(search_tool_t *tool, detail_tab_t *tab)
         detail_copy_text(tool->ctx, dump);
       }
 
-      ui_text_cols_t cols = {0};
-      ui_text_cols_reset(&cols, 2);
-
-      ui_text_cols_include(&cols, 0, tab->type_col);
-      ui_text_cols_include(&cols, 1, tab->name_col);
-
-      for (record_t *instance = record_from_slot(tool, tab->record->first_instance_slot); instance; instance = record_from_slot(tool, instance->next_instance_slot)) {
-        if (!record_has_flag(instance, RECORD_FLAG_LIVE)) {
-          continue;
-        }
-
-        ASSERT(cache_names(tool, instance));
-
-        record_t *type_record = record_from_slot(tool, instance->type_slot);
-        ASSERT(type_record != NULL);
-        ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
-        ASSERT(cache_names(tool, type_record));
-
-        ui_text_cols_include(&cols, 0, type_record->name);
-        ui_text_cols_include(&cols, 1, instance->name);
-      }
-
       if (tab->record->first_instance_slot == RECORD_SLOT_INVALID) {
         ui_text_cell_t parts[] = {
           UI_TEXT_CELL(tab->no_instances, UI_C_TEXT),
@@ -3999,7 +3848,7 @@ draw_detail_layout_section_instances(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = NULL,
         };
-        ui_detail_row(tool, NULL, row, NULL);
+        ui_detail_row(tool, &tab->single_grid, row, NULL);
       } else {
         ui_text_cell_t header_parts[] = {
           UI_TEXT_CELL(tab->type_col, UI_C_TEXT),
@@ -4013,7 +3862,7 @@ draw_detail_layout_section_instances(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = NULL,
         };
-        ui_detail_row(tool, &cols, header_row, NULL);
+        ui_detail_row(tool, &tab->instance_grid, header_row, NULL);
 
         for (record_t *instance = record_from_slot(tool, tab->record->first_instance_slot); instance; instance = record_from_slot(tool, instance->next_instance_slot)) {
           if (!record_has_flag(instance, RECORD_FLAG_LIVE)) {
@@ -4023,6 +3872,8 @@ draw_detail_layout_section_instances(search_tool_t *tool, detail_tab_t *tab)
           record_t *type_record = record_from_slot(tool, instance->type_slot);
           ASSERT(type_record != NULL);
           ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
+          ASSERT(cache_names(tool, instance));
+          ASSERT(cache_names(tool, type_record));
 
           ui_text_cell_t instance_parts[] = {
             UI_TEXT_CELL(type_record->name, uobject_kind_color(instance->kind)),
@@ -4037,7 +3888,7 @@ draw_detail_layout_section_instances(search_tool_t *tool, detail_tab_t *tab)
             .copy_text      = instance->full_name.str,
             .record_to_open = instance,
           };
-          ui_detail_row(tool, &cols, row, NULL);
+          ui_detail_row(tool, &tab->instance_grid, row, NULL);
         }
       }
 
@@ -4121,25 +3972,6 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
 
       nk_layout_row_dynamic(tool->ctx, group_h, 1);
       if (nk_group_begin(tool->ctx, "uobject_search.details.properties.table", NK_WINDOW_NO_SCROLLBAR_V)) {
-        ui_text_cols_t prop_cols = {0};
-        ui_text_cols_reset(&prop_cols, DETAIL_PROP_COL_COUNT);
-
-        ui_text_cols_include(&prop_cols, 0, tab->offset_col);
-        ui_text_cols_include(&prop_cols, 1, tab->size_col);
-        ui_text_cols_include(&prop_cols, 2, tab->type_col);
-        ui_text_cols_include(&prop_cols, 3, tab->name_col);
-        ui_text_cols_include(&prop_cols, 4, tab->val_col);
-
-        for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
-          for (detail_prop_t *prop = owner->first_prop; prop; prop = prop->next) {
-            ui_text_cols_include(&prop_cols, 0, prop->offset_text);
-            ui_text_cols_include(&prop_cols, 1, prop->size_text);
-            ui_text_cols_include(&prop_cols, 2, prop->type);
-            ui_text_cols_include(&prop_cols, 3, prop->name);
-            ui_text_cols_include(&prop_cols, 4, prop->summary);
-          }
-        }
-
         ui_text_cell_t header_parts[] = {
           UI_TEXT_CELL(tab->offset_col, UI_C_TEXT),
           UI_TEXT_CELL(tab->size_col, UI_C_TEXT),
@@ -4155,7 +3987,7 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = NULL,
         };
-        ui_detail_row(tool, &prop_cols, header_row, NULL);
+        ui_detail_row(tool, &tab->prop_grid, header_row, NULL);
 
         for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
           int prop_count = 0;
@@ -4176,7 +4008,7 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
             .record_to_open = owner->record,
           };
 
-          ui_detail_row(tool, NULL, owner_row, NULL);
+          ui_detail_row(tool, &tab->single_grid, owner_row, NULL);
 
           if (!owner->first_prop) {
             ui_text_cell_t parts[] = {
@@ -4190,10 +4022,10 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
               .has_children   = false,
               .record_to_open = NULL,
             };
-            ui_detail_row(tool, NULL, row, NULL);
+            ui_detail_row(tool, &tab->single_grid, row, NULL);
           } else {
             for (detail_prop_t *prop = owner->first_prop; prop; prop = prop->next) {
-              draw_detail_prop(tool, tab, &prop_cols, prop, 1);
+              draw_detail_prop(tool, &tab->prop_grid, prop, 1);
             }
           }
         }
@@ -4232,43 +4064,6 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
         detail_copy_text(tool->ctx, dump);
       }
 
-      ui_text_cols_t owner_cols = {0};
-      ui_text_cols_reset(&owner_cols, 3);
-      ui_text_cols_include(&owner_cols, 0, tab->owner_hbar);
-      ui_text_cols_include(&owner_cols, 1, tab->owner_hbar);
-      ui_text_cols_include(&owner_cols, 2, tab->owner_hbar);
-
-      ui_text_cols_t func_cols = {0};
-      ui_text_cols_reset(&func_cols, 1);
-
-      ui_text_cols_t param_cols = {0};
-      ui_text_cols_reset(&param_cols, DETAIL_PROP_COL_COUNT);
-
-      ui_text_cols_include(&param_cols, 0, tab->offset_col);
-      ui_text_cols_include(&param_cols, 1, tab->size_col);
-      ui_text_cols_include(&param_cols, 2, tab->type_col);
-      ui_text_cols_include(&param_cols, 3, tab->name_col);
-      ui_text_cols_include(&param_cols, 4, tab->flags_col);
-
-      for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
-        ui_text_cols_include(&owner_cols, 1, owner->record->name);
-
-        if (!owner->first_func) {
-          continue;
-        }
-
-        for (detail_func_t *func = owner->first_func; func; func = func->next) {
-          ui_text_cols_include(&func_cols, 0, func->record->name);
-          for (detail_prop_t *param = func->first_param; param; param = param->next) {
-            ui_text_cols_include(&param_cols, 0, param->offset_text);
-            ui_text_cols_include(&param_cols, 1, param->size_text);
-            ui_text_cols_include(&param_cols, 2, param->type);
-            ui_text_cols_include(&param_cols, 3, param->name);
-            ui_text_cols_include(&param_cols, 4, param->summary);
-          }
-        }
-      }
-
       for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
         ui_text_cell_t owner_parts[] = {
           UI_TEXT_CELL(tab->owner_hbar, UI_C_TEXT),
@@ -4283,7 +4078,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
           .has_children   = false,
           .record_to_open = owner->record,
         };
-        ui_detail_row(tool, &owner_cols, owner_row, NULL);
+        ui_detail_row(tool, &tab->func_owner_grid, owner_row, NULL);
 
         if (!owner->first_func) {
           ui_text_cell_t parts[] = {
@@ -4297,7 +4092,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
             .has_children   = false,
             .record_to_open = NULL,
           };
-          ui_detail_row(tool, NULL, row, NULL);
+          ui_detail_row(tool, &tab->single_grid, row, NULL);
         } else {
           for (detail_func_t *func = owner->first_func; func; func = func->next) {
             ui_text_cell_t func_parts[] = {
@@ -4312,7 +4107,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
               .record_to_open = func->record,
             };
 
-            if (ui_detail_row(tool, &func_cols, row, &func->maximized)) {
+            if (ui_detail_row(tool, &tab->func_name_grid, row, &func->maximized)) {
               ui_text_cell_t header_parts[] = {
                 UI_TEXT_CELL(tab->offset_col, UI_C_TEXT),
                 UI_TEXT_CELL(tab->size_col, UI_C_TEXT),
@@ -4328,7 +4123,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
                 .has_children   = false,
                 .record_to_open = NULL,
               };
-              ui_detail_row(tool, &param_cols, header_row, NULL);
+              ui_detail_row(tool, &tab->param_grid, header_row, NULL);
 
               if (!func->first_param) {
                 ui_text_cell_t parts[] = {
@@ -4342,10 +4137,10 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
                   .has_children   = false,
                   .record_to_open = NULL,
                 };
-                ui_detail_row(tool, NULL, row, NULL);
+                ui_detail_row(tool, &tab->single_grid, row, NULL);
               } else {
                 for (detail_prop_t *prop = func->first_param; prop; prop = prop->next) {
-                  draw_detail_prop(tool, tab, &param_cols, prop, 2);
+                  draw_detail_prop(tool, &tab->param_grid, prop, 2);
                 }
               }
             }
