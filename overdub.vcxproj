@@ -144,6 +144,9 @@
     <ClCompile Include="src\globals.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\hook_chain.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\ini.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>
@@ -267,6 +270,7 @@
     <ClInclude Include="include\config.h" />
     <ClInclude Include="include\file.h" />
     <ClInclude Include="include\globals.h" />
+    <ClInclude Include="include\hook_chain.h" />
     <ClInclude Include="include\ini.h" />
     <ClInclude Include="include\input.h" />
     <ClInclude Include="include\log.h" />

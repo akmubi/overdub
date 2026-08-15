@@ -1,10 +1,13 @@
 #include "signatures.h"
 
 #include "globals.h"
+#include "hook_chain.h"
 #include "log.h"
 #include "sigscan.h"
 
-#include "vendor_minhook.h"
+#include <windows.h>
+
+static hook_chain_handle_t g_signature_hooks[64];
 
 #define UE_FUNC_NORMAL(NAME, RET, ...) \
   NAME##_fn_t NAME = NULL;
@@ -126,6 +129,15 @@ scan_user_module_signatures(void)
 
   globals.num_user_spans   = sigscan_build_exec_spans(globals.user_spans, COUNTOF(globals.user_spans), user_module);
   globals.user_module_base = user_module;
+  if (globals.num_user_spans <= 0 || !sigscan_snapshot_exec_spans(globals.user_spans, globals.num_user_spans, &globals.perm)) {
+    LOG_ERROR("signatures: failed to snapshot executable sections");
+    return false;
+  }
+
+  if (COUNTOF(sig_table) > COUNTOF(g_signature_hooks)) {
+    LOG_ERROR("signatures: hook storage is too small");
+    return false;
+  }
 
   int resolved = 0;
   for (int i = 0; i < COUNTOF(sig_table); ++i) {
@@ -152,15 +164,14 @@ scan_user_module_signatures(void)
     }
 
     if (entry->addr && detour && original) {
-      MH_STATUS s = MH_CreateHook(entry->addr, detour, original);
-      if (s != MH_OK) {
-        LOG_ERROR("%s: failed to create hook: %s", entry->name, MH_StatusToString(s));
+      if (!hook_chain_create(&g_signature_hooks[i], entry->addr, detour, original)) {
+        LOG_ERROR("%s: failed to create hook chain", entry->name);
         continue;
       }
 
-      s = MH_EnableHook(entry->addr);
-      if (s != MH_OK) {
-        LOG_ERROR("%s: failed to enable hook: %s", entry->name, MH_StatusToString(s));
+      if (!hook_chain_enable(&g_signature_hooks[i])) {
+        hook_chain_remove(&g_signature_hooks[i]);
+        LOG_ERROR("%s: failed to enable hook chain", entry->name);
         continue;
       }
 

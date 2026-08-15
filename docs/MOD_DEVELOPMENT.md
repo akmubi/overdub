@@ -690,6 +690,10 @@ The pattern above is only an example.
 
 A detour must match the real ABI, parameters, return type, and calling thread. It must also handle recursion and shutdown correctly. Call the original when the caller depends on its side effects or return value.
 
+Overdub snapshots the main executable's unpacked executable sections before loading mods, so SDK signature scans are stable if another SDK or direct MinHook detour later changes live code. Scan results are translated by RVA and always point into the live module.
+
+SDK hooks on the same target form a chain. The most recently enabled hook runs first, and the `original` pointer returned to each mod is a stable next-call thunk. Disabling or removing a hook rewires the chain without changing another mod's stored pointer. Hooks installed directly with MinHook do not join this chain and can still conflict with it.
+
 Hooks created through the SDK are removed after `deinit`. Manual hooks and patches are the mod's responsibility.
 
 ## 19. Assets and Blueprint Actors

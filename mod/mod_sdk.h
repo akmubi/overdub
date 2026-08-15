@@ -442,7 +442,9 @@ struct sigscan_entry_s {
 sigscan_err_t
 mod_sigscan(sigscan_entry_t *entry);
 /*
- * Creates a hook owned by this mod and writes the trampoline to original.
+ * Creates a hook owned by this mod and writes a stable next-call thunk to original.
+ * Multiple mods may hook the same target. The most recently enabled hook runs first;
+ * calling original continues with the next enabled hook, then the real function.
  * The hook starts disabled.
  * Removed automatically by the loader after mod is deinitialized (i.e. deinit called).
  */

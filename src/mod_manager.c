@@ -16,7 +16,6 @@
 
 #include "ui_console.h"
 
-#include "vendor_minhook.h"
 #include "version.h"
 
 #include <windows.h>
@@ -1952,9 +1951,9 @@ mod_manager_discover(mod_manager_t *manager)
 static int
 mod_dll_hook_find(mod_dll_runtime_t *r, void *target)
 {
-  for (int i = 0; i < r->hook_count; ++i) {
+  for (int i = 0; i < CONFIG_MOD_MAX_HOOKS; ++i) {
     mod_dll_runtime_hook_t *hook = &r->hooks[i];
-    if (hook->target == target) {
+    if (hook->occupied && hook->chain.target == target) {
       return i;
     }
   }
@@ -1986,18 +1985,22 @@ mod_dll_hook_create(mod_manager_t *manager, mod_handle_t h, void *target, void *
     return false;
   }
 
-  MH_STATUS s = MH_CreateHook(target, detour, original);
-  if (s != MH_OK) {
-    /* failed to create hook */
+  int free_idx = -1;
+  for (int i = 0; i < CONFIG_MOD_MAX_HOOKS; ++i) {
+    if (!rt->hooks[i].occupied) {
+      free_idx = i;
+      break;
+    }
+  }
+  ASSERT(free_idx >= 0);
+
+  mod_dll_runtime_hook_t *new_slot = &rt->hooks[free_idx];
+  if (!hook_chain_create(&new_slot->chain, target, detour, original)) {
     return false;
   }
 
-  mod_dll_runtime_hook_t *new_slot = &rt->hooks[rt->hook_count++];
-
-  new_slot->target   = target;
-  new_slot->detour   = detour;
-  new_slot->original = original;
-  new_slot->enabled  = false;
+  new_slot->occupied = true;
+  rt->hook_count += 1;
   return true;
 }
 
@@ -2022,14 +2025,7 @@ mod_dll_hook_enable(mod_manager_t *manager, mod_handle_t h, void *target)
     return false;
   }
 
-  MH_STATUS s = MH_EnableHook(target);
-  if (s != MH_OK) {
-    /* failed to enable hook */
-    return false;
-  }
-
-  rt->hooks[idx].enabled = true;
-  return true;
+  return hook_chain_enable(&rt->hooks[idx].chain);
 }
 
 bool
@@ -2053,14 +2049,7 @@ mod_dll_hook_disable(mod_manager_t *manager, mod_handle_t h, void *target)
     return false;
   }
 
-  MH_STATUS s = MH_DisableHook(target);
-  if (s != MH_OK) {
-    /* failed to disable hook */
-    return false;
-  }
-
-  rt->hooks[idx].enabled = false;
-  return true;
+  return hook_chain_disable(&rt->hooks[idx].chain);
 }
 
 bool
@@ -2088,15 +2077,12 @@ mod_dll_hook_remove(mod_manager_t *manager, mod_handle_t h, void *target)
     return false;
   }
 
-  MH_STATUS s = MH_RemoveHook(target);
-  if (s != MH_OK) {
-    /* failed to remove hook */
+  mod_dll_runtime_hook_t *hook = &rt->hooks[idx];
+  if (!hook_chain_remove(&hook->chain)) {
     return false;
   }
 
-  for (int i = idx; i < rt->hook_count - 1; ++i) {
-    rt->hooks[i] = rt->hooks[i + 1];
-  }
+  hook->occupied = false;
   rt->hook_count -= 1;
   return true;
 }
@@ -2252,16 +2238,14 @@ mod_cleanup_dll_runtime_hooks(mod_t *m)
     return;
   }
 
-  for (int i = 0; i < m->dll.hook_count; ++i) {
+  for (int i = 0; i < CONFIG_MOD_MAX_HOOKS; ++i) {
     mod_dll_runtime_hook_t *hook = &m->dll.hooks[i];
-
-    ASSERT(hook->target != NULL);
-
-    if (hook->enabled) {
-      MH_DisableHook(hook->target);
+    if (!hook->occupied) {
+      continue;
     }
 
-    MH_RemoveHook(hook->target);
+    hook_chain_remove(&hook->chain);
+    hook->occupied = false;
   }
   m->dll.hook_count = 0;
 }

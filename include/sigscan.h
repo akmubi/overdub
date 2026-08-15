@@ -1,6 +1,7 @@
 #ifndef SIGSCAN_H
 #define SIGSCAN_H
 
+#include "arena.h"
 #include "types.h"
 
 typedef uint8_t sig_kind_t;
@@ -122,13 +123,17 @@ struct sigscan_entry_s {
 /* executable section walker */
 typedef struct sigscan_exec_span_s sigscan_exec_span_t;
 struct sigscan_exec_span_s {
-  char     name[8];
-  uint8_t *base;
-  uint64_t size;
+  char      name[8];
+  uint8_t  *base;
+  uint64_t  size;
+  uintptr_t rva;
 };
 
 int
 sigscan_build_exec_spans(sigscan_exec_span_t *spans, int max_spans, void *module_base);
+
+bool
+sigscan_snapshot_exec_spans(sigscan_exec_span_t *spans, int num_spans, arena_t *arena);
 
 sigscan_err_t
 sigscan_scan_entry(sigscan_exec_span_t *spans, int num_spans, void *module_base, sigscan_entry_t *entry);

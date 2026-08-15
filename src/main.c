@@ -3,6 +3,7 @@
 #include "debug.h"
 #include "file.h"
 #include "globals.h"
+#include "hook_chain.h"
 #include "input.h"
 #include "log.h"
 #include "mod_manager.h"
@@ -249,6 +250,8 @@ loader_init(HINSTANCE inst)
   log_init(STR_LIT(CONFIG_LOG_FILE_NAME), CONFIG_LOG_LEVEL, false);
   nk_d3d12_preinit(&globals.perm);
   ui_manager_preinit(&globals.ui_manager, &globals.mod_manager, &globals.perm);
+
+  hook_chain_init();
   scan_user_module_signatures();
 
   globals.listeners = ARENA_PUSH_ARRAY_ZERO(&globals.perm, uobject_listener_t, CONFIG_UOBJECT_ARRAY_MAX_LISTENERS);

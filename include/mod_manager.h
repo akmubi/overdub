@@ -2,6 +2,7 @@
 #define MOD_MANAGER_H
 
 #include "arena.h"
+#include "hook_chain.h"
 #include "ini.h"
 #include "input.h"
 #include "str.h"
@@ -278,10 +279,8 @@ struct mod_dll_runtime_funcs_s {
 
 typedef struct mod_dll_runtime_hook_s mod_dll_runtime_hook_t;
 struct mod_dll_runtime_hook_s {
-  bool   enabled;
-  void  *target;
-  void  *detour;
-  void **original;
+  bool                occupied;
+  hook_chain_handle_t chain;
 };
 
 typedef struct err_msg_s err_msg_t;

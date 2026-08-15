@@ -38,11 +38,33 @@ sigscan_build_exec_spans(sigscan_exec_span_t *spans, int max_spans, void *module
 
       s->base  = base + sec[i].VirtualAddress;
       s->size  = (vsz > rsz ? vsz : rsz);
+      s->rva   = sec[i].VirtualAddress;
       n_spans += 1;
     }
   }
 
   return n_spans;
+}
+
+bool
+sigscan_snapshot_exec_spans(sigscan_exec_span_t *spans, int num_spans, arena_t *arena)
+{
+  if (!spans || num_spans <= 0 || !arena) {
+    return false;
+  }
+
+  for (int i = 0; i < num_spans; ++i) {
+    sigscan_exec_span_t *span = &spans[i];
+    uint8_t             *copy = ARENA_PUSH_ARRAY(arena, uint8_t, span->size);
+    if (!copy) {
+      return false;
+    }
+
+    mem_copy(copy, span->base, span->size);
+    span->base = copy;
+  }
+
+  return true;
 }
 
 static inline void *
@@ -54,14 +76,14 @@ rip_rel32(uint8_t *disp_at)
 }
 
 static void *
-resolve_match(sigscan_entry_t *e, uint8_t *match)
+resolve_match(sigscan_entry_t *e, uint8_t *scan_match, uint8_t *live_match)
 {
   switch (e->kind) {
   case SIG_DIRECT:
-    return match;
+    return live_match;
     // e.g. "48 8B 05 ?? ?? ?? ??" mov rax,[rip+disp32], "E8 ?? ?? ?? ??" call rel32
   case SIG_RIPREL32_AT:
-    return rip_rel32(match + e->op_off);
+    return live_match + ((uint8_t *)rip_rel32(scan_match + e->op_off) - scan_match);
   }
   return NULL;
 }
@@ -173,16 +195,27 @@ find_signature(void *haystack, uint64_t haystack_len, uint8_t *sig, const char *
 }
 
 static sigscan_err_t
-scan_at_rva(sigscan_entry_t *e, void *module_base, uintptr_t rva, uint8_t *sig, const char *mask, uint64_t len)
+scan_at_rva(sigscan_exec_span_t *spans, int num_spans, sigscan_entry_t *e, void *module_base, uintptr_t rva, uint8_t *sig, const char *mask, uint64_t len)
 {
-  uint8_t *mod_base  = (uint8_t *)module_base;
-  uint8_t *candidate = mod_base + rva;
+  uint8_t *candidate = NULL;
+  for (int i = 0; i < num_spans; ++i) {
+    sigscan_exec_span_t *span = &spans[i];
+    if (rva >= span->rva && rva - span->rva <= span->size && len <= span->size - (rva - span->rva)) {
+      candidate = span->base + (rva - span->rva);
+      break;
+    }
+  }
+
+  if (!candidate) {
+    return SIG_ERR_NOT_FOUND;
+  }
 
   if (!signature_match(candidate, sig, mask, len)) {
     return SIG_ERR_NOT_FOUND;
   }
 
-  uint8_t *target = (uint8_t *)resolve_match(e, candidate);
+  uint8_t *live_match = (uint8_t *)module_base + rva;
+  uint8_t *target     = (uint8_t *)resolve_match(e, candidate, live_match);
   if (!target) {
     return SIG_ERR_NOT_FOUND;
   }
@@ -218,7 +251,7 @@ sigscan_scan_entry(sigscan_exec_span_t *spans, int num_spans, void *module_base,
     uintptr_t rva = entry->first_rvas[i];
 
     if (rva != 0) {
-      if (scan_at_rva(entry, module_base, rva, sig, mask, len) == SIG_ERR_OK) {
+      if (scan_at_rva(spans, num_spans, entry, module_base, rva, sig, mask, len) == SIG_ERR_OK) {
         // found immediately
         return SIG_ERR_OK;
       }
@@ -233,14 +266,15 @@ sigscan_scan_entry(sigscan_exec_span_t *spans, int num_spans, void *module_base,
       continue;
     }
 
-    uintptr_t rva = (uintptr_t)match - (uintptr_t)module_base;
+    uintptr_t rva = span->rva + ((uintptr_t)match - (uintptr_t)span->base);
     if (entry->name && entry->name[0] != '\0') {
       LOG_DEBUG("%s: found match: 0x%08llX", entry->name, rva);
     } else {
       LOG_DEBUG("found match: 0x%08llX", rva);
     }
 
-    uint8_t *target = (uint8_t *)resolve_match(entry, match);
+    uint8_t *live_match = (uint8_t *)module_base + rva;
+    uint8_t *target     = (uint8_t *)resolve_match(entry, match, live_match);
     if (!target) {
       continue;
     }
