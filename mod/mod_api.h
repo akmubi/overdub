@@ -450,7 +450,7 @@ struct mod_host_api_s {
   fuobject_array_t  *(MOD_CALL *get_object_array)         (void);
   uworld_t         **(MOD_CALL *get_gworld_ptr)           (void);
   void               (MOD_CALL *process_event)            (uobject_t *self, ufunc_t *func, void *params);
-  uclass_t          *(MOD_CALL *uobject_load_class)       (uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
+  uclass_t          *(MOD_CALL *static_load_class)        (uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
   bool               (MOD_CALL *mount_pak)                (str_t file_path, int order);
   bool               (MOD_CALL *mount_iostore)            (str_t file_path, int order);
   fname_t            (MOD_CALL *fname_from_str)           (str_t str, efind_name_t find_type);
@@ -484,16 +484,17 @@ struct mod_host_api_s {
   bool          (MOD_CALL *hook_disable)(mod_t m, void *target);
   bool          (MOD_CALL *hook_remove) (mod_t m, void *target);
 
-  /* UNREAL ENGINE (MAP HELPERS) */
-
-  void (MOD_CALL *map_add)   (void *map, void *prop, const void *key, const void *val);
-  bool (MOD_CALL *map_remove)(void *map, void *prop, const void *key);
-  bool (MOD_CALL *map_find)  (void *map, void *prop, const void *key, void *out_val);
+  /* UNREAL ENGINE (CONT.) */
+  void       (MOD_CALL *map_add)           (void *map, void *prop, const void *key, const void *val);
+  bool       (MOD_CALL *map_remove)        (void *map, void *prop, const void *key);
+  bool       (MOD_CALL *map_find)          (void *map, void *prop, const void *key, void *out_val);
+  uobject_t *(MOD_CALL *static_load_object)(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
 };
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_add)    == 0x1e8, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_remove) == 0x1f0, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_find)   == 0x1f8, "invalid host API offset");
-MOD_STATIC_ASSERT(sizeof(mod_host_api_t)               == 0x200, "invalid host API size");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_add)            == 0x1e8, "invalid host API offset");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)         == 0x1f0, "invalid host API offset");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_find)           == 0x1f8, "invalid host API offset");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object) == 0x200, "invalid host API offset");
+MOD_STATIC_ASSERT(sizeof(mod_host_api_t)                       == 0x208, "invalid host API size");
 
 #ifdef __cplusplus
 }

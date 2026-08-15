@@ -2856,9 +2856,12 @@ unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
 /* Calls K2_DestroyActor on an actor. unreal_cache_objects must have run first. */
 void
 unreal_despawn_actor(uobject_t *actor);
+/* Loads a UObject through the host's Unreal loader and returns NULL on failure. */
+uobject_t *
+unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
 /* Loads a UClass through the host's Unreal loader and returns NULL on failure. */
 uclass_t *
-unreal_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
+unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
 /* Mounts a pak file using the supplied engine mount order. */
 bool

@@ -1405,8 +1405,38 @@ unreal_despawn_actor(uobject_t *actor)
   }
 }
 
+uobject_t *
+unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx)
+{
+  uobject_t  *result = NULL;
+  tmp_arena_t tmp    = scratch_begin(NULL);
+  {
+    str16_t name16     = str16_from_str(tmp.arena, name);
+    str16_t filename16 = str16_from_str(tmp.arena, filename);
+
+    // NOTE: str16_from_str allocates wchar string with a null-terminator in mind, so the following is OK
+    const wchar_t *namew     = str16_is_empty(name16)     ? NULL : name16.data;
+    const wchar_t *filenamew = str16_is_empty(filename16) ? NULL : filename16.data;
+
+#if !defined BUILD_TEST_UI
+    result = static_load_object(obj_cls, outer, namew, filenamew, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
+#else
+    (void)filenamew;
+    (void)namew;
+    (void)obj_cls;
+    (void)outer;
+    (void)load_flags;
+    (void)sandbox;
+    (void)allow_obj_reconcile;
+    (void)instancing_ctx;
+#endif
+  }
+  scratch_end(tmp);
+  return result;
+}
+
 uclass_t *
-unreal_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
+unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
 {
   uclass_t   *result = NULL;
   tmp_arena_t tmp    = scratch_begin(NULL);

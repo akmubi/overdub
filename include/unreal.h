@@ -2891,8 +2891,11 @@ uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
 void
 unreal_despawn_actor(uobject_t *actor);
+
+uobject_t *
+unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
 uclass_t *
-unreal_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
+unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
 bool
 unreal_mount_pak(str_t file_path, int order);

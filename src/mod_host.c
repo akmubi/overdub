@@ -287,9 +287,9 @@ host_process_event(uobject_t *self, ufunc_t *func, void *params)
 }
 
 static uclass_t *MOD_CALL
-host_uobject_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
+host_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
 {
-  return unreal_load_class(base_cls, outer, name, filename, load_flags);
+  return unreal_static_load_class(base_cls, outer, name, filename, load_flags);
 }
 
 static bool MOD_CALL
@@ -464,6 +464,12 @@ host_map_find(void *map, void *prop, const void *key, void *out_val)
   return unreal_map_find(map, prop, key, out_val);
 }
 
+static uobject_t * MOD_CALL
+host_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx)
+{
+  return unreal_static_load_object(obj_cls, outer, name, filename, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
+}
+
 static const mod_host_api_t g_host_api = {
   .struct_size = sizeof(mod_host_api_t),
   .abi_version = MOD_HOST_ABI_VERSION,
@@ -517,7 +523,7 @@ static const mod_host_api_t g_host_api = {
   .get_object_array          = host_get_object_array,
   .get_gworld_ptr            = host_get_gworld_ptr,
   .process_event             = host_process_event,
-  .uobject_load_class        = host_uobject_load_class,
+  .static_load_class         = host_static_load_class,
   .mount_pak                 = host_mount_pak,
   .mount_iostore             = host_mount_iostore,
   .fname_from_str            = host_fname_from_str,
@@ -549,10 +555,11 @@ static const mod_host_api_t g_host_api = {
   .hook_disable = host_hook_disable,
   .hook_remove  = host_hook_remove,
 
-  /* UNREAL ENGINE (MAP HELPERS) */
-  .map_add    = host_map_add,
-  .map_remove = host_map_remove,
-  .map_find   = host_map_find,
+  /* UNREAL ENGINE (CONT.) */
+  .map_add            = host_map_add,
+  .map_remove         = host_map_remove,
+  .map_find           = host_map_find,
+  .static_load_object = host_static_load_object,
 };
 
 const mod_host_api_t *

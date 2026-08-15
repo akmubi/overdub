@@ -2664,7 +2664,7 @@ static uclass_t *
 mod_blueprint_load_actor_class(mod_blueprint_info_t *info)
 {
   ASSERT(info != NULL);
-  return unreal_load_class(globals.unreal.actor, NULL, info->mod_actor_class_path, STR_LIT(""), 0);
+  return unreal_static_load_class(globals.unreal.actor, NULL, info->mod_actor_class_path, STR_LIT(""), 0);
 }
 
 static bool

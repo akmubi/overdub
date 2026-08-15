@@ -1,7 +1,5 @@
 #include "mod_unreal.h"
 
-#include <string.h>
-
 #define TMAP_FNAME_UINT8PTR_KEY_EQUAL(A, B) unreal_fname_equal(A, B, false)
 #define TMAP_FNAME_UINT8PTR_KEY_HASH(KEY)   unreal_fname_hash(KEY)
 
@@ -1073,11 +1071,21 @@ unreal_despawn_actor(uobject_t *actor)
   }
 }
 
-uclass_t *
-unreal_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
+uobject_t *
+unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx)
 {
   const mod_host_api_t *host = mod_sdk_host();
-  return (host) ? host->uobject_load_class(base_cls, outer, name, filename, load_flags) : NULL;
+  if (!MOD_HOST_API_HAS_FIELD(host, static_load_object) || !host->static_load_object) {
+    return NULL;
+  }
+  return host->static_load_object(obj_cls, outer, name, filename, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
+}
+
+uclass_t *
+unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  return (host) ? host->static_load_class(base_cls, outer, name, filename, load_flags) : NULL;
 }
 
 bool
