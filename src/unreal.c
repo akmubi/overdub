@@ -1698,16 +1698,75 @@ unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_ha
   return data[key_hash & (uint32_t)(hash_size - 1)];
 }
 
+void
+unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val)
+{
+  if (!map || !prop || !prop->key_prop || !prop->val_prop || !key || !val || !fscript_map_add_pair) {
+    return;
+  }
+
+  fscript_map_helper_t helper = {
+    .key_prop = prop->key_prop,
+    .val_prop = prop->val_prop,
+    .map      = map,
+    .layout   = prop->map_layout,
+    .flags    = prop->map_flags,
+  };
+
+  fscript_map_add_ctx_t ctx = {
+    .helper   = &helper,
+    .key      = key,
+    .value    = val,
+    .key_prop = prop->key_prop,
+    .val_prop = prop->val_prop,
+  };
+
+  fscript_map_add_pair(&helper, &ctx);
+}
+
+bool
+unreal_map_remove(void *map, fprop_map_t *prop, const void *key)
+{
+  if (!map || !prop || !prop->key_prop || !key || !fscript_map_remove_pair) {
+    return false;
+  }
+
+  fscript_map_helper_t helper = {
+    .key_prop = prop->key_prop,
+    .val_prop = prop->val_prop,
+    .map      = map,
+    .layout   = prop->map_layout,
+    .flags    = prop->map_flags,
+  };
+
+  fscript_map_remove_ctx_t ctx = {
+    .helper   = &helper,
+    .key      = key,
+    .key_prop = prop->key_prop,
+  };
+
+  return fscript_map_remove_pair(&helper, &ctx);
+}
+
+bool
+unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val)
+{
+  if (!map || !prop || !key || !out_val || !generic_map_find) {
+    return false;
+  }
+  return generic_map_find(map, prop, key, out_val);
+}
+
 /* =================================================== DATA TABLE =================================================== */
 
 tmap_fname_uint8ptr_t *
-udata_table_get_row_map(udata_table_t *table)
+unreal_udata_table_get_row_map(udata_table_t *table)
 {
   return (table) ? &table->row_map : NULL;
 }
 
 void
-udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data)
+unreal_udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data)
 {
   if (table && row_data) {
     table->vtable->add_row(table, row_name, row_data);
@@ -1715,7 +1774,7 @@ udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_bas
 }
 
 void
-udata_table_remove_row(udata_table_t *table, fname_t row_name)
+unreal_udata_table_remove_row(udata_table_t *table, fname_t row_name)
 {
   if (table) {
     table->vtable->remove_row(table, row_name);
@@ -1723,7 +1782,7 @@ udata_table_remove_row(udata_table_t *table, fname_t row_name)
 }
 
 void
-udata_table_empty(udata_table_t *table)
+unreal_udata_table_empty(udata_table_t *table)
 {
   if (table) {
     table->vtable->empty_table(table);
@@ -1731,7 +1790,7 @@ udata_table_empty(udata_table_t *table)
 }
 
 uint8_t *
-udata_table_find_row(udata_table_t *table, fname_t row_name)
+unreal_udata_table_find_row(udata_table_t *table, fname_t row_name)
 {
   if (table && table->row_struct && !unreal_fname_is_none(row_name)) {
     uint8_t **row_data_ptr = unreal_tmap_fname_uint8ptr_find(&table->row_map, row_name);

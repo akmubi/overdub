@@ -14,6 +14,9 @@ UE_FUNC_NORMAL(add_uobject_delete_listener, void, void *self, fuobject_listener_
 UE_FUNC_NORMAL(tarray_grow, void *, void *self)
 UE_FUNC_NORMAL(tarray_shrink, void *, void *self)
 UE_FUNC_NORMAL(get_mcast_sparse_delegate, void *, uobject_t *delegate_owner, fname_t delegate_name)
+UE_FUNC_NORMAL(fscript_map_add_pair, void, fscript_map_helper_t *helper, fscript_map_add_ctx_t *ctx)
+UE_FUNC_NORMAL(fscript_map_remove_pair, bool, fscript_map_helper_t *helper, fscript_map_remove_ctx_t *ctx)
+UE_FUNC_NORMAL(generic_map_find, bool, void *map, fprop_map_t *map_prop, const void *key_ptr, void *out_val_ptr)
 
 #undef UE_FUNC_NORMAL
 

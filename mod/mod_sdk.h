@@ -133,13 +133,18 @@ mod_t
 mod_sdk_mod_handle(void);
 
 /*
- * Checks the host API size and ABI version, then stores the host API and mod handle.
- * This must succeed before any other SDK function is used. Major and minor ABI versions must match.
+ * Checks the required host API prefix and ABI version, then stores the host API and mod handle.
+ * This must succeed before any other SDK function is used. Major and minor ABI versions must match;
+ * optional fields appended in patch releases are checked by the wrappers that use them.
  */
 bool
 mod_sdk_init(const mod_host_api_t *host, mod_t mod);
 
 extern mod_sdk_t g_sdk;
+
+/* True when HOST contains FIELD and it is safe to read that function pointer. */
+#define MOD_HOST_API_HAS_FIELD(HOST, FIELD) \
+  ((HOST) != NULL && (HOST)->struct_size >= (offsetof(mod_host_api_t, FIELD) + sizeof((HOST)->FIELD)))
 
 /* ======================================================= MOD  ===================================================== */
 

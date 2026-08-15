@@ -11,7 +11,7 @@
 
 #include "mod_manager.h"
 
-#define MOD_HOST_ABI_VERSION MAKE_VERSION(1, 0, 0)
+#define MOD_HOST_ABI_VERSION MAKE_VERSION(1, 0, 1)
 
 typedef struct host_tmp_arena_s host_tmp_arena_t;
 struct host_tmp_arena_s {
@@ -106,7 +106,16 @@ struct mod_host_api_s {
   bool          (MOD_CALL *hook_enable) (mod_handle_t h, void *target);
   bool          (MOD_CALL *hook_disable)(mod_handle_t h, void *target);
   bool          (MOD_CALL *hook_remove) (mod_handle_t h, void *target);
+
+  /* UNREAL ENGINE (MAP HELPERS) */
+  void (MOD_CALL *map_add)   (void *map, void *prop, const void *key, const void *val);
+  bool (MOD_CALL *map_remove)(void *map, void *prop, const void *key);
+  bool (MOD_CALL *map_find)  (void *map, void *prop, const void *key, void *out_val);
 };
+STATIC_ASSERT(offsetof(mod_host_api_t, map_add)    == 0x1e8, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, map_remove) == 0x1f0, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, map_find)   == 0x1f8, "invalid host API offset");
+STATIC_ASSERT(sizeof(mod_host_api_t)               == 0x200, "invalid host API size");
 
 const mod_host_api_t *
 mod_host_api_get(void);
@@ -130,10 +139,11 @@ struct mod_api_s {
 typedef const mod_api_t *(MOD_CALL *mod_entry_fn_t)(void);
 
 /*
- * Strict host/plugin ABI rule:
+ * Host/plugin ABI rule:
  * - major must match
  * - minor must match
- * - patch is ignored for compatibility
+ * - patch is ignored for compatibility and may add optional fields at the end of a table
+ * - struct_size must be checked before accessing optional appended fields
  */
 static inline bool
 mod_abi_compatible(version_t host, version_t plugin)

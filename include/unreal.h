@@ -1419,6 +1419,40 @@ struct fscript_map_layout_s {
   fscript_set_layout_t set_layout;
 };
 
+typedef struct fscript_map_helper_s fscript_map_helper_t;
+struct fscript_map_helper_s {
+  fprop_t             *key_prop;
+  fprop_t             *val_prop;
+  void                *map;
+  fscript_map_layout_t layout;
+  emap_prop_flags_t    flags;
+  uint32_t             pad;
+};
+STATIC_ASSERT(offsetof(fscript_map_helper_t, key_prop) == 0x00, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_map_helper_t, val_prop) == 0x08, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_map_helper_t, map)      == 0x10, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_map_helper_t, layout)   == 0x18, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_map_helper_t, flags)    == 0x30, "invalid offset");
+STATIC_ASSERT(sizeof(fscript_map_helper_t)             == 0x38, "size mismatch");
+
+typedef struct fscript_map_add_ctx_s fscript_map_add_ctx_t;
+struct fscript_map_add_ctx_s {
+  fscript_map_helper_t *helper;
+  const void           *key;
+  const void           *value;
+  fprop_t              *key_prop;
+  fprop_t              *val_prop;
+};
+STATIC_ASSERT(sizeof(fscript_map_add_ctx_t) == 0x28, "size mismatch");
+
+typedef struct fscript_map_remove_ctx_s fscript_map_remove_ctx_t;
+struct fscript_map_remove_ctx_s {
+  fscript_map_helper_t *helper;
+  const void           *key;
+  fprop_t              *key_prop;
+};
+STATIC_ASSERT(sizeof(fscript_map_remove_ctx_t) == 0x18, "size mismatch");
+
 /* MapProperty */
 typedef struct fprop_map_s fprop_map_t;
 struct fprop_map_s {
@@ -1428,10 +1462,10 @@ struct fprop_map_s {
   fscript_map_layout_t map_layout;
   emap_prop_flags_t    map_flags;
 };
-STATIC_ASSERT(offsetof(fprop_map_t, key_prop) == 0x78, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_map_t, val_prop) == 0x80, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_map_t, key_prop)   == 0x78, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_map_t, val_prop)   == 0x80, "invalid offset");
 STATIC_ASSERT(offsetof(fprop_map_t, map_layout) == 0x88, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_map_t, map_flags) == 0xa0, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_map_t, map_flags)  == 0xa0, "invalid offset");
 
 /* SetProperty */
 typedef struct fprop_set_s fprop_set_t;
@@ -2946,17 +2980,24 @@ unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx);
 int32_t
 unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash);
 
+void
+unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val);
+bool
+unreal_map_remove(void *map, fprop_map_t *prop, const void *key);
+bool
+unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val);
+
 /* =================================================== DATA TABLE =================================================== */
 
 tmap_fname_uint8ptr_t *
-udata_table_get_row_map(udata_table_t *table);
+unreal_udata_table_get_row_map(udata_table_t *table);
 void
-udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
+unreal_udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
 void
-udata_table_remove_row(udata_table_t *table, fname_t row_name);
+unreal_udata_table_remove_row(udata_table_t *table, fname_t row_name);
 void
-udata_table_empty(udata_table_t *table);
+unreal_udata_table_empty(udata_table_t *table);
 uint8_t *
-udata_table_find_row(udata_table_t *table, fname_t row_name);
+unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
 
 #endif /* UE_TYPES_H */

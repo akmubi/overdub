@@ -224,7 +224,15 @@ struct mod_api_s {
 };
 ```
 
-Always set `struct_size` and `abi_version`. Major and minor ABI versions must match the loader. Patch differences are ignored.
+Always set `struct_size` and `abi_version`. Major and minor ABI versions must match the loader. Patch differences are ignored. A patch release may append optional host functions; SDK wrappers check `struct_size` before using them.
+
+If a mod requires an optional capability rather than merely using it when available, reject the host explicitly during `init`. For example:
+```c
+if (!unreal_map_helpers_available()) {
+  MOD_LOG_ERROR("this mod requires reflected map helpers");
+  return false;
+}
+```
 
 ## 5. Lifecycle and Cleanup
 

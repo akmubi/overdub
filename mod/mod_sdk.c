@@ -45,7 +45,7 @@ mod_sdk_init(const mod_host_api_t *host, mod_t mod)
   }
 
   g_sdk.host = host;
-  g_sdk.mod    = mod;
+  g_sdk.mod  = mod;
   return true;
 }
 

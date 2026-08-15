@@ -377,7 +377,7 @@ typedef void (MOD_CALL *mod_deinit_fn_t)(mod_t m);
 
 typedef void (MOD_CALL *mod_cmd_fn_t)(mod_t m, str_t name, str_t args, void *user);
 
-#define MOD_ABI_VERSION MAKE_VERSION(1, 0, 0)
+#define MOD_ABI_VERSION MAKE_VERSION(1, 0, 1)
 
 typedef struct mod_api_s mod_api_t;
 struct mod_api_s {
@@ -483,7 +483,17 @@ struct mod_host_api_s {
   bool          (MOD_CALL *hook_enable) (mod_t m, void *target);
   bool          (MOD_CALL *hook_disable)(mod_t m, void *target);
   bool          (MOD_CALL *hook_remove) (mod_t m, void *target);
+
+  /* UNREAL ENGINE (MAP HELPERS) */
+
+  void (MOD_CALL *map_add)   (void *map, void *prop, const void *key, const void *val);
+  bool (MOD_CALL *map_remove)(void *map, void *prop, const void *key);
+  bool (MOD_CALL *map_find)  (void *map, void *prop, const void *key, void *out_val);
 };
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_add)    == 0x1e8, "invalid host API offset");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_remove) == 0x1f0, "invalid host API offset");
+MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_find)   == 0x1f8, "invalid host API offset");
+MOD_STATIC_ASSERT(sizeof(mod_host_api_t)               == 0x200, "invalid host API size");
 
 #ifdef __cplusplus
 }

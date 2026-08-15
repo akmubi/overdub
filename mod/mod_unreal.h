@@ -1423,10 +1423,10 @@ struct fprop_map_s {
   fscript_map_layout_t map_layout;
   emap_prop_flags_t    map_flags;
 };
-MOD_STATIC_ASSERT(offsetof(fprop_map_t, key_prop) == 0x78, "invalid offset");
-MOD_STATIC_ASSERT(offsetof(fprop_map_t, val_prop) == 0x80, "invalid offset");
+MOD_STATIC_ASSERT(offsetof(fprop_map_t, key_prop)   == 0x78, "invalid offset");
+MOD_STATIC_ASSERT(offsetof(fprop_map_t, val_prop)   == 0x80, "invalid offset");
 MOD_STATIC_ASSERT(offsetof(fprop_map_t, map_layout) == 0x88, "invalid offset");
-MOD_STATIC_ASSERT(offsetof(fprop_map_t, map_flags) == 0xa0, "invalid offset");
+MOD_STATIC_ASSERT(offsetof(fprop_map_t, map_flags)  == 0xa0, "invalid offset");
 
 /* SetProperty */
 typedef struct fprop_set_s fprop_set_t;
@@ -2969,18 +2969,28 @@ unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx);
 int32_t
 unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash);
 
+/* Returns false when the connected host predates the reflected map helpers. */
+bool
+unreal_map_helpers_available(void);
+void
+unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val);
+bool
+unreal_map_remove(void *map, fprop_map_t *prop, const void *key);
+bool
+unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val);
+
 /* =================================================== DATA TABLE =================================================== */
 
 tmap_fname_uint8ptr_t *
-udata_table_get_row_map(udata_table_t *table);
+unreal_udata_table_get_row_map(udata_table_t *table);
 void
-udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
+unreal_udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
 void
-udata_table_remove_row(udata_table_t *table, fname_t row_name);
+unreal_udata_table_remove_row(udata_table_t *table, fname_t row_name);
 void
-udata_table_empty(udata_table_t *table);
+unreal_udata_table_empty(udata_table_t *table);
 uint8_t *
-udata_table_find_row(udata_table_t *table, fname_t row_name);
+unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
 
 #ifdef __cplusplus
 }

@@ -113,6 +113,9 @@ scan_user_module_signatures(void)
     SIG_ENTRY_NORMAL(CALL_ARG,   tarray_grow,                             "E8 ? ? ? ? 48 8B 05 ? ? ? ? 48 8D 0D ? ? ? ? ? ? ? ? 48 8B 5C 24 ? 48 83 C4 ? 5F 48 FF 25 ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? 40 53",                                                           0x02A0D029, 0x029911A9),
     SIG_ENTRY_NORMAL(CALL_ARG,   tarray_shrink,                           "E8 ? ? ? ? 48 8D 0D ? ? ? ? 48 83 C4 ? 5B 48 FF 25 ? ? ? ? ? 8B 42",                                                                                                                              0x02A0D107, 0x02991287),
     SIG_ENTRY_NORMAL(DIRECT,     get_mcast_sparse_delegate,               "48 89 5C 24 ? 57 48 83 EC ? 48 8B F9 48 8B DA 48 8D 0D ? ? ? ? FF 15 ? ? ? ? 4C 8B C7",                                                                                                           0x02A06FF0, 0x0298B190),
+    SIG_ENTRY_NORMAL(DIRECT,     fscript_map_add_pair,                    "40 55 56 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 45 ? 0F B6 41",                                                                                                  0x00000000, 0x00000000),
+    SIG_ENTRY_NORMAL(DIRECT,     fscript_map_remove_pair,                 "48 89 5C 24 ? 48 89 74 24 ? 55 57 41 56 48 8B EC 48 83 EC ? 0F B6 41 ? 48 8B F2",                                                                                                                 0x00000000, 0x00000000),
+    SIG_ENTRY_NORMAL(DIRECT,     generic_map_find,                        "48 89 5C 24 ? 48 89 74 24 ? 55 57 41 56 48 8D 6C 24 ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4 48 89 45 ? 4D 8B F1",                                                                            0x00000000, 0x00000000),
   };
 
   void *user_module = (void *)GetModuleHandleA(NULL);

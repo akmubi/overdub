@@ -446,6 +446,24 @@ host_hook_remove(mod_handle_t h, void *target)
   return mod_dll_hook_remove(&globals.mod_manager, h, target);
 }
 
+static void MOD_CALL
+host_map_add(void *map, void *prop, const void *key, const void *val)
+{
+  unreal_map_add(map, prop, key, val);
+}
+
+static bool MOD_CALL
+host_map_remove(void *map, void *prop, const void *key)
+{
+  return unreal_map_remove(map, prop, key);
+}
+
+static bool MOD_CALL
+host_map_find(void *map, void *prop, const void *key, void *out_val)
+{
+  return unreal_map_find(map, prop, key, out_val);
+}
+
 static const mod_host_api_t g_host_api = {
   .struct_size = sizeof(mod_host_api_t),
   .abi_version = MOD_HOST_ABI_VERSION,
@@ -530,6 +548,11 @@ static const mod_host_api_t g_host_api = {
   .hook_enable  = host_hook_enable,
   .hook_disable = host_hook_disable,
   .hook_remove  = host_hook_remove,
+
+  /* UNREAL ENGINE (MAP HELPERS) */
+  .map_add    = host_map_add,
+  .map_remove = host_map_remove,
+  .map_find   = host_map_find,
 };
 
 const mod_host_api_t *
