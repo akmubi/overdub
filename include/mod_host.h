@@ -112,12 +112,17 @@ struct mod_host_api_s {
   bool       (MOD_CALL *map_remove)        (void *map, void *prop, const void *key);
   bool       (MOD_CALL *map_find)          (void *map, void *prop, const void *key, void *out_val);
   uobject_t *(MOD_CALL *static_load_object)(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
+
+  uint64_t (MOD_CALL *get_frame_counter)(void);
+  float    (MOD_CALL *get_fps)(void);
 };
 STATIC_ASSERT(offsetof(mod_host_api_t, map_add)            == 0x1e8, "invalid host API offset");
 STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)         == 0x1f0, "invalid host API offset");
 STATIC_ASSERT(offsetof(mod_host_api_t, map_find)           == 0x1f8, "invalid host API offset");
 STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object) == 0x200, "invalid host API offset");
-STATIC_ASSERT(sizeof(mod_host_api_t)                       == 0x208, "invalid host API size");
+STATIC_ASSERT(offsetof(mod_host_api_t, get_frame_counter)  == 0x208, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, get_fps)            == 0x210, "invalid host API offset");
+STATIC_ASSERT(sizeof(mod_host_api_t)                       == 0x218, "invalid host API size");
 
 const mod_host_api_t *
 mod_host_api_get(void);

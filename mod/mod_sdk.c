@@ -207,6 +207,26 @@ mod_get_viewport_size(unsigned int *vw, unsigned int *vh)
   }
 }
 
+uint64_t
+mod_get_frame_counter(void)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  if (!MOD_HOST_API_HAS_FIELD(host, get_frame_counter) || !host->get_frame_counter) {
+    return 0;
+  }
+  return host->get_frame_counter();
+}
+
+float
+mod_get_fps(void)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  if (!MOD_HOST_API_HAS_FIELD(host, get_fps) || !host->get_fps) {
+    return 0.0f;
+  }
+  return host->get_fps();
+}
+
 /* ======================================================= CFG  ===================================================== */
 
 bool

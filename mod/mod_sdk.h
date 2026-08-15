@@ -185,6 +185,13 @@ mod_get_nk_ctx(void);
 void
 mod_get_viewport_size(unsigned int *vw, unsigned int *vh);
 
+/* Returns current value of frame counter. */
+uint64_t
+mod_get_frame_counter(void);
+/* Returns current FPS value. */
+float
+mod_get_fps(void);
+
 /* ======================================================= CFG  ===================================================== */
 
 /* Returns a bool config value, or false when the handle cannot provide one. */

@@ -470,6 +470,18 @@ host_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t f
   return unreal_static_load_object(obj_cls, outer, name, filename, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
 }
 
+static uint64_t
+host_get_frame_counter(void)
+{
+  return globals.frame_counter;
+}
+
+static float
+host_get_fps(void)
+{
+  return globals.fps;
+}
+
 static const mod_host_api_t g_host_api = {
   .struct_size = sizeof(mod_host_api_t),
   .abi_version = MOD_HOST_ABI_VERSION,
@@ -560,6 +572,9 @@ static const mod_host_api_t g_host_api = {
   .map_remove         = host_map_remove,
   .map_find           = host_map_find,
   .static_load_object = host_static_load_object,
+
+  .get_frame_counter = host_get_frame_counter,
+  .get_fps           = host_get_fps,
 };
 
 const mod_host_api_t *
