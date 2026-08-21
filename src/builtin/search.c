@@ -33,12 +33,6 @@ record_matches_query(search_tool_t *tool, record_t *record)
   return query_matches_fname_entry(entry, &tool->search.query, tool->search.ignore_case, tool->search.exact_match);
 }
 
-static inline bool
-fprop_class_is(fprop_t *prop, fname_t name)
-{
-  return prop && prop->cls && unreal_fname_equal(prop->cls->name, name, false);
-}
-
 static bool
 query_matches_uobject_name(search_tool_t *tool, uobject_t *obj)
 {
@@ -66,75 +60,78 @@ prop_matches_query(search_tool_t *tool, fprop_t *prop)
     return true;
   }
 
-  if (fprop_class_is(prop, globals.unreal.struct_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
     fprop_struct_t *p = (fprop_struct_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->script_struct)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.array_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
     fprop_array_t *p = (fprop_array_t *)prop;
 
     if (prop_matches_query(tool, p->inner)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.set_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
     fprop_set_t *p = (fprop_set_t *)prop;
 
     if (prop_matches_query(tool, p->elem_prop)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.map_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
     fprop_map_t *p = (fprop_map_t *)prop;
 
     if (prop_matches_query(tool, p->key_prop) || prop_matches_query(tool, p->val_prop)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.obj_prop) || fprop_class_is(prop, globals.unreal.weak_obj_prop) || fprop_class_is(prop, globals.unreal.lazy_obj_prop) ||
-             fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) ||
+             unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop) ||
+             unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop) ||
+             unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
     fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->prop_class)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.class_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
     fprop_class_t *p = (fprop_class_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) || query_matches_uobject_name(tool, (uobject_t *)p->meta_class)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
     fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) || query_matches_uobject_name(tool, (uobject_t *)p->meta_class)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.interface_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
     fprop_iface_t *p = (fprop_iface_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->iface_class)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.byte_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
     fprop_byte_t *p = (fprop_byte_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->uenum)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.enum_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
     fprop_enum_t *p = (fprop_enum_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->uenum) || prop_matches_query(tool, (fprop_t *)p->underlying_prop)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.delegate_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
     fprop_delegate_t *p = (fprop_delegate_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->signature_func)) {
       return true;
     }
-  } else if (fprop_class_is(prop, globals.unreal.mcast_delegate_prop) || fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop) ||
-             fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop) ||
+             unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop) ||
+             unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
     fprop_mcast_delegate_t *p = (fprop_mcast_delegate_t *)prop;
 
     if (query_matches_uobject_name(tool, (uobject_t *)p->signature_func)) {

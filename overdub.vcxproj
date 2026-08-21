@@ -219,6 +219,9 @@
     <ClCompile Include="src\builtin\uobject_search.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\builtin\ufunction_call.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\builtin\ufunction_tracer.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>

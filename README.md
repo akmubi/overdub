@@ -114,7 +114,8 @@ Built-in tools appear in the normal mod list and can be configured like other mo
 UObject Search inspects Unreal objects currently loaded in memory. Enter a name, adjust the search settings when needed, and select a result to inspect it.
 It can search names, type instances, properties, etc. The details panel shows object information, reflected fields, functions, and Kismet bytecode when available.
 Selecting results reuses a preview tab. Click the tab to pin it. Useful shortcuts are `Tab`, `Ctrl+Tab`, and `Ctrl+W`.
-The tool is read-only. It cannot edit properties or call functions, and broad searches may be slow.
+UFunction details include a `Call...` action. The call dialog validates a target object, provides reflected input fields and searchable typed object/class pickers, automatically supplies conventional WorldContext parameters, and displays return/out values. Unsupported parameter types disable the call. Calls can still change game state, send RPCs, or invoke unsafe game logic, so inspect the function before using it.
+Property inspection remains read-only, and broad searches may be slow.
 ![UObject Search](docs/images/uobject-search.png)
 
 ### UFunction Tracer

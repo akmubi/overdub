@@ -53,6 +53,7 @@ SRCS_TEST_UI :=                     \
   src/builtin/kismet_disassembler.c \
   src/builtin/search.c              \
   src/builtin/uobject_search.c      \
+  src/builtin/ufunction_call.c      \
   src/builtin/ufunction_tracer.c    \
   src/builtin/tweaks.c              \
   test/test_ui_overview.c           \

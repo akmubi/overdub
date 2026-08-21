@@ -550,6 +550,11 @@ tool_init(const mod_host_api_t *host, mod_handle_t h)
     tool->details.tabs[i].next = &tool->details.tabs[i + 1];
   }
 
+  if (!ufunc_call_init(tool, host, h)) {
+    LOG_ERROR("UObject Search: failed to initialize the UFunction call dialog");
+    return false;
+  }
+
   ASSERT(host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_CREATE, on_uobject_created, tool));
   ASSERT(host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_DELETE, on_uobject_deleted, tool));
 
@@ -590,6 +595,7 @@ tool_tick(mod_handle_t h, float delta)
 
   if (globals.ui_manager.inited && globals.ui_manager.ctx) {
     draw_window(tool, globals.ui_manager.vw, globals.ui_manager.vh);
+    ufunc_call_draw(tool, globals.ui_manager.vw, globals.ui_manager.vh);
   }
 }
 

@@ -470,6 +470,34 @@ host_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t f
   return unreal_static_load_object(obj_cls, outer, name, filename, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
 }
 
+static uobject_t *MOD_CALL
+host_static_construct_object(void *params)
+{
+  return unreal_static_construct_object(params);
+}
+
+static bool MOD_CALL
+host_add_gameplay_tag(fname_t tag_name)
+{
+  if (globals.num_custom_tags >= CONFIG_MAX_CUSTOM_GAMEPLAY_TAGS) {
+    return false;
+  }
+
+  globals.custom_tags[globals.num_custom_tags++].tag_name = tag_name;
+  return true;
+}
+
+static bool MOD_CALL
+host_check_gameplay_tag_exists(fname_t tag_name)
+{
+  if (unreal_fname_is_none(tag_name)) {
+    return false;
+  }
+
+  fgameplay_tag_t tag = unreal_gameplay_tags_manager_request_tag(tag_name);
+  return !unreal_fname_is_none(tag.tag_name);
+}
+
 static uint64_t
 host_get_frame_counter(void)
 {
@@ -568,10 +596,13 @@ static const mod_host_api_t g_host_api = {
   .hook_remove  = host_hook_remove,
 
   /* UNREAL ENGINE (CONT.) */
-  .map_add            = host_map_add,
-  .map_remove         = host_map_remove,
-  .map_find           = host_map_find,
-  .static_load_object = host_static_load_object,
+  .map_add                   = host_map_add,
+  .map_remove                = host_map_remove,
+  .map_find                  = host_map_find,
+  .static_load_object        = host_static_load_object,
+  .static_construct_object   = host_static_construct_object,
+  .add_gameplay_tag          = host_add_gameplay_tag,
+  .check_gameplay_tag_exists = host_check_gameplay_tag_exists,
 
   .get_frame_counter = host_get_frame_counter,
   .get_fps           = host_get_fps,

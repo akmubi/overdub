@@ -452,22 +452,121 @@ enum {
   ETEXT_INITIAL_EXPR_SYNCED = (1 << 3),
 };
 
+typedef int8_t etext_history_type_t;
+enum {
+  ETEXT_HISTORY_TYPE_NONE = -1,
+  ETEXT_HISTORY_TYPE_BASE = 0,
+  ETEXT_HISTORY_TYPE_NAMED_FORMAT,
+  ETEXT_HISTORY_TYPE_ORDERED_FORMAT,
+  ETEXT_HISTORY_TYPE_ARGUMENT_FORMAT,
+  ETEXT_HISTORY_TYPE_AS_NUMBER,
+  ETEXT_HISTORY_TYPE_AS_PERCENT,
+  ETEXT_HISTORY_TYPE_AS_CURRENCY,
+  ETEXT_HISTORY_TYPE_AS_DATE,
+  ETEXT_HISTORY_TYPE_AS_TIME,
+  ETEXT_HISTORY_TYPE_AS_DATE_TIME,
+  ETEXT_HISTORY_TYPE_TRANSFORM,
+  ETEXT_HISTORY_TYPE_STRING_TABLE_ENTRY,
+  ETEXT_HISTORY_TYPE_TEXT_GENERATOR,
+};
+
+typedef uint8_t etext_identical_mode_flags_t;
+enum {
+  ETEXT_IDENTICAL_MODE_NONE                       = 0,
+  ETEXT_IDENTICAL_MODE_DEEP_COMPARE               = FLAG(0),
+  ETEXT_IDENTICAL_MODE_LEXICAL_COMPARE_INVARIANTS = FLAG(1),
+};
+
+typedef TSHARED_PTR(fstring_t) ftext_display_string_ptr_t;
+
+struct ftext_history_s;
+struct ftext_s;
+
+typedef void                 (__fastcall *ftest_history_destructor_fn_t)                          (void);
+typedef etext_history_type_t (__fastcall *ftest_history_get_type_fn_t)                            (void);
+typedef bool                 (__fastcall *ftest_history_identical_to_fn_t)                        (struct ftext_history_s *other, etext_identical_mode_flags_t compare_mode_flags);
+typedef fstring_t            (__fastcall *ftest_history_build_localized_display_string_fn_t)      (void);
+typedef fstring_t            (__fastcall *ftest_history_build_invariant_display_string_fn_t)      (void);
+typedef void                 (__fastcall *ftest_history_serialize_fn_t)                           (void *record);
+typedef void                 (__fastcall *ftest_history_serialize_for_display_string_fn_t)        (void *record, ftext_display_string_ptr_t *out_display_string);
+typedef bool                 (__fastcall *ftest_history_should_read_from_buffer_fn_t)             (const wchar_t *buffer);
+typedef const wchar_t       *(__fastcall *ftest_history_read_from_buffer_fn_t)                    (const wchar_t *buffer, const wchar_t *text_namespace, const wchar_t *package_namespace, ftext_display_string_ptr_t *out_display_string);
+typedef bool                 (__fastcall *ftest_history_write_to_buffer_fn_t)                     (fstring_t *buffer, ftext_display_string_ptr_t display_string, bool strip_package_namespace);
+typedef bool                 (__fastcall *ftest_history_is_out_of_date_fn_t)                      (void);
+typedef fstring_t           *(__fastcall *ftest_history_get_source_string_fn_t)                   (void);
+typedef void                 (__fastcall *ftest_history_get_historic_format_data_fn_t)            (struct ftext_s *text, void *out_historic_format_data);
+typedef bool                 (__fastcall *ftest_history_get_historic_numeric_data_fn_t)           (struct ftext_s *text, void *out_historic_numeric_data);
+typedef bool                 (__fastcall *ftest_history_can_rebuild_localized_display_string_fn_t)(void);
+
+typedef struct ftext_history_vtable_s ftext_history_vtable_t;
+struct ftext_history_vtable_s {
+  ftest_history_destructor_fn_t                            destructor;
+  ftest_history_get_type_fn_t                              get_type;
+  ftest_history_identical_to_fn_t                          identical_to;
+  ftest_history_build_localized_display_string_fn_t        build_localized_display_string;
+  ftest_history_build_invariant_display_string_fn_t        build_invariant_display_string;
+  ftest_history_serialize_fn_t                             serialize;
+  ftest_history_serialize_for_display_string_fn_t          serialize_for_display_string;
+  ftest_history_should_read_from_buffer_fn_t               should_read_from_buffer;
+  ftest_history_read_from_buffer_fn_t                      read_from_buffer;
+  ftest_history_write_to_buffer_fn_t                       write_to_buffer;
+  ftest_history_is_out_of_date_fn_t                        is_out_of_date;
+  ftest_history_get_source_string_fn_t                     get_source_string;
+  ftest_history_get_historic_format_data_fn_t              get_historic_format_data;
+  ftest_history_get_historic_numeric_data_fn_t             get_historic_numeric_data;
+  ftest_history_can_rebuild_localized_display_string_fn_t  can_rebuild_localized_display_string;
+};
+
+typedef struct ftext_history_s ftext_history_t;
+struct ftext_history_s {
+  ftext_history_vtable_t *vtable;
+  uint64_t                revision;
+};
+
+typedef void                        (__fastcall *itext_data_destructor_fn_t)                  (void);
+typedef bool                        (__fastcall *itext_data_owns_localized_string_fn_t)       (void);
+typedef fstring_t                  *(__fastcall *itext_data_get_display_string_fn_t)          (void);
+typedef ftext_display_string_ptr_t  (__fastcall *itext_data_get_localized_string_fn_t)        (void);
+typedef ftext_display_string_ptr_t *(__fastcall *itext_data_get_mutable_localized_string_fn_t)(void);
+typedef struct ftext_history_s     *(__fastcall *itext_data_get_text_history_fn_t)            (void);
+typedef struct ftext_history_s     *(__fastcall *itext_data_get_mutable_text_history_fn_t)    (void);
+typedef void                        (__fastcall *itext_data_persist_text_fn_t)                (void);
+typedef uint16_t                    (__fastcall *itext_data_get_global_history_revision_fn_t) (void);
+typedef uint16_t                    (__fastcall *itext_data_get_local_history_revision_fn_t)  (void);
+
+typedef struct itext_data_vtable_s itext_data_vtable_t;
+struct itext_data_vtable_s {
+  itext_data_destructor_fn_t                   destructor;
+  itext_data_owns_localized_string_fn_t        owns_localized_string;
+  itext_data_get_display_string_fn_t           get_display_string;
+  itext_data_get_localized_string_fn_t         get_localized_string;
+  itext_data_get_mutable_localized_string_fn_t get_mutable_localized_string;
+  itext_data_get_text_history_fn_t             get_text_history;
+  itext_data_get_mutable_text_history_fn_t     get_mutable_text_history;
+  itext_data_persist_text_fn_t                 persist_text;
+  itext_data_get_global_history_revision_fn_t  get_global_history_revision;
+  itext_data_get_local_history_revision_fn_t   get_local_history_revision;
+};
+
+typedef struct itext_data_s itext_data_t;
+struct itext_data_s {
+  itext_data_vtable_t *vtable;
+};
+
 typedef struct ftext_data_s ftext_data_t;
 struct ftext_data_s {
   void     *vftable;
   fstring_t local_str;
   fstring_t display_str;
 };
-MOD_STATIC_ASSERT(offsetof(ftext_data_t, local_str) == 0x08, "invalid offset");
-MOD_STATIC_ASSERT(offsetof(ftext_data_t, display_str) == 0x18, "invalid offset");
 
 typedef struct ftext_s ftext_t;
 struct ftext_s {
-  TSHARED_PTR(ftext_data_t) text_data;
-  etext_flags_t flags;
+  TSHARED_PTR(itext_data_t) text_data;
+  etext_flags_t             flags;
 };
-MOD_STATIC_ASSERT(sizeof(ftext_t) == 24, "size mismatch");
 MOD_STATIC_ASSERT(offsetof(ftext_t, flags) == 0x10, "invalid offset");
+MOD_STATIC_ASSERT(sizeof(ftext_t)          == 0x18,  "size mismatch");
 
 typedef struct fscript_name_s fscript_name_t;
 struct fscript_name_s {
@@ -2856,6 +2955,9 @@ unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
 /* Calls K2_DestroyActor on an actor. unreal_cache_objects must have run first. */
 void
 unreal_despawn_actor(uobject_t *actor);
+/* Creates and initializes a new UObject according to the specified parameters. */
+uobject_t *
+unreal_static_construct_object(fstatic_construct_obj_params_t *params);
 /* Loads a UObject through the host's Unreal loader and returns NULL on failure. */
 uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
@@ -2994,6 +3096,14 @@ void
 unreal_udata_table_empty(udata_table_t *table);
 uint8_t *
 unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
+
+/* Adds a new FGameplayTag.
+ * NOTE: tags are added after tick function. */
+bool
+unreal_add_gameplay_tag(fname_t tag_name);
+/* Check if given FGameplayTag exists. */
+bool
+unreal_check_gameplay_tag_exists(fname_t tag_name);
 
 #ifdef __cplusplus
 }

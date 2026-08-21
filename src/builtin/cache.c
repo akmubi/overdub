@@ -183,7 +183,8 @@ add_live(search_tool_t *tool, record_t *record)
   record_set_flag(record, RECORD_FLAG_LIVE, true);
   record->live_list_idx                                      = tool->cache.live_slots.count;
   tool->cache.live_slots.slots[tool->cache.live_slots.count] = record_to_slot(tool, record);
-  tool->cache.live_slots.count++;
+  tool->cache.live_slots.count += 1;
+  tool->cache.generation       += 1;
 }
 
 void
@@ -209,6 +210,7 @@ remove_live(search_tool_t *tool, record_t *record)
   tool->cache.live_slots.count = last_idx;
   record->live_list_idx        = 0;
   record_set_flag(record, RECORD_FLAG_LIVE, false);
+  tool->cache.generation += 1;
 }
 
 void
@@ -704,6 +706,8 @@ remove_slot(search_tool_t *tool, uint32_t slot)
   unlink_record(tool, record);
   release_names(tool, record);
   remove_live(tool, record);
+
+  ufunc_call_on_uobject_removed(tool, record->obj);
 
   details_clear_stale(tool);
 

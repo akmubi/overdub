@@ -108,21 +108,27 @@ struct mod_host_api_s {
   bool          (MOD_CALL *hook_remove) (mod_handle_t h, void *target);
 
   /* UNREAL ENGINE (CONT.) */
-  void       (MOD_CALL *map_add)           (void *map, void *prop, const void *key, const void *val);
-  bool       (MOD_CALL *map_remove)        (void *map, void *prop, const void *key);
-  bool       (MOD_CALL *map_find)          (void *map, void *prop, const void *key, void *out_val);
-  uobject_t *(MOD_CALL *static_load_object)(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
+  void       (MOD_CALL *map_add)                  (void *map, void *prop, const void *key, const void *val);
+  bool       (MOD_CALL *map_remove)               (void *map, void *prop, const void *key);
+  bool       (MOD_CALL *map_find)                 (void *map, void *prop, const void *key, void *out_val);
+  uobject_t *(MOD_CALL *static_load_object)       (uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
+  uobject_t *(MOD_CALL *static_construct_object)  (void *params);
+  bool       (MOD_CALL *add_gameplay_tag)         (fname_t tag_name);
+  bool       (MOD_CALL *check_gameplay_tag_exists)(fname_t tag_name);
 
   uint64_t (MOD_CALL *get_frame_counter)(void);
   float    (MOD_CALL *get_fps)(void);
 };
-STATIC_ASSERT(offsetof(mod_host_api_t, map_add)            == 0x1e8, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)         == 0x1f0, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, map_find)           == 0x1f8, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object) == 0x200, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, get_frame_counter)  == 0x208, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, get_fps)            == 0x210, "invalid host API offset");
-STATIC_ASSERT(sizeof(mod_host_api_t)                       == 0x218, "invalid host API size");
+STATIC_ASSERT(offsetof(mod_host_api_t, map_add)                   == 0x1e8, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)                == 0x1f0, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, map_find)                  == 0x1f8, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object)        == 0x200, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, static_construct_object)   == 0x208, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, add_gameplay_tag)          == 0x210, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, check_gameplay_tag_exists) == 0x218, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, get_frame_counter)         == 0x220, "invalid host API offset");
+STATIC_ASSERT(offsetof(mod_host_api_t, get_fps)                   == 0x228, "invalid host API offset");
+STATIC_ASSERT(sizeof(mod_host_api_t)                              == 0x230, "invalid host API size");
 
 const mod_host_api_t *
 mod_host_api_get(void);

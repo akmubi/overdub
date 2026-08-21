@@ -746,6 +746,10 @@ Selecting a result opens a reusable preview tab. Click the tab to pin it. The de
 | `Ctrl+Tab` | Select previous tab |
 | `Ctrl+W`   | Close selected tab  |
 
+UFunction details have a `Call...` action. Instance functions require a compatible live target; static functions default to their class default object. Object and class inputs use searchable lists of compatible loaded UObjects, while soft references also accept unloaded paths. Conventional `WorldContext` parameters use the current world automatically. Return and out values are copied into read-only result fields after the synchronous call.
+
+The caller initializes and destroys reflected parameter values, but it cannot make arbitrary game functions safe. Network, latent, destructive, or internal functions can still have unintended effects.
+
 ### UFunction Tracer
 
 Start with a narrow filter. Capturing every reflected call can fill the call limit and slow the game.

@@ -450,22 +450,122 @@ enum {
   ETEXT_INITIAL_EXPR_SYNCED = (1 << 3),
 };
 
+typedef int8_t etext_history_type_t;
+enum {
+  ETEXT_HISTORY_TYPE_NONE = -1,
+  ETEXT_HISTORY_TYPE_BASE = 0,
+  ETEXT_HISTORY_TYPE_NAMED_FORMAT,
+  ETEXT_HISTORY_TYPE_ORDERED_FORMAT,
+  ETEXT_HISTORY_TYPE_ARGUMENT_FORMAT,
+  ETEXT_HISTORY_TYPE_AS_NUMBER,
+  ETEXT_HISTORY_TYPE_AS_PERCENT,
+  ETEXT_HISTORY_TYPE_AS_CURRENCY,
+  ETEXT_HISTORY_TYPE_AS_DATE,
+  ETEXT_HISTORY_TYPE_AS_TIME,
+  ETEXT_HISTORY_TYPE_AS_DATE_TIME,
+  ETEXT_HISTORY_TYPE_TRANSFORM,
+  ETEXT_HISTORY_TYPE_STRING_TABLE_ENTRY,
+  ETEXT_HISTORY_TYPE_TEXT_GENERATOR,
+};
+
+typedef uint8_t etext_identical_mode_flags_t;
+enum {
+  ETEXT_IDENTICAL_MODE_NONE                       = 0,
+  ETEXT_IDENTICAL_MODE_DEEP_COMPARE               = FLAG(0),
+  ETEXT_IDENTICAL_MODE_LEXICAL_COMPARE_INVARIANTS = FLAG(1),
+};
+
+typedef TSHARED_PTR(fstring_t) ftext_display_string_ptr_t;
+
+struct ftext_history_s;
+struct ftext_s;
+struct itext_data_s;
+
+typedef void                 (__fastcall *ftest_history_destructor_fn_t)                          (struct ftext_history_s *self);
+typedef etext_history_type_t (__fastcall *ftest_history_get_type_fn_t)                            (struct ftext_history_s *self);
+typedef bool                 (__fastcall *ftest_history_identical_to_fn_t)                        (struct ftext_history_s *self, struct ftext_history_s *other, etext_identical_mode_flags_t compare_mode_flags);
+typedef fstring_t            (__fastcall *ftest_history_build_localized_display_string_fn_t)      (struct ftext_history_s *self);
+typedef fstring_t            (__fastcall *ftest_history_build_invariant_display_string_fn_t)      (struct ftext_history_s *self);
+typedef void                 (__fastcall *ftest_history_serialize_fn_t)                           (struct ftext_history_s *self, void *record);
+typedef void                 (__fastcall *ftest_history_serialize_for_display_string_fn_t)        (struct ftext_history_s *self, void *record, ftext_display_string_ptr_t *out_display_string);
+typedef bool                 (__fastcall *ftest_history_should_read_from_buffer_fn_t)             (struct ftext_history_s *self, const wchar_t *buffer);
+typedef const wchar_t       *(__fastcall *ftest_history_read_from_buffer_fn_t)                    (struct ftext_history_s *self, const wchar_t *buffer, const wchar_t *text_namespace, const wchar_t *package_namespace, ftext_display_string_ptr_t *out_display_string);
+typedef bool                 (__fastcall *ftest_history_write_to_buffer_fn_t)                     (struct ftext_history_s *self, fstring_t *buffer, ftext_display_string_ptr_t display_string, bool strip_package_namespace);
+typedef bool                 (__fastcall *ftest_history_is_out_of_date_fn_t)                      (struct ftext_history_s *self);
+typedef fstring_t           *(__fastcall *ftest_history_get_source_string_fn_t)                   (struct ftext_history_s *self);
+typedef void                 (__fastcall *ftest_history_get_historic_format_data_fn_t)            (struct ftext_history_s *self, struct ftext_s *text, void *out_historic_format_data);
+typedef bool                 (__fastcall *ftest_history_get_historic_numeric_data_fn_t)           (struct ftext_history_s *self, struct ftext_s *text, void *out_historic_numeric_data);
+typedef bool                 (__fastcall *ftest_history_can_rebuild_localized_display_string_fn_t)(struct ftext_history_s *self);
+
+typedef struct ftext_history_vtable_s ftext_history_vtable_t;
+struct ftext_history_vtable_s {
+  ftest_history_destructor_fn_t                            destructor;
+  ftest_history_get_type_fn_t                              get_type;
+  ftest_history_identical_to_fn_t                          identical_to;
+  ftest_history_build_localized_display_string_fn_t        build_localized_display_string;
+  ftest_history_build_invariant_display_string_fn_t        build_invariant_display_string;
+  ftest_history_serialize_fn_t                             serialize;
+  ftest_history_serialize_for_display_string_fn_t          serialize_for_display_string;
+  ftest_history_should_read_from_buffer_fn_t               should_read_from_buffer;
+  ftest_history_read_from_buffer_fn_t                      read_from_buffer;
+  ftest_history_write_to_buffer_fn_t                       write_to_buffer;
+  ftest_history_is_out_of_date_fn_t                        is_out_of_date;
+  ftest_history_get_source_string_fn_t                     get_source_string;
+  ftest_history_get_historic_format_data_fn_t              get_historic_format_data;
+  ftest_history_get_historic_numeric_data_fn_t             get_historic_numeric_data;
+  ftest_history_can_rebuild_localized_display_string_fn_t  can_rebuild_localized_display_string;
+};
+
+typedef struct ftext_history_s ftext_history_t;
+struct ftext_history_s {
+  ftext_history_vtable_t *vtable;
+  uint64_t                revision;
+};
+
+typedef void                        (__fastcall *itext_data_destructor_fn_t)                  (struct itext_data_s *self);
+typedef bool                        (__fastcall *itext_data_owns_localized_string_fn_t)       (struct itext_data_s *self);
+typedef fstring_t                  *(__fastcall *itext_data_get_display_string_fn_t)          (struct itext_data_s *self);
+typedef ftext_display_string_ptr_t  (__fastcall *itext_data_get_localized_string_fn_t)        (struct itext_data_s *self);
+typedef ftext_display_string_ptr_t *(__fastcall *itext_data_get_mutable_localized_string_fn_t)(struct itext_data_s *self);
+typedef struct ftext_history_s     *(__fastcall *itext_data_get_text_history_fn_t)            (struct itext_data_s *self);
+typedef struct ftext_history_s     *(__fastcall *itext_data_get_mutable_text_history_fn_t)    (struct itext_data_s *self);
+typedef void                        (__fastcall *itext_data_persist_text_fn_t)                (struct itext_data_s *self);
+typedef uint16_t                    (__fastcall *itext_data_get_global_history_revision_fn_t) (struct itext_data_s *self);
+typedef uint16_t                    (__fastcall *itext_data_get_local_history_revision_fn_t)  (struct itext_data_s *self);
+
+typedef struct itext_data_vtable_s itext_data_vtable_t;
+struct itext_data_vtable_s {
+  itext_data_destructor_fn_t                   destructor;
+  itext_data_owns_localized_string_fn_t        owns_localized_string;
+  itext_data_get_display_string_fn_t           get_display_string;
+  itext_data_get_localized_string_fn_t         get_localized_string;
+  itext_data_get_mutable_localized_string_fn_t get_mutable_localized_string;
+  itext_data_get_text_history_fn_t             get_text_history;
+  itext_data_get_mutable_text_history_fn_t     get_mutable_text_history;
+  itext_data_persist_text_fn_t                 persist_text;
+  itext_data_get_global_history_revision_fn_t  get_global_history_revision;
+  itext_data_get_local_history_revision_fn_t   get_local_history_revision;
+};
+
+typedef struct itext_data_s itext_data_t;
+struct itext_data_s {
+  itext_data_vtable_t *vtable;
+};
+
 typedef struct ftext_data_s ftext_data_t;
 struct ftext_data_s {
   void     *vftable;
   fstring_t local_str;
   fstring_t display_str;
 };
-STATIC_ASSERT(offsetof(ftext_data_t, local_str) == 0x08, "invalid offset");
-STATIC_ASSERT(offsetof(ftext_data_t, display_str) == 0x18, "invalid offset");
 
 typedef struct ftext_s ftext_t;
 struct ftext_s {
-  TSHARED_PTR(ftext_data_t) text_data;
-  etext_flags_t flags;
+  TSHARED_PTR(itext_data_t) text_data;
+  etext_flags_t             flags;
 };
-STATIC_ASSERT(sizeof(ftext_t) == 24, "size mismatch");
 STATIC_ASSERT(offsetof(ftext_t, flags) == 0x10, "invalid offset");
+STATIC_ASSERT(sizeof(ftext_t)          == 0x18,  "size mismatch");
 
 typedef struct fname_s fname_t;
 struct fname_s {
@@ -2652,6 +2752,153 @@ struct execute_console_cmd_params_s {
   void      *specific_player; // APlayerController *
 };
 
+typedef tmulticast_delegate_t fon_gameplay_tag_loaded_t;
+typedef uint16_t              fgameplay_tag_net_idx_t;
+
+typedef struct fgameplay_tag_container_s fgameplay_tag_container_t;
+struct fgameplay_tag_container_s {
+  TARRAY(fgameplay_tag_t) gameplay_tags;
+  TARRAY(fgameplay_tag_t) parent_tags;
+};
+
+typedef struct fgameplay_tag_node_s fgameplay_tag_node_t;
+struct fgameplay_tag_node_s {
+  fname_t                                          tag;
+  fgameplay_tag_container_t                        complete_tag_with_parents;
+  TARRAY(TSHARED_PTR(struct fgameplay_tag_node_s)) child_tags;
+  TSHARED_PTR(struct fgameplay_tag_node_s)         parent_node;
+  fgameplay_tag_net_idx_t                          net_idx;
+};
+
+typedef struct fgameplay_tag_search_path_info_s fgameplay_tag_search_path_info_t;
+struct fgameplay_tag_search_path_info_s {
+  TARRAY(fname_t)   sources_in_path;
+  TARRAY(fstring_t) tag_ini_list;
+  bool              was_searched;
+  bool              was_added_to_tree;
+};
+
+typedef uint8_t egameplay_tag_source_t;
+enum {
+  EGAMEPLAY_TAG_SOURCE_NATIVE,
+  EGAMEPLAY_TAG_SOURCE_DEFAULT_TAG_LIST,
+  EGAMEPLAY_TAG_SOURCE_TAG_LIST,
+  EGAMEPLAY_TAG_SOURCE_RESTRICTED_TAG_LIST,
+  EGAMEPLAY_TAG_SOURCE_DATA_TABLE,
+  EGAMEPLAY_TAG_SOURCE_INVALID,
+};
+
+typedef struct fgameplay_tag_table_row_s fgameplay_tag_table_row_t;
+struct fgameplay_tag_table_row_s {
+  ftable_row_vtable_t *vtable;
+  fname_t              tag;
+  fstring_t            dev_comment;
+};
+
+typedef struct frestricted_gameplay_tag_table_row_s frestricted_gameplay_tag_table_row_t;
+struct frestricted_gameplay_tag_table_row_s {
+  ftable_row_vtable_t *vtable;
+  fname_t              tag;
+  fstring_t            dev_comment;
+  bool                 allow_non_restricted_children;
+};
+
+typedef struct ugameplay_tags_list_s ugameplay_tags_list_t;
+struct ugameplay_tags_list_s {
+  /* uobject_t */
+  uobject_vtable_t *vtable;
+  eobj_flags_t      obj_flags;
+  int32_t           internal_idx;
+  struct uclass_s  *cls;
+  fname_t           name;
+  struct uobject_s *outer;
+
+  /* ugameplay_tags_list_t */
+  fstring_t                         config_file_name;
+  TARRAY(fgameplay_tag_table_row_t) gameplay_tag_list;
+};
+
+typedef struct urestricted_gameplay_tags_list_s urestricted_gameplay_tags_list_t;
+struct urestricted_gameplay_tags_list_s {
+  /* uobject_t */
+  uobject_vtable_t *vtable;
+  eobj_flags_t      obj_flags;
+  int32_t           internal_idx;
+  struct uclass_s  *cls;
+  fname_t           name;
+  struct uobject_s *outer;
+
+  /* urestricted_gameplay_tags_list_t */
+  fstring_t                                    config_file_name;
+  TARRAY(frestricted_gameplay_tag_table_row_t) restricted_gameplay_tag_list;
+};
+
+typedef struct fgameplay_tag_source_s fgameplay_tag_source_t;
+struct fgameplay_tag_source_s {
+  fname_t                           source_name;
+  egameplay_tag_source_t            source_type;
+  ugameplay_tags_list_t*            source_tag_list;
+  urestricted_gameplay_tags_list_t* source_restricted_tag_list;
+};
+
+typedef struct ugameplay_tags_manager_s ugameplay_tags_manager_t;
+struct ugameplay_tags_manager_s {
+  /* uobject_t */
+  ufield_vtable_t  *vtable;
+  eobj_flags_t      obj_flags;
+  int32_t           internal_idx;
+  struct uclass_s  *cls;
+  fname_t           name;
+  struct uobject_s *outer;
+
+  /* ugameplay_tags_manager_t */
+  fon_gameplay_tag_loaded_t                                on_gameplay_tag_loaded_delegate;
+  int32_t                                                  num_bits_for_container_size;
+  int32_t                                                  net_idx_true_bit_num;
+  int32_t                                                  net_idx_first_bit_segment;
+  fgameplay_tag_net_idx_t                                  invalid_tag_net_idx;
+  TSET(fname_t)                                            legacy_native_tags;
+  TMAP(fstring_t, fgameplay_tag_search_path_info_t)        registered_search_paths;
+  TSHARED_PTR(fgameplay_tag_node_t)                        gameplay_root_tag;
+  TMAP(fgameplay_tag_t, TSHARED_PTR(fgameplay_tag_node_t)) gameplay_tag_node_map;
+  TARRAY(fgameplay_tag_t)                                  commonly_replicated_tags;
+  TMAP(fname_t, fgameplay_tag_source_t)                    tag_sources;
+  TSET(fname_t)                                            restricted_gameplay_tag_source_names;
+  bool                                                     is_constructing_gameplay_tag_tree;
+  bool                                                     use_fast_replication;
+  bool                                                     should_warn_on_invalid_tags;
+  bool                                                     should_clear_invalid_tags;
+  bool                                                     done_adding_native_tags;
+  fstring_t                                                invalid_tag_characters;
+  TARRAY(TSHARED_PTR(fgameplay_tag_node_t))                network_gameplay_tag_node_idx;
+  uint32_t                                                 network_gameplay_tag_node_idx_hash;
+  bool                                                     network_idx_invalidated;
+  TARRAY(udata_table_t *)                                  gameplay_tag_tables;
+};
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, on_gameplay_tag_loaded_delegate)      == 0x028, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, num_bits_for_container_size)          == 0x040, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, net_idx_true_bit_num)                 == 0x044, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, net_idx_first_bit_segment)            == 0x048, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, invalid_tag_net_idx)                  == 0x04C, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, legacy_native_tags)                   == 0x050, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, registered_search_paths)              == 0x0A0, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, gameplay_root_tag)                    == 0x0F0, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, gameplay_tag_node_map)                == 0x100, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, commonly_replicated_tags)             == 0x150, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, tag_sources)                          == 0x160, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, restricted_gameplay_tag_source_names) == 0x1B0, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, is_constructing_gameplay_tag_tree)    == 0x200, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, use_fast_replication)                 == 0x201, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, should_warn_on_invalid_tags)          == 0x202, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, should_clear_invalid_tags)            == 0x203, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, done_adding_native_tags)              == 0x204, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, invalid_tag_characters)               == 0x208, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, network_gameplay_tag_node_idx)        == 0x218, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, network_gameplay_tag_node_idx_hash)   == 0x228, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, network_idx_invalidated)              == 0x22C, "invalid offset");
+STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, gameplay_tag_tables)                  == 0x230, "invalid offset");
+STATIC_ASSERT(sizeof(ugameplay_tags_manager_t)                                         == 0x240, "size mismatch");
+
 /* ===================================================== FNAME ====================================================== */
 
 bool
@@ -2834,6 +3081,8 @@ unreal_uobject_array_get_obj(int idx);
 bool
 unreal_uobject_is_a(uobject_t *obj, uclass_t *cls);
 bool
+unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent);
+bool
 unreal_uobject_is_default(uobject_t *obj);
 bool
 unreal_uobject_is_valid(uobject_t *obj);
@@ -2886,11 +3135,17 @@ unreal_uobject_find_by_full_name(uclass_t *cls, str_t full_name);
 
 void
 unreal_process_event(uobject_t *self, ufunc_t *func, void *params);
+/* Calls the virtual ProcessEvent entry so normal Overdub hooks/listeners observe the call. */
+void
+unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params);
 
 uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
 void
 unreal_despawn_actor(uobject_t *actor);
+
+uobject_t *
+unreal_static_construct_object(fstatic_construct_obj_params_t *params);
 
 uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
@@ -2974,6 +3229,25 @@ unreal_uprop_set_obj(fprop_t *prop, void *container, uobject_t *val)
   *(uobject_t **)unreal_uprop_ptr(prop, container) = val;
 }
 
+bool
+unreal_fprop_class_is(fprop_t *prop, fname_t name);
+str_t
+unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena);
+
+/* FProperty value lifecycle helpers. `container` is the owner buffer, not the
+ * address of the property value. These cover the property's complete static
+ * array dimension. */
+void
+unreal_fprop_initialize_in_container(fprop_t *prop, void *container);
+void
+unreal_fprop_destroy_in_container(fprop_t *prop, void *container);
+
+/* Imports one direct property value. `value` points at the property value,
+ * rather than its containing struct. The returned pointer is inside `text`, or
+ * NULL when Unreal rejected the input. */
+const wchar_t *
+unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner);
+
 /* =============================================== CONTAINER UTILITIES ============================================== */
 
 bool
@@ -3002,5 +3276,15 @@ void
 unreal_udata_table_empty(udata_table_t *table);
 uint8_t *
 unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
+
+/* ============================================= GAMEPLAY TAGS MANAGER ============================================== */
+
+bool
+unreal_gameplay_tags_manager_add(fname_t tag_name);
+void
+unreal_gameplay_tags_manager_broadcast_tree_changed(void);
+
+fgameplay_tag_t
+unreal_gameplay_tags_manager_request_tag(fname_t tag_name);
 
 #endif /* UE_TYPES_H */

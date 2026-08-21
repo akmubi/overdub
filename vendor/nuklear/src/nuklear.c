@@ -27892,7 +27892,7 @@ nk_edit_buffer(struct nk_context *ctx, nk_flags flags, struct nk_text_edit *edit
   } else if (state == NK_WIDGET_DISABLED) {
     flags |= NK_EDIT_READ_ONLY;
   }
-  in = (win->layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
+  in = ((win->layout->flags & NK_WINDOW_ROM) || state == NK_WIDGET_DISABLED) ? 0 : &ctx->input;
 
   /* check if edit is currently hot item */
   hash = win->edit.seq++;
@@ -27915,7 +27915,6 @@ nk_edit_buffer(struct nk_context *ctx, nk_flags flags, struct nk_text_edit *edit
 
   filter     = (!filter) ? nk_filter_default : filter;
   prev_state = (unsigned char)edit->active;
-  in         = (flags & NK_EDIT_READ_ONLY) ? 0 : in;
   ret_flags  = nk_do_edit(&ctx->last_widget_state, &win->buffer, bounds, flags, filter, edit, &style->edit, in, style->font);
 
   if (ctx->last_widget_state & NK_WIDGET_STATE_HOVER) {

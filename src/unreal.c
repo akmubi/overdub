@@ -798,6 +798,19 @@ unreal_uobject_is_a(uobject_t *obj, uclass_t *cls)
 }
 
 bool
+unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent)
+{
+  if (child && parent) {
+    for (uclass_t *cls = child; cls; cls = (uclass_t *)cls->super_struct) {
+      if (cls == parent) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool
 unreal_uobject_is_default(uobject_t *obj)
 {
   return (obj && (obj->obj_flags & (RF_CLASS_DEFAULT_OBJECT | RF_ARCHETYPE_OBJECT)));
@@ -1345,6 +1358,224 @@ unreal_process_event(uobject_t *self, ufunc_t *func, void *params)
 #endif
 }
 
+void
+unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params)
+{
+#if !defined BUILD_TEST_UI
+  if (self && self->vtable && self->vtable->process_event && func) {
+    self->vtable->process_event(self, func, params);
+  }
+#else
+  (void)self;
+  (void)func;
+  (void)params;
+#endif
+}
+
+static inline str_t
+unreal_fprop_class_push_type_name(arena_t *arena, str_t prefix, uclass_t *cls)
+{
+  str_t cls_name = cls ? unreal_uobject_push_name((uobject_t *)cls, arena) : STR_LIT("<unknown>");
+  return str_push_fmt(arena, "%.*s<%.*s>", STR_ARG(prefix), STR_ARG(cls_name));
+}
+
+bool
+unreal_fprop_class_is(fprop_t *prop, fname_t name)
+{
+  if (prop && prop->cls) {
+    return unreal_fname_equal(prop->cls->name, name, false);
+  }
+  return false;
+}
+
+str_t
+unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena)
+{
+  if (!prop || !prop->cls || !arena) {
+    return STR_LIT("<null>");
+  }
+
+  struct {
+    str_t   name;
+    fname_t fname;
+  } simple_prop_names[] = {
+    {STR_CLIT("bool"),     globals.unreal.bool_prop  },
+    {STR_CLIT("uint8_t"),  globals.unreal.byte_prop  },
+    {STR_CLIT("int8_t"),   globals.unreal.int8_prop  },
+    {STR_CLIT("int16_t"),  globals.unreal.int16_prop },
+    {STR_CLIT("int32_t"),  globals.unreal.int_prop   },
+    {STR_CLIT("int32_t"),  globals.unreal.int32_prop },
+    {STR_CLIT("int64_t"),  globals.unreal.int64_prop },
+    {STR_CLIT("uint16_t"), globals.unreal.uint16_prop},
+    {STR_CLIT("uint32_t"), globals.unreal.uint32_prop},
+    {STR_CLIT("uint64_t"), globals.unreal.uint64_prop},
+    {STR_CLIT("float"),    globals.unreal.float_prop },
+    {STR_CLIT("double"),   globals.unreal.double_prop},
+    {STR_CLIT("FName"),    globals.unreal.name_prop  },
+    {STR_CLIT("FString"),  globals.unreal.str_prop   },
+    {STR_CLIT("FText"),    globals.unreal.text_prop  },
+  };
+
+  for (int i = 0; i < COUNTOF(simple_prop_names); ++i) {
+    str_t   type_name  = simple_prop_names[i].name;
+    fname_t type_fname = simple_prop_names[i].fname;
+
+    if (unreal_fprop_class_is(prop, type_fname)) {
+      return type_name; // ok, because it's string literal
+    }
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.obj_prop)) {
+    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("Object"), p->prop_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
+    fprop_class_t *p = (fprop_class_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("Class"), p->meta_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
+    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("SoftObject"), p->prop_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+    fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("SoftClass"), p->meta_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
+    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("WeakObject"), p->prop_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
+    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("LazyObject"), p->prop_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
+    fprop_iface_t *p = (fprop_iface_t *)prop;
+    return unreal_fprop_class_push_type_name(arena, STR_LIT("Interface"), p->iface_class);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
+    fprop_struct_t *p = (fprop_struct_t *)prop;
+
+    if (!p->script_struct) {
+      return STR_LIT("<unknown struct>");
+    }
+
+    return unreal_uobject_push_name((uobject_t *)p->script_struct, arena);
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
+    fprop_enum_t *p         = (fprop_enum_t *)prop;
+    str_t         enum_name = p->uenum ? unreal_uobject_push_name((uobject_t *)p->uenum, arena) : STR_LIT("<unknown>");
+
+    if (p->underlying_prop) {
+      str_t underlying_type_name = unreal_fprop_push_type_name(&p->underlying_prop->base, arena);
+      return str_push_fmt(arena, "Enum<%.*s:%.*s>", STR_ARG(enum_name), STR_ARG(underlying_type_name));
+    }
+    return str_push_fmt(arena, "Enum<%.*s>", STR_ARG(enum_name));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
+    fprop_array_t *p               = (fprop_array_t *)prop;
+    str_t          inner_type_name = unreal_fprop_push_type_name(p->inner, arena);
+    return str_push_fmt(arena, "TArray<%.*s>", STR_ARG(inner_type_name));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
+    fprop_set_t *p              = (fprop_set_t *)prop;
+    str_t        elem_type_name = unreal_fprop_push_type_name(p->elem_prop, arena);
+    return str_push_fmt(arena, "TSet<%.*s>", STR_ARG(elem_type_name));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
+    fprop_map_t *p               = (fprop_map_t *)prop;
+    str_t        key_type_name   = unreal_fprop_push_type_name(p->key_prop, arena);
+    str_t        value_type_name = unreal_fprop_push_type_name(p->val_prop, arena);
+    return str_push_fmt(arena, "TMap<%.*s, %.*s>", STR_ARG(key_type_name), STR_ARG(value_type_name));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
+    fprop_delegate_t *p   = (fprop_delegate_t *)prop;
+    str_t             sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
+    return str_push_fmt(arena, "Delegate<%.*s>", STR_ARG(sig));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
+    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
+    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
+    return str_push_fmt(arena, "MulticastDelegate<%.*s>", STR_ARG(sig));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
+    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
+    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
+    return str_push_fmt(arena, "MulticastInlineDelegate<%.*s>", STR_ARG(sig));
+  }
+
+  if (unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
+    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
+    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
+    return str_push_fmt(arena, "MulticastSparseDelegate<%.*s>", STR_ARG(sig));
+  }
+
+  return unreal_fname_to_str(prop->cls->name, arena);
+
+}
+
+void
+unreal_fprop_initialize_in_container(fprop_t *prop, void *container)
+{
+  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0) {
+    return;
+  }
+
+  uint8_t *value = (uint8_t *)container + prop->offset_internal;
+  if (prop->prop_flags & CPF_ZERO_CONSTRUCTOR) {
+    mem_zero(value, (uint64_t)prop->elem_size * (uint64_t)prop->array_dim);
+    return;
+  }
+
+  if (!prop->vtable || !prop->vtable->initialize_value_internal) {
+    return;
+  }
+
+  for (int32_t i = 0; i < prop->array_dim; ++i) {
+    prop->vtable->initialize_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
+  }
+}
+
+void
+unreal_fprop_destroy_in_container(fprop_t *prop, void *container)
+{
+  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0 || (prop->prop_flags & CPF_NO_DESTRUCTOR)) {
+    return;
+  }
+
+  if (!prop->vtable || !prop->vtable->destroy_value_internal) {
+    return;
+  }
+
+  uint8_t *value = (uint8_t *)container + prop->offset_internal;
+  for (int32_t i = 0; i < prop->array_dim; ++i) {
+    prop->vtable->destroy_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
+  }
+}
+
+const wchar_t *
+unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner)
+{
+  if (!prop || !prop->vtable || !prop->vtable->import_text_internal || !text || !value) {
+    return NULL;
+  }
+  return prop->vtable->import_text_internal(prop, text, value, 0, owner, NULL);
+}
+
 uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls)
 {
@@ -1403,6 +1634,15 @@ unreal_despawn_actor(uobject_t *actor)
   if (actor) {
     unreal_process_event(actor, destroy_actor, NULL);
   }
+}
+
+uobject_t *
+unreal_static_construct_object(fstatic_construct_obj_params_t *params)
+{
+  if (!static_construct_object || !params) {
+    return NULL;
+  }
+  return static_construct_object(params);
 }
 
 uobject_t *
@@ -1829,4 +2069,58 @@ unreal_udata_table_find_row(udata_table_t *table, fname_t row_name)
     }
   }
   return NULL;
+}
+
+/* ================================================= GAMEPLAY TAGS ================================================== */
+
+bool
+unreal_gameplay_tags_manager_add(fname_t tag_name)
+{
+  if (!globals.gameplay_tags_manager_ptr || !add_tag_table_row) {
+    return false;
+  }
+
+  ugameplay_tags_manager_t *manager = *globals.gameplay_tags_manager_ptr;
+  if (!manager || unreal_fname_is_none(tag_name)) {
+    return false;
+  }
+
+  fname_t                   source = unreal_fname_from_str(STR_LIT("Overdub"), FNAME_FIND_OR_ADD); 
+  fgameplay_tag_table_row_t row    = {
+    .tag = tag_name,
+  };
+
+  add_tag_table_row(manager, &row, source, false);
+  return true;
+}
+
+void
+unreal_gameplay_tags_manager_broadcast_tree_changed(void)
+{
+  if (!globals.gameplay_tags_manager_ptr || !tmulticast_delegate_broadcast || !globals.on_gameplay_tag_tree_changed) {
+    return;
+  }
+
+  ugameplay_tags_manager_t *manager = *globals.gameplay_tags_manager_ptr;
+  if (!manager) {
+    return;
+  }
+
+  if (!manager->is_constructing_gameplay_tag_tree) {
+    manager->network_idx_invalidated = true;
+    tmulticast_delegate_broadcast(globals.on_gameplay_tag_tree_changed);
+  }
+}
+
+fgameplay_tag_t
+unreal_gameplay_tags_manager_request_tag(fname_t tag_name)
+{
+  fgameplay_tag_t tag = {0};
+  if (globals.gameplay_tags_manager_ptr && request_gameplay_tag) {
+    ugameplay_tags_manager_t *manager = *globals.gameplay_tags_manager_ptr;
+    if (manager) {
+      request_gameplay_tag(manager, &tag, tag_name, false);
+    }
+  }
+  return tag;
 }

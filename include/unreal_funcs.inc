@@ -17,6 +17,9 @@ UE_FUNC_NORMAL(get_mcast_sparse_delegate, void *, uobject_t *delegate_owner, fna
 UE_FUNC_NORMAL(fscript_map_add_pair, void, fscript_map_helper_t *helper, fscript_map_add_ctx_t *ctx)
 UE_FUNC_NORMAL(fscript_map_remove_pair, bool, fscript_map_helper_t *helper, fscript_map_remove_ctx_t *ctx)
 UE_FUNC_NORMAL(generic_map_find, bool, void *map, fprop_map_t *map_prop, const void *key_ptr, void *out_val_ptr)
+UE_FUNC_NORMAL(add_tag_table_row, void, ugameplay_tags_manager_t *self, fgameplay_tag_table_row_t *tag_row, fname_t source_name, bool is_restricted_tag)
+UE_FUNC_NORMAL(tmulticast_delegate_broadcast, void, tmulticast_delegate_t *self)
+UE_FUNC_NORMAL(request_gameplay_tag, fgameplay_tag_t *, ugameplay_tags_manager_t *self, fgameplay_tag_t *, fname_t tag_name, bool error_if_not_found);
 
 #undef UE_FUNC_NORMAL
 
@@ -40,5 +43,6 @@ UE_FUNC_HOOKED(process_key_up_event, bool, void *self, fkey_event_t key_event);
 UE_FUNC_HOOKED(process_analog_input_event, bool, void *self, fanalog_input_event_t analog_input_event);
 UE_FUNC_HOOKED(process_app_activation_event, bool, void *self, bool app_activated);
 UE_FUNC_HOOKED(d3d12_viewport_init, void, void *self);
+UE_FUNC_HOOKED(init_gameplay_tag_manager, void, void);
 
 #undef UE_FUNC_HOOKED

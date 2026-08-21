@@ -26,14 +26,20 @@ struct globals_s {
   void *io_dispatcher;
   void *pak_file;
 
-  fuobject_array_t   *uobjects;
-  fname_pool_t       *name_pool;
-  uworld_t          **gworld_ptr; // points to current world
-  fnative_func_ptr_t *natives;
-  uobject_vtable_t   *uobject_vtable;
+  fuobject_array_t    *uobjects;
+  fname_pool_t        *name_pool;
+  uworld_t           **gworld_ptr; // points to current world
+  fnative_func_ptr_t  *natives;
+  uobject_vtable_t    *uobject_vtable;
 
   unreal_common_t     unreal;
   uobject_listener_t *listeners;
+
+  ugameplay_tags_manager_t **gameplay_tags_manager_ptr;
+  tmulticast_delegate_t     *on_gameplay_tag_tree_changed;
+
+  fgameplay_tag_t custom_tags[CONFIG_MAX_CUSTOM_GAMEPLAY_TAGS];
+  int             num_custom_tags;
 
   /* window */
   uint64_t hwnd;

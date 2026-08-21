@@ -66,6 +66,8 @@
 /* UObject array create/delete listeners */
 #define CONFIG_UOBJECT_ARRAY_MAX_LISTENERS (64)
 
+#define CONFIG_MAX_CUSTOM_GAMEPLAY_TAGS (1024)
+
 /* uobject cache */
 #define CONFIG_UOB_NAME_CACHE_ARENA_RESERVE (64 * MB)
 #define CONFIG_UOB_NAME_CACHE_ARENA_COMMIT  (64 * KB)

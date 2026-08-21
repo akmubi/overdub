@@ -270,6 +270,7 @@ struct tool_cache_s {
 
   uint32_t build_cursor;
   uint32_t build_total;
+  uint64_t generation;
 
   string_pool_t strings;
   uworld_t     *world;
@@ -277,6 +278,19 @@ struct tool_cache_s {
   slot_list_t     live_slots;
   pending_queue_t pending_slots;
 };
+
+typedef struct ufunc_call_dialog_s ufunc_call_dialog_t;
+
+bool
+ufunc_call_init(search_tool_t *tool, const mod_host_api_t *host, mod_handle_t h);
+void
+ufunc_call_open(search_tool_t *tool, record_t *func_record, record_t *suggested_target);
+void
+ufunc_call_close(search_tool_t *tool);
+void
+ufunc_call_on_uobject_removed(search_tool_t *tool, uobject_t *obj);
+void
+ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh);
 
 bool
 build_in_progress(search_tool_t *tool);
@@ -425,15 +439,16 @@ struct tool_cfg_s {
 };
 
 struct search_tool_s {
-  arena_t           *perm;
-  tool_cache_t       cache;
-  tool_search_t      search;
-  tool_ui_t          ui;
-  tool_details_t     details;
-  tool_cfg_t         cfg;
-  mod_handle_t       handle;
-  struct nk_context *ctx;
-  bool               inited;
+  arena_t             *perm;
+  tool_cache_t         cache;
+  tool_search_t        search;
+  tool_ui_t            ui;
+  tool_details_t       details;
+  ufunc_call_dialog_t *call_dialog;
+  tool_cfg_t           cfg;
+  mod_handle_t         handle;
+  struct nk_context   *ctx;
+  bool                 inited;
 };
 
 bool

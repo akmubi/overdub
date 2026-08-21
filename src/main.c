@@ -131,6 +131,22 @@ on_engine_tick_pre(float delta)
     mod_manager_dispatch_tick(&globals.mod_manager, delta);
   }
 
+  if (globals.num_custom_tags > 0) {
+    tmp_arena_t tmp = scratch_begin(NULL);
+    {
+      for (int i = 0; i < globals.num_custom_tags; ++i) {
+        fname_t tag_name = globals.custom_tags[i].tag_name;
+        if (!unreal_gameplay_tags_manager_add(tag_name)) {
+          LOG_WARN("Failed to add GameplayTag: %.*s", STR_ARG(unreal_fname_to_str(tag_name, tmp.arena)));
+        }
+      }
+
+      unreal_gameplay_tags_manager_broadcast_tree_changed();
+      globals.num_custom_tags = 0;
+    }
+    scratch_end(tmp);
+  }
+
 #if defined BUILD_DEBUG
   if (keybind_str_is_pressed(STR_LIT("Ctrl+P"))) {
     profiler_log_report();
@@ -526,4 +542,11 @@ d3d12_viewport_init_hook(void *self)
   if (queue) {
     nk_d3d12_set_command_queue(queue);
   }
+}
+
+void __fastcall
+init_gameplay_tag_manager_hook(void)
+{
+  LOG_DEBUG("UGameplayTagsManager::InitializeManager");
+  init_gameplay_tag_manager_real();
 }

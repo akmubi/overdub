@@ -1072,6 +1072,16 @@ unreal_despawn_actor(uobject_t *actor)
 }
 
 uobject_t *
+unreal_static_construct_object(fstatic_construct_obj_params_t *params)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  if (!MOD_HOST_API_HAS_FIELD(host, static_construct_object) || !host->static_construct_object) {
+    return NULL;
+  }
+  return host->static_construct_object(params);
+}
+
+uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx)
 {
   const mod_host_api_t *host = mod_sdk_host();
@@ -1336,4 +1346,24 @@ unreal_udata_table_find_row(udata_table_t *table, fname_t row_name)
     }
   }
   return NULL;
+}
+
+bool
+unreal_add_gameplay_tag(fname_t tag_name)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  if (!MOD_HOST_API_HAS_FIELD(host, add_gameplay_tag) || !host->add_gameplay_tag) {
+    return false;
+  }
+  return host->add_gameplay_tag(tag_name);
+}
+
+bool
+unreal_check_gameplay_tag_exists(fname_t tag_name)
+{
+  const mod_host_api_t *host = mod_sdk_host();
+  if (!MOD_HOST_API_HAS_FIELD(host, check_gameplay_tag_exists) || !host->check_gameplay_tag_exists) {
+    return false;
+  }
+  return host->check_gameplay_tag_exists(tag_name);
 }

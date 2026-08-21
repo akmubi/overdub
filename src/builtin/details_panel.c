@@ -339,8 +339,6 @@ detail_prop_clear_runtime_children(detail_tab_t *tab, detail_prop_t *node)
   node->live_slot_count  = 0;
 }
 
-static str_t
-fprop_push_type_name(arena_t *arena, fprop_t *prop);
 static detail_prop_t *
 detail_prop_push_pseudo(search_tool_t *tool, detail_tab_t *tab, fprop_t *prop, str_t name, uint32_t depth, bool permanent, bool runtime);
 static void
@@ -359,14 +357,6 @@ static detail_enum_t *
 detail_enum_push(search_tool_t *tool, detail_tab_t *tab, record_t *enum_record);
 
 static inline bool
-fprop_class_is(fprop_t *prop, fname_t name)
-{
-  ASSERT(prop != NULL);
-  ASSERT(prop->cls != NULL);
-  return unreal_fname_equal(prop->cls->name, name, false);
-}
-
-static inline bool
 fprop_struct_is(fprop_t *prop, fname_t name)
 {
   ASSERT(prop != NULL);
@@ -378,151 +368,6 @@ fprop_struct_is(fprop_t *prop, fname_t name)
 
   uobject_t *obj = (uobject_t *)sp->script_struct;
   return unreal_fname_equal(obj->name, name, false);
-}
-
-static inline str_t
-fprop_class_push_type_name(arena_t *arena, str_t prefix, uclass_t *cls)
-{
-  str_t cls_name = cls ? unreal_uobject_push_name((uobject_t *)cls, arena) : STR_LIT("<unknown>");
-  return str_push_fmt(arena, "%.*s<%.*s>", STR_ARG(prefix), STR_ARG(cls_name));
-}
-
-str_t
-fprop_push_type_name(arena_t *arena, fprop_t *prop)
-{
-  if (!prop || !prop->cls) {
-    return STR_LIT("<null>");
-  }
-
-  struct {
-    str_t   name;
-    fname_t fname;
-  } simple_prop_names[] = {
-    {STR_CLIT("bool"), globals.unreal.bool_prop},
-    {STR_CLIT("uint8_t"), globals.unreal.byte_prop},
-    {STR_CLIT("int8_t"), globals.unreal.int8_prop},
-    {STR_CLIT("int16_t"), globals.unreal.int16_prop},
-    {STR_CLIT("int32_t"), globals.unreal.int32_prop},
-    {STR_CLIT("int64_t"), globals.unreal.int64_prop},
-    {STR_CLIT("uint16_t"), globals.unreal.uint16_prop},
-    {STR_CLIT("uint32_t"), globals.unreal.uint32_prop},
-    {STR_CLIT("uint64_t"), globals.unreal.uint64_prop},
-    {STR_CLIT("float"), globals.unreal.float_prop},
-    {STR_CLIT("double"), globals.unreal.double_prop},
-    {STR_CLIT("FName"), globals.unreal.name_prop},
-    {STR_CLIT("FString"), globals.unreal.str_prop},
-    {STR_CLIT("FText"), globals.unreal.text_prop},
-  };
-
-  for (int i = 0; i < COUNTOF(simple_prop_names); ++i) {
-    str_t   type_name  = simple_prop_names[i].name;
-    fname_t type_fname = simple_prop_names[i].fname;
-
-    if (fprop_class_is(prop, type_fname)) {
-      return type_name; // ok, because it's string literal
-    }
-  }
-
-  if (fprop_class_is(prop, globals.unreal.obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("Object"), p->prop_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.class_prop)) {
-    fprop_class_t *p = (fprop_class_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("Class"), p->meta_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("SoftObject"), p->prop_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("SoftClass"), p->meta_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("WeakObject"), p->prop_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("LazyObject"), p->prop_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.interface_prop)) {
-    fprop_iface_t *p = (fprop_iface_t *)prop;
-    return fprop_class_push_type_name(arena, STR_LIT("Interface"), p->iface_class);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *p = (fprop_struct_t *)prop;
-
-    if (!p->script_struct) {
-      return STR_LIT("<unknown struct>");
-    }
-
-    return unreal_uobject_push_name((uobject_t *)p->script_struct, arena);
-  }
-
-  if (fprop_class_is(prop, globals.unreal.enum_prop)) {
-    fprop_enum_t *p         = (fprop_enum_t *)prop;
-    str_t         enum_name = p->uenum ? unreal_uobject_push_name((uobject_t *)p->uenum, arena) : STR_LIT("<unknown>");
-
-    if (p->underlying_prop) {
-      str_t underlying_type_name = fprop_push_type_name(arena, &p->underlying_prop->base);
-      return str_push_fmt(arena, "Enum<%.*s:%.*s>", STR_ARG(enum_name), STR_ARG(underlying_type_name));
-    }
-    return str_push_fmt(arena, "Enum<%.*s>", STR_ARG(enum_name));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.array_prop)) {
-    fprop_array_t *p               = (fprop_array_t *)prop;
-    str_t          inner_type_name = fprop_push_type_name(arena, p->inner);
-    return str_push_fmt(arena, "TArray<%.*s>", STR_ARG(inner_type_name));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.set_prop)) {
-    fprop_set_t *p              = (fprop_set_t *)prop;
-    str_t        elem_type_name = fprop_push_type_name(arena, p->elem_prop);
-    return str_push_fmt(arena, "TSet<%.*s>", STR_ARG(elem_type_name));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.map_prop)) {
-    fprop_map_t *p               = (fprop_map_t *)prop;
-    str_t        key_type_name   = fprop_push_type_name(arena, p->key_prop);
-    str_t        value_type_name = fprop_push_type_name(arena, p->val_prop);
-    return str_push_fmt(arena, "TMap<%.*s, %.*s>", STR_ARG(key_type_name), STR_ARG(value_type_name));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.delegate_prop)) {
-    fprop_delegate_t *p   = (fprop_delegate_t *)prop;
-    str_t             sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "Delegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastInlineDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastSparseDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  return unreal_fname_to_str(prop->cls->name, arena);
 }
 
 detail_prop_t *
@@ -537,7 +382,7 @@ detail_prop_push_pseudo(search_tool_t *tool, detail_tab_t *tab, fprop_t *prop, s
   if (node) {
     node->prop        = prop;
     node->name        = ui_text_span_make(tool->ctx, str_push_copy(arena, name));
-    node->type        = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, prop));
+    node->type        = ui_text_span_make(tool->ctx, unreal_fprop_push_type_name(prop, arena));
     node->offset      = 0;
     node->size        = 0;
     node->array_dim   = 0;
@@ -572,7 +417,7 @@ detail_prop_expand_complex(search_tool_t *tool, detail_tab_t *tab, detail_prop_t
     return;
   }
 
-  if (fprop_class_is(prop, globals.unreal.struct_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
     fprop_struct_t *sp = (fprop_struct_t *)prop;
     if (sp->script_struct) {
       ustruct_t *st = (ustruct_t *)sp->script_struct;
@@ -584,19 +429,19 @@ detail_prop_expand_complex(search_tool_t *tool, detail_tab_t *tab, detail_prop_t
         }
       }
     }
-  } else if (fprop_class_is(prop, globals.unreal.array_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
     fprop_array_t *ap         = (fprop_array_t *)prop;
     detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, ap->inner, STR_LIT("Inner"), depth + 1, permanent, runtime);
     if (child_node) {
       QUEUE_PUSH(node->first_child, node->last_child, child_node);
     }
-  } else if (fprop_class_is(prop, globals.unreal.set_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
     fprop_set_t   *sp         = (fprop_set_t *)prop;
     detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, sp->elem_prop, STR_LIT("Element"), depth + 1, permanent, runtime);
     if (child_node) {
       QUEUE_PUSH(node->first_child, node->last_child, child_node);
     }
-  } else if (fprop_class_is(prop, globals.unreal.map_prop)) {
+  } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
     fprop_map_t *mp = (fprop_map_t *)prop;
 
     detail_prop_t *key_child_node = detail_prop_push_pseudo(tool, tab, mp->key_prop, STR_LIT("Key"), depth + 1, permanent, runtime);
@@ -627,7 +472,7 @@ detail_prop_push(search_tool_t *tool, detail_tab_t *tab, fprop_t *prop, bool is_
   if (node) {
     node->prop        = prop;
     node->name        = ui_text_span_make(tool->ctx, unreal_fname_to_str(prop->name, arena));
-    node->type        = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, prop));
+    node->type        = ui_text_span_make(tool->ctx, unreal_fprop_push_type_name(prop, arena));
     node->offset      = prop->offset_internal;
     node->size        = prop->elem_size;
     node->array_dim   = prop->array_dim;
@@ -661,7 +506,7 @@ detail_prop_push_array_elem(
   if (node) {
     node->prop           = elem;
     node->name           = ui_text_span_make(tool->ctx, str_push_fmt(arena, "[%u]", elem_idx));
-    node->type           = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, elem));
+    node->type           = ui_text_span_make(tool->ctx, unreal_fprop_push_type_name(elem, arena));
     node->offset         = elem_offset;
     node->size           = elem->elem_size;
     node->array_dim      = elem->array_dim;
@@ -692,7 +537,7 @@ detail_prop_push_set_elem(
   if (node) {
     node->prop           = elem;
     node->name           = ui_text_span_make(tool->ctx, str_push_fmt(arena, "[%u]", elem_idx));
-    node->type           = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, elem));
+    node->type           = ui_text_span_make(tool->ctx, unreal_fprop_push_type_name(elem, arena));
     node->offset         = elem_offset;
     node->size           = elem->elem_size;
     node->array_dim      = elem->array_dim;
@@ -744,8 +589,8 @@ detail_prop_push_map_pair(
     val  = &nodes[2];
   }
 
-  str_t key_type_name  = fprop_push_type_name(arena, map->key_prop);
-  str_t val_type_name  = fprop_push_type_name(arena, map->val_prop);
+  str_t key_type_name  = unreal_fprop_push_type_name(map->key_prop, arena);
+  str_t val_type_name  = unreal_fprop_push_type_name(map->val_prop, arena);
   str_t pair_type_name = str_push_fmt(arena, "TPair<%.*s, %.*s>", STR_ARG(key_type_name), STR_ARG(val_type_name));
 
   pair->name           = ui_text_span_make(tool->ctx, str_push_fmt(arena, "[%u]", pair_idx));
@@ -1266,35 +1111,35 @@ details_clear_stale(search_tool_t *tool)
 static int64_t
 fprop_read_int_value(fprop_t *prop, void *addr)
 {
-  if (fprop_class_is(prop, globals.unreal.byte_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
     return *(uint8_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.int8_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.int8_prop)) {
     return *(int8_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.int16_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.int16_prop)) {
     return *(int16_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.int_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.int_prop)) {
     return *(int32_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.int64_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.int64_prop)) {
     return *(int64_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.uint16_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) {
     return *(uint16_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.uint32_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
     return *(uint32_t *)addr;
   }
 
-  if (fprop_class_is(prop, globals.unreal.uint64_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
     return (int64_t)*(uint64_t *)addr;
   }
 
@@ -1507,22 +1352,22 @@ ftext_push_summary(arena_t *arena, ftext_t *text)
     return STR_LIT("null");
   }
 
+  itext_data_t *data = text->text_data.obj;
+
   str_t       result = STR_LIT("\"\"");
   tmp_arena_t tmp    = scratch_begin(arena);
   {
-    ftext_data_t *data    = text->text_data.obj;
-    str_t         display = fstring_push_plain(tmp.arena, &data->display_str);
-    if (str_is_empty(display)) {
-      display = fstring_push_plain(tmp.arena, &data->local_str);
+    fstring_t *display_string = data->vtable->get_display_string(data);
+    str_t      display        = STR_NULL;
+
+    if (display_string) {
+      display = fstring_push_plain(tmp.arena, display_string);
     }
 
-    if (!str_is_empty(display)) {
-      result = str_push_fmt(arena, "\"%.*s\" Flags=0x%X", STR_ARG(display), (uint32_t)text->flags);
-    } else {
-      result = str_push_fmt(arena, "\"\" Flags=0x%X", (uint32_t)text->flags);
-    }
+    result = str_push_fmt(arena, "\"%.*s\" Flags=0x%X", STR_ARG(display), (uint32_t)text->flags);
   }
   scratch_end(tmp);
+
   return result;
 }
 
@@ -1823,60 +1668,60 @@ prop_push_value_summary(search_tool_t *tool, detail_prop_t *node, arena_t *arena
   str_t       result = STR_NULL;
   tmp_arena_t tmp    = scratch_begin(arena);
   {
-    if (fprop_class_is(prop, globals.unreal.bool_prop)) {
+    if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
       fprop_bool_t *bp   = (fprop_bool_t *)prop;
       uint8_t       byte = *((uint8_t *)addr + bp->byte_offset);
       bool          val  = (byte & bp->field_mask) != 0;
 
       result = val ? STR_LIT("true") : STR_LIT("false");
-    } else if (fprop_class_is(prop, globals.unreal.byte_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
       result = str_push_fmt(arena, "%u", (uint32_t)*(uint8_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.int8_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.int8_prop)) {
       result = str_push_fmt(arena, "%d", (int32_t)*(int8_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.int16_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.int16_prop)) {
       result = str_push_fmt(arena, "%d", (int32_t)*(int16_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.int_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.int_prop)) {
       result = str_push_fmt(arena, "%d", *(int32_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.int32_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.int32_prop)) {
       result = str_push_fmt(arena, "%d", *(int32_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.int64_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.int64_prop)) {
       result = str_push_fmt(arena, "%lld", (long long)*(int64_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.uint16_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) {
       result = str_push_fmt(arena, "%u", (uint32_t)*(uint16_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.uint32_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
       result = str_push_fmt(arena, "%u", *(uint32_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.uint64_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
       result = str_push_fmt(arena, "%llu", (unsigned long long)*(uint64_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.float_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop)) {
       result = str_push_fmt(arena, "%.3f", *(float *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.double_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
       result = str_push_fmt(arena, "%.3f", *(double *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.name_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.name_prop)) {
       str_t name = unreal_fname_to_str(*(fname_t *)addr, tmp.arena);
       result     = str_push_fmt(arena, "\"%.*s\"", STR_ARG(name));
-    } else if (fprop_class_is(prop, globals.unreal.str_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.str_prop)) {
       result = fstring_push_quoted(arena, (fstring_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.text_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.text_prop)) {
       result = ftext_push_summary(arena, (ftext_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.obj_prop) || fprop_class_is(prop, globals.unreal.class_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
       result = object_ptr_push_summary(arena, *(uobject_t **)addr);
-    } else if (fprop_class_is(prop, globals.unreal.soft_obj_prop) || fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) || unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
       result = soft_object_push_summary(arena, node);
-    } else if (fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
       result = weak_object_push_summary(arena, *(detail_fweak_object_ptr_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
       result = lazy_object_push_summary(arena, (detail_flazy_object_ptr_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.interface_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
       result = interface_push_summary(arena, (detail_fscript_interface_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.delegate_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
       result = delegate_push_summary(arena, (detail_fscript_delegate_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
       result = mcast_delegate_push_summary(arena, (detail_tarray_view_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
       result = mcast_delegate_push_summary(arena, (detail_tarray_view_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
       result = str_push_fmt(arena, "SparseDelegate 0x%02X", (uint32_t)*(uint8_t *)addr);
-    } else if (fprop_class_is(prop, globals.unreal.obj_prop) || fprop_class_is(prop, globals.unreal.class_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
       uobject_t *obj = *(uobject_t **)addr;
       if (!obj) {
         result = STR_LIT("null");
@@ -1885,7 +1730,7 @@ prop_push_value_summary(search_tool_t *tool, detail_prop_t *node, arena_t *arena
       } else {
         result = unreal_uobject_push_full_name(obj, arena);
       }
-    } else if (fprop_class_is(prop, globals.unreal.struct_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
       fprop_struct_t *sp = (fprop_struct_t *)prop;
 
       if (fprop_struct_is(prop, globals.unreal.vector) || fprop_struct_is(prop, globals.unreal.vector_net_quantize) ||
@@ -1922,14 +1767,14 @@ prop_push_value_summary(search_tool_t *tool, detail_prop_t *node, arena_t *arena
         str_t hex = prop_push_hex_summary(arena, addr, node->size);
         result    = str_push_fmt(arena, "<no reflected fields> %.*s", STR_ARG(hex));
       }
-    } else if (fprop_class_is(prop, globals.unreal.array_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
       detail_tarray_view_t *array = (detail_tarray_view_t *)addr;
       result                      = str_push_fmt(arena, "Num=%d Max=%d Data=%p", array->num, array->max, array->data);
-    } else if (fprop_class_is(prop, globals.unreal.set_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
       result = STR_LIT("Num=?");
-    } else if (fprop_class_is(prop, globals.unreal.map_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
       result = STR_LIT("Num=?");
-    } else if (fprop_class_is(prop, globals.unreal.enum_prop)) {
+    } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
       fprop_enum_t *ep         = (fprop_enum_t *)prop;
       fprop_t      *underlying = ep->underlying_prop ? &ep->underlying_prop->base : NULL;
       if (!underlying) {
@@ -2203,30 +2048,30 @@ detail_prop_open_record(search_tool_t *tool, detail_prop_t *node)
   fprop_t *prop = node->prop;
   void    *addr = node->value_addr;
 
-  if (fprop_class_is(prop, globals.unreal.obj_prop) || fprop_class_is(prop, globals.unreal.class_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
     return detail_record_from_uobject(tool, *(uobject_t **)addr);
   }
 
-  if (fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
     detail_fweak_object_ptr_t weak = *(detail_fweak_object_ptr_t *)addr;
     return detail_record_from_uobject(tool, detail_weak_object_resolve(weak));
   }
 
-  if (fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
     detail_flazy_object_ptr_t *ptr = (detail_flazy_object_ptr_t *)addr;
     return detail_record_from_uobject(tool, detail_weak_object_resolve(ptr->weak));
   }
 
-  if (fprop_class_is(prop, globals.unreal.interface_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
     detail_fscript_interface_t *iface = (detail_fscript_interface_t *)addr;
     return detail_record_from_uobject(tool, iface->object);
   }
 
-  if (fprop_class_is(prop, globals.unreal.delegate_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
     return detail_script_delegate_open_record(tool, (detail_fscript_delegate_t *)addr);
   }
 
-  if (fprop_class_is(prop, globals.unreal.soft_obj_prop) || fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+  if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) || unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
     if (node->size >= (int32_t)sizeof(detail_fsoft_object_ptr_t)) {
       detail_fsoft_object_ptr_t *ptr = (detail_fsoft_object_ptr_t *)addr;
       return detail_record_from_uobject(tool, detail_weak_object_resolve(ptr->weak));
@@ -2270,7 +2115,7 @@ detail_prop_refresh_runtime_text(search_tool_t *tool, detail_tab_t *tab, detail_
   }
 
   if (node->prop) {
-    node->type = ui_text_span_make(tool->ctx, fprop_push_type_name(arena, node->prop));
+    node->type = ui_text_span_make(tool->ctx, unreal_fprop_push_type_name(node->prop, arena));
   }
 
   node->offset_text = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)node->offset));
@@ -2496,8 +2341,8 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
     pair->summary        = ui_text_span_make(tool->ctx, STR_LIT("{...}"));
 
     {
-      str_t key_type_name  = fprop_push_type_name(arena, map_prop->key_prop);
-      str_t val_type_name  = fprop_push_type_name(arena, map_prop->val_prop);
+      str_t key_type_name  = unreal_fprop_push_type_name(map_prop->key_prop, arena);
+      str_t val_type_name  = unreal_fprop_push_type_name(map_prop->val_prop, arena);
       str_t pair_type_name = str_push_fmt(arena, "TPair<%.*s, %.*s>", STR_ARG(key_type_name), STR_ARG(val_type_name));
 
       pair->name        = ui_text_span_make(tool->ctx, str_push_fmt(arena, "[%d]", slot_idx));
@@ -2689,15 +2534,15 @@ detail_prop_fill_value_direct(search_tool_t *tool, detail_tab_t *tab, detail_pro
 
   fprop_t *p = node->prop;
 
-  if (fprop_class_is(p, globals.unreal.array_prop)) {
+  if (unreal_fprop_class_is(p, globals.unreal.array_prop)) {
     detail_prop_fill_value_tarray_children(tool, tab, node, (fprop_array_t *)p, depth);
-  } else if (fprop_class_is(p, globals.unreal.set_prop)) {
+  } else if (unreal_fprop_class_is(p, globals.unreal.set_prop)) {
     detail_prop_fill_value_tset_children(tool, tab, node, (fprop_set_t *)p, depth);
-  } else if (fprop_class_is(p, globals.unreal.map_prop)) {
+  } else if (unreal_fprop_class_is(p, globals.unreal.map_prop)) {
     detail_prop_fill_value_tmap_children(tool, tab, node, (fprop_map_t *)p, depth);
-  } else if (fprop_class_is(p, globals.unreal.mcast_delegate_prop) || fprop_class_is(p, globals.unreal.mcast_inline_delegate_prop)) {
+  } else if (unreal_fprop_class_is(p, globals.unreal.mcast_delegate_prop) || unreal_fprop_class_is(p, globals.unreal.mcast_inline_delegate_prop)) {
     detail_prop_fill_value_mcast_delegate_children(tool, tab, node, depth);
-  } else if (fprop_class_is(p, globals.unreal.mcast_sparse_delegate_prop)) {
+  } else if (unreal_fprop_class_is(p, globals.unreal.mcast_sparse_delegate_prop)) {
     detail_prop_fill_value_sparse_mcast_delegate_children(tool, tab, node, depth);
   } else {
     node->summary        = ui_text_span_make(tool->ctx, prop_push_value_summary(tool, node, tab->value_arena));
@@ -3764,10 +3609,14 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
       nk_style_push_vec2(tool->ctx, &tool->ctx->style.tab.padding, nk_vec2(2.0f, 2.0f));
       nk_style_push_style_item(tool->ctx, &tool->ctx->style.window.fixed_background, UI_ITEM(UI_C_TRANSPARENT));
 
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_push_single_func_dump(tool, tab, tmp.arena);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
+        ufunc_call_open(tool, f->record, NULL);
       }
 
       ui_text_cell_t header_parts[] = {
@@ -4108,6 +3957,11 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
             };
 
             if (ui_detail_row(tool, &tab->func_name_grid, row, &func->maximized)) {
+              nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+              if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
+                ufunc_call_open(tool, func->record, NULL);
+              }
+
               ui_text_cell_t header_parts[] = {
                 UI_TEXT_CELL(tab->offset_col, UI_C_TEXT),
                 UI_TEXT_CELL(tab->size_col, UI_C_TEXT),
