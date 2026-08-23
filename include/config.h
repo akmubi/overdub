@@ -47,6 +47,11 @@
 #define CONFIG_NK_CONSOLE_PADDING              (4.0f)
 #define CONFIG_UI_CONSOLE_WINDOW_NAME          "Console"
 
+/* Lua */
+#define CONFIG_LUA_EXECUTION_LIMIT_US        (2 * 1000)
+#define CONFIG_LUA_HOOK_INSTRUCTION_COUNT    (1000)
+#define CONFIG_LUA_MEMORY_LIMIT              (16 * MB)
+
 /* manager */
 #define CONFIG_MOD_MANAGER_MAX_MODS          (128)
 #define CONFIG_MOD_CFG_MAX_STR_LEN           (1024)

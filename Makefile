@@ -1,9 +1,10 @@
 CC        := x86_64-w64-mingw32-gcc
 BUILD_DIR := build
 
-OBJ_DIR_DEBUG   := $(BUILD_DIR)/obj/debug
-OBJ_DIR_RELEASE := $(BUILD_DIR)/obj/release
-OBJ_DIR_TEST_UI := $(BUILD_DIR)/obj/test_ui
+OBJ_DIR_DEBUG    := $(BUILD_DIR)/obj/debug
+OBJ_DIR_RELEASE  := $(BUILD_DIR)/obj/release
+OBJ_DIR_TEST_UI  := $(BUILD_DIR)/obj/test_ui
+OBJ_DIR_TEST_LUA := $(BUILD_DIR)/obj/test_lua
 
 INC            := -I. -Iinclude -Ivendor
 CFLAGS_COMMON  := -std=c11 -Wall -Wextra -Wno-unused-function -DWIN32_LEAN_AND_MEAN -DCOBJMACROS $(INC)
@@ -17,7 +18,8 @@ LDFLAGS_DEBUG :=
 CFLAGS_RELEASE  := -O2 -DNDEBUG -flto -ffunction-sections -fdata-sections
 LDFLAGS_RELEASE := -Wl,--gc-sections -flto
 
-SRCS := $(shell find src -name '*.c')
+LUA_SRCS := $(filter-out vendor/lua/src/lua.c vendor/lua/src/luac.c,$(wildcard vendor/lua/src/*.c))
+SRCS     := $(shell find src -name '*.c') $(LUA_SRCS)
 
 SRCS_TEST_UI :=                     \
   src/arena.c                       \
@@ -59,11 +61,15 @@ SRCS_TEST_UI :=                     \
   test/test_ui_overview.c           \
   test/test_ui_style_configurator.c
 
-OBJS_DEBUG   := $(SRCS:%.c=$(OBJ_DIR_DEBUG)/%.o)
-OBJS_RELEASE := $(SRCS:%.c=$(OBJ_DIR_RELEASE)/%.o)
-OBJS_TEST_UI := $(SRCS_TEST_UI:%.c=$(OBJ_DIR_TEST_UI)/%.o)
+SRCS_TEST_UI  += $(LUA_SRCS)
+SRCS_TEST_LUA := src/lua_runtime.c test/test_lua_runtime.c $(LUA_SRCS)
 
-.PHONY: all debug release test_ui clean
+OBJS_DEBUG    := $(SRCS:%.c=$(OBJ_DIR_DEBUG)/%.o)
+OBJS_RELEASE  := $(SRCS:%.c=$(OBJ_DIR_RELEASE)/%.o)
+OBJS_TEST_UI  := $(SRCS_TEST_UI:%.c=$(OBJ_DIR_TEST_UI)/%.o)
+OBJS_TEST_LUA := $(SRCS_TEST_LUA:%.c=$(OBJ_DIR_TEST_LUA)/%.o)
+
+.PHONY: all debug release test_ui test_lua clean
 
 all: debug
 
@@ -81,7 +87,13 @@ test_ui: test/test_ui.c $(OBJS_TEST_UI) | $(BUILD_DIR)
 	@printf "RUN\t$(BUILD_DIR)/overdub_test_ui.exe\n"
 	@wine $(BUILD_DIR)/overdub_test_ui.exe
 
-$(BUILD_DIR) $(OBJ_DIR_DEBUG) $(OBJ_DIR_RELEASE) $(OBJ_DIR_TEST) $(OBJ_DIR_TEST_UI):
+test_lua: $(OBJS_TEST_LUA) | $(BUILD_DIR)
+	@printf "LINK\t$(BUILD_DIR)/overdub_test_lua.exe\n"
+	@$(CC) $(CFLAGS_COMMON) -g3 -O0 -DBUILD_TEST_LUA -o $(BUILD_DIR)/overdub_test_lua.exe $(OBJS_TEST_LUA)
+	@printf "RUN\t$(BUILD_DIR)/overdub_test_lua.exe\n"
+	@wine $(BUILD_DIR)/overdub_test_lua.exe
+
+$(BUILD_DIR) $(OBJ_DIR_DEBUG) $(OBJ_DIR_RELEASE) $(OBJ_DIR_TEST) $(OBJ_DIR_TEST_UI) $(OBJ_DIR_TEST_LUA):
 	@printf "MKDIR\t$@\n"
 	@mkdir -p $@
 
@@ -100,6 +112,11 @@ $(OBJ_DIR_TEST_UI)/%.o: %.c
 	@printf "CC\t$@\n"
 	@$(CC) $(CFLAGS_COMMON) -g3 -O0 -DBUILD_TEST_UI -MMD -MP -c $< -o $@
 
+$(OBJ_DIR_TEST_LUA)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@printf "CC\t$@\n"
+	@$(CC) $(CFLAGS_COMMON) -g3 -O0 -DBUILD_TEST_LUA -MMD -MP -c $< -o $@
+
 clean:
 	@printf "RM\t$(BUILD_DIR)\n"
 	@rm -rf $(BUILD_DIR)
@@ -107,4 +124,5 @@ clean:
 -include $(OBJS_DEBUG:.o=.d)
 -include $(OBJS_RELEASE:.o=.d)
 -include $(OBJS_TEST_UI:.o=.d)
+-include $(OBJS_TEST_LUA:.o=.d)
 

@@ -2,6 +2,7 @@
 #define UI_CONSOLE_H
 
 #include "input.h"
+#include "lua_runtime.h"
 #include "log.h"
 #include "mod_manager.h"
 #include "str.h"
@@ -75,6 +76,8 @@ struct ui_console_cfg_s {
 
 typedef struct ui_console_s ui_console_t;
 struct ui_console_s {
+  lua_runtime_t lua;
+
   ui_console_line_t *lines;
   uint8_t           *line_text_storage;
   int                line_count;

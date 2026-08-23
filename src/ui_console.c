@@ -264,6 +264,8 @@ ui_console_init(ui_console_t *console, arena_t *arena)
   console->focus_input       = false;
   console->inited            = true;
   console->closed            = true;
+
+  lua_runtime_init(&console->lua);
 }
 
 bool
@@ -370,8 +372,9 @@ ui_console_execute_builtin(ui_console_t *console, mod_manager_t *mod_manager, st
   (void)cmd_args;
 
   if (str_equal(cmd_name, STR_LIT("help"), STR_CMP_FLAG_IGNORE_CASE)) {
-    CONSOLE_INFO("Built-in commands:");
-    CONSOLE_INFO("  help - List available commands");
+    CONSOLE_INFO("Overdub commands:");
+    CONSOLE_INFO("  :help - List available commands");
+    CONSOLE_INFO("Enter Lua expressions or statements without a prefix.");
 
     for (int i = 0; i < mod_manager->mod_order.count; ++i) {
       mod_handle_t h = mod_manager->mod_order.runtime[i];
@@ -380,7 +383,7 @@ ui_console_execute_builtin(ui_console_t *console, mod_manager_t *mod_manager, st
         CONSOLE_INFO("Commands provided by '%.*s':", STR_ARG(m->manifest.info.name));
         for (int i = 0; i < m->dll.command_count; ++i) {
           mod_cmd_t *cmd = &m->dll.commands[i];
-          CONSOLE_INFO("  %.*s - %.*s", STR_ARG(cmd->name), STR_ARG(cmd->description));
+          CONSOLE_INFO("  :%.*s - %.*s", STR_ARG(cmd->name), STR_ARG(cmd->description));
         }
       }
     }
@@ -399,7 +402,18 @@ ui_console_execute(ui_console_t *console, mod_manager_t *mod_manager, str_t inpu
   }
 
   ui_console_push_history(console, input);
-  CONSOLE_INFO("> %.*s", STR_ARG(input));
+  CONSOLE_INFO("%s %.*s", input.data[0] == ':' ? ">" : "lua>", STR_ARG(input));
+
+  if (input.data[0] != ':') {
+    lua_runtime_execute(&console->lua, input);
+    return;
+  }
+
+  input = str_trim_space(str_slice(input, 1, input.len));
+  if (str_is_empty(input)) {
+    CONSOLE_ERROR("Missing Overdub command after ':'. Type ':help' to list available commands.");
+    return;
+  }
 
   str_t cmd_name = input;
   str_t cmd_args = {0};
@@ -418,7 +432,7 @@ ui_console_execute(ui_console_t *console, mod_manager_t *mod_manager, str_t inpu
     return;
   }
 
-  CONSOLE_ERROR("Unknown command '%.*s'. Type 'help' to list available commands.", STR_ARG(cmd_name));
+  CONSOLE_ERROR("Unknown Overdub command ':%.*s'. Type ':help' to list available commands.", STR_ARG(cmd_name));
 }
 
 static void
