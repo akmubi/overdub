@@ -10,9 +10,10 @@
 
 #include <string.h>
 
-#define CFG_DISABLE_TUTORIALS "disable-tutorials"
-#define CFG_RESTORE_JUKEBOX   "restore-jukebox-state"
-#define MOD_ID                "tweaks"
+#define CFG_DISABLE_TUTORIALS    "disable-tutorials"
+#define CFG_RESTORE_JUKEBOX      "restore-jukebox-state"
+#define CFG_DEBUG_WIDGET_KEYBIND "debug-widget-keybind"
+#define MOD_ID                   "tweaks"
 
 typedef enum {
   JBOX_PLAYBACK_STOPPED = 0,
@@ -154,6 +155,7 @@ typedef struct tweaks_cfg_s tweaks_cfg_t;
 struct tweaks_cfg_s {
   mod_cfg_handle_t disable_tutorials_h;
   mod_cfg_handle_t restore_jbox_h;
+  mod_cfg_handle_t debug_widget_keybind_h;
 };
 
 typedef struct tweaks_s tweaks_t;
@@ -329,8 +331,9 @@ tweaks_init(const mod_host_api_t *host, mod_handle_t h)
   tweaks->perm = mod_arena_handle_resolve(host->get_perm(h));
   ASSERT(tweaks->perm != NULL);
 
-  tweaks->cfg.disable_tutorials_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));
-  tweaks->cfg.restore_jbox_h      = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_RESTORE_JUKEBOX));
+  tweaks->cfg.disable_tutorials_h    = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));
+  tweaks->cfg.restore_jbox_h         = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_RESTORE_JUKEBOX));
+  tweaks->cfg.debug_widget_keybind_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DEBUG_WIDGET_KEYBIND));
 
   void *jbox_play_music_addr = NULL;
   host->sigscan("JukeboxPlayMusic", "48 89 5C 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 4C 8B F2 48 8B F9", 0, 0, NULL, &jbox_play_music_addr);
@@ -481,6 +484,26 @@ tweaks_tick(mod_handle_t h, float delta)
       }
     }
   }
+
+  if (keybind_is_pressed(mod_cfg_get_keybind(&globals.mod_manager, tweaks->cfg.debug_widget_keybind_h))) {
+    static uclass_t *debug_cls  = NULL;
+    static ufunc_t  *debug_show = NULL;
+
+    if (!debug_cls || !unreal_uobject_is_valid((uobject_t *)debug_cls)) {
+      debug_cls = unreal_uclass_find(STR_LIT("DebugWidgetSelect_UI_C"), false, true);
+    }
+
+    if (!debug_show || !unreal_uobject_is_valid((uobject_t *)debug_show)) {
+      debug_show = (ufunc_t *)unreal_uobject_find_by_full_name(globals.unreal.core_func, STR_LIT("/Script/Hibiki.HbkDebugSelectWidget.Show"));
+    }
+
+    if (debug_cls && debug_show) {
+      uobject_t *debug = unreal_uobject_find_first_of(debug_cls);
+      if (debug) {
+        unreal_process_event(debug, debug_show, NULL);
+      }
+    }
+  }
 }
 
 void
@@ -513,6 +536,19 @@ register_builtin_tweaks(mod_manager_t *manager)
             },
         },
     },
+    {
+      .type        = MOD_OPTION_KEYBIND,
+      .id          = STR_CLIT(CFG_DEBUG_WIDGET_KEYBIND),
+      .label       = STR_CLIT("Open Debug Widget"),
+      .description = STR_CLIT("Opens Debug Widget that is inaccessible by default."),
+      .val =
+        {
+          .keybind =
+            {
+              .default_val = keybind_parse(STR_LIT("Gamepad_LeftThumbstick+Gamepad_RightShoulder"), KEYBIND_NULL),
+            },
+        },
+    }
   };
 
   mod_manifest_t manifest = {
