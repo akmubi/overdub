@@ -10,10 +10,11 @@
 
 #include <string.h>
 
-#define CFG_DISABLE_TUTORIALS    "disable-tutorials"
-#define CFG_RESTORE_JUKEBOX      "restore-jukebox-state"
-#define CFG_DEBUG_WIDGET_KEYBIND "debug-widget-keybind"
-#define MOD_ID                   "tweaks"
+#define CFG_DISABLE_TUTORIALS     "disable-tutorials"
+#define CFG_RESTORE_JUKEBOX       "restore-jukebox-state"
+#define CFG_DEBUG_WIDGET_KEYBIND  "debug-widget-keybind"
+#define CFG_ENABLE_INFINITE_JUMPS "enable-infinite-jumps"
+#define MOD_ID                    "tweaks"
 
 typedef enum {
   JBOX_PLAYBACK_STOPPED = 0,
@@ -156,6 +157,7 @@ struct tweaks_cfg_s {
   mod_cfg_handle_t disable_tutorials_h;
   mod_cfg_handle_t restore_jbox_h;
   mod_cfg_handle_t debug_widget_keybind_h;
+  mod_cfg_handle_t enable_infinite_jumps_h;
 };
 
 typedef struct tweaks_s tweaks_t;
@@ -331,9 +333,11 @@ tweaks_init(const mod_host_api_t *host, mod_handle_t h)
   tweaks->perm = mod_arena_handle_resolve(host->get_perm(h));
   ASSERT(tweaks->perm != NULL);
 
-  tweaks->cfg.disable_tutorials_h    = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));
-  tweaks->cfg.restore_jbox_h         = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_RESTORE_JUKEBOX));
-  tweaks->cfg.debug_widget_keybind_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DEBUG_WIDGET_KEYBIND));
+  tweaks->cfg.disable_tutorials_h     = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));
+  tweaks->cfg.restore_jbox_h          = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_RESTORE_JUKEBOX));
+  tweaks->cfg.debug_widget_keybind_h  = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DEBUG_WIDGET_KEYBIND));
+  tweaks->cfg.enable_infinite_jumps_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_ENABLE_INFINITE_JUMPS));
+
 
   void *jbox_play_music_addr = NULL;
   host->sigscan("JukeboxPlayMusic", "48 89 5C 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 4C 8B F2 48 8B F9", 0, 0, NULL, &jbox_play_music_addr);
@@ -381,6 +385,13 @@ tweaks_process_event_pre(mod_handle_t h, uobject_t *self, ufunc_t *func, void *p
 
   if (should_disable_tutorials(tweaks) && ufunc_is(func, STR_LIT("WidgetAnimationEvt_OpenAnimation_K2Node_WidgetAnimationEvent"))) {
     should_consume = true;
+  }
+
+  if (mod_cfg_get_bool(&globals.mod_manager, tweaks->cfg.enable_infinite_jumps_h)) {
+    if (func && unreal_fname_match_text(func->name, STR_LIT("CanJumpInternal"), false, true)) {
+      *((uint8_t *)params) = 1;
+      should_consume = true;
+    }
   }
 
   return should_consume;
@@ -546,6 +557,19 @@ register_builtin_tweaks(mod_manager_t *manager)
           .keybind =
             {
               .default_val = keybind_parse(STR_LIT("Gamepad_LeftThumbstick+Gamepad_RightShoulder"), KEYBIND_NULL),
+            },
+        },
+    },
+    {
+      .type        = MOD_OPTION_BOOL,
+      .id          = STR_CLIT(CFG_ENABLE_INFINITE_JUMPS),
+      .label       = STR_CLIT("Enable infinite jumps"),
+      .description = STR_CLIT("Jump as high as you can, lol"),
+      .val =
+        {
+          .boolean =
+            {
+              .default_val = false,
             },
         },
     }
