@@ -363,7 +363,14 @@ io_dispatcher_mount_hook(void *self, fio_status_t *st, fio_env_t *env, fguid_t *
     globals.io_dispatcher = self;
   }
 
-  fio_status_t *ret = io_dispatcher_mount_real(self, st, env, guid, key);
+  fio_status_t *ret = st;
+  if (unreal_is_pak_only_mount_active()) {
+    mem_zero(st, sizeof(*st));
+    LOG_DEBUG("Skipping IoStore mount: the .pak has no complete .utoc/.ucas pair");
+  } else {
+    ret = io_dispatcher_mount_real(self, st, env, guid, key);
+  }
+
   tmp_arena_t   tmp = scratch_begin(NULL);
   {
     str_t path_str = str_from_str16(tmp.arena, str16_make(env->path.data, env->path.len));
@@ -376,6 +383,13 @@ io_dispatcher_mount_hook(void *self, fio_status_t *st, fio_env_t *env, fguid_t *
   }
   scratch_end(tmp);
   return ret;
+}
+
+bool __fastcall
+pak_precacher_add_new_block_hook(void *self)
+{
+  *((uint8_t *)self + 0x2C0) = 0;
+  return pak_precacher_add_new_block_real(self);
 }
 
 void __fastcall
@@ -542,11 +556,4 @@ d3d12_viewport_init_hook(void *self)
   if (queue) {
     nk_d3d12_set_command_queue(queue);
   }
-}
-
-void __fastcall
-init_gameplay_tag_manager_hook(void)
-{
-  LOG_DEBUG("UGameplayTagsManager::InitializeManager");
-  init_gameplay_tag_manager_real();
 }

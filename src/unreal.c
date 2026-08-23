@@ -1703,6 +1703,14 @@ unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t
   return result;
 }
 
+static THREAD_LOCAL int g_pak_only_mount_depth = 0;
+
+bool
+unreal_is_pak_only_mount_active(void)
+{
+  return g_pak_only_mount_depth > 0;
+}
+
 bool
 unreal_mount_pak(str_t file_path, int order)
 {
@@ -1719,19 +1727,31 @@ unreal_mount_pak(str_t file_path, int order)
     }
 
     if (file_exists(abs_file_path)) {
+      str_t archive_base = path_trim_ext(abs_file_path);
+      str_t utoc_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".utoc"));
+      str_t ucas_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".ucas"));
+      bool  pak_only     = !file_exists(utoc_path) || !file_exists(ucas_path);
+
       /* if absolute path can be reduced to relative path - do it */
       str_t mount_file_path = abs_file_path;
       str_t rel_file_path   = STR_NULL;
-      if (path_make_relative(file_path, globals.game_dir, &rel_file_path)) {
+      if (path_make_relative(abs_file_path, globals.game_dir, &rel_file_path)) {
         mount_file_path = rel_file_path;
       }
 
       str16_t mount_file_path16 = str16_from_str(tmp.arena, mount_file_path);
       if (!str16_is_empty(mount_file_path16)) {
 #if !defined BUILD_TEST_UI
+        if (pak_only) {
+          g_pak_only_mount_depth += 1;
+        }
         result = pak_file_mount(globals.pak_file, mount_file_path16.data, order, NULL, true);
+        if (pak_only) {
+          g_pak_only_mount_depth -= 1;
+        }
 #else
         (void)order;
+        (void)pak_only;
 #endif
       }
     }
@@ -1765,7 +1785,7 @@ unreal_mount_iostore(str_t file_path, int order)
       /* if absolute path can be reduced to relative path - do it */
       str_t mount_file_path = abs_file_path;
       str_t rel_file_path   = STR_NULL;
-      if (path_make_relative(file_path, globals.game_dir, &rel_file_path)) {
+      if (path_make_relative(abs_file_path, globals.game_dir, &rel_file_path)) {
         mount_file_path = rel_file_path;
       }
 

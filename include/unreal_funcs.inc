@@ -28,6 +28,7 @@ UE_FUNC_NORMAL(request_gameplay_tag, fgameplay_tag_t *, ugameplay_tags_manager_t
 #endif
 
 UE_FUNC_HOOKED(pak_file_mount, bool, void *self, const wchar_t *pak_filename, int pak_order, const wchar_t *path, bool load_index)
+UE_FUNC_HOOKED(pak_precacher_add_new_block, bool, void *self)
 UE_FUNC_HOOKED(io_dispatcher_mount, fio_status_t *, void *self, fio_status_t *status, fio_env_t *env, fguid_t *guid, faes_key_t *key)
 UE_FUNC_HOOKED(game_engine_tick, void, void *self, float delta, bool idle_mode);
 UE_FUNC_HOOKED(process_event, void, uobject_t *self, ufunc_t *func, void *params)
@@ -43,6 +44,5 @@ UE_FUNC_HOOKED(process_key_up_event, bool, void *self, fkey_event_t key_event);
 UE_FUNC_HOOKED(process_analog_input_event, bool, void *self, fanalog_input_event_t analog_input_event);
 UE_FUNC_HOOKED(process_app_activation_event, bool, void *self, bool app_activated);
 UE_FUNC_HOOKED(d3d12_viewport_init, void, void *self);
-UE_FUNC_HOOKED(init_gameplay_tag_manager, void, void);
 
 #undef UE_FUNC_HOOKED

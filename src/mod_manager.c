@@ -3101,7 +3101,7 @@ mod_manager_mount_assets(mod_manager_t *manager)
         str_t path = str_list_join(tmp.arena, path_parts, STR_NULL, STR_LIT("/"), STR_NULL);
 
         if (!unreal_mount_pak(path, asset->priority)) {
-          err_msg_set(&asset->last_error, STR_LIT("failed to mount .pak, .utoc and .ucas files"));
+          err_msg_set(&asset->last_error, STR_LIT("failed to mount .pak file"));
           asset->state = MOD_ASSET_STATE_ERROR;
         } else {
           asset->state = MOD_ASSET_STATE_MOUNTED;

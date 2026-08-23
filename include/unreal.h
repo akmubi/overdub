@@ -3153,6 +3153,9 @@ uclass_t *
 unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
 bool
+unreal_is_pak_only_mount_active(void);
+
+bool
 unreal_mount_pak(str_t file_path, int order);
 bool
 unreal_mount_iostore(str_t file_path, int order);
