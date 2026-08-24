@@ -316,6 +316,37 @@ DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
   return TRUE;
 }
 
+static bool
+aes_key_is_zero(const faes_key_t *key)
+{
+  if (!key) {
+    return true;
+  }
+
+  for (int i = 0; i < COUNTOF(key->key); ++i) {
+    if (key->key[i] != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void
+dump_asset_aes_key(const faes_key_t *key)
+{
+  static bool dumped = false;
+  if (!dumped) {
+    if (!aes_key_is_zero(key)) {
+      tmp_arena_t tmp = scratch_begin(NULL);
+      {
+        LOG_INFO("Asset AES key: 0x%.*s", STR_ARG(str_push_hex(tmp.arena, (void *)key->key, sizeof(key->key))));
+      }
+      scratch_end(tmp);
+      dumped = true;
+    }
+  }
+}
+
 /* ===================================================== HOOKS ====================================================== */
 
 bool __fastcall
@@ -332,12 +363,23 @@ pak_file_mount_hook(void *self, const wchar_t *pak_filename, int pak_order, cons
     str_t pak_filename_str = str_from_str16(tmp.arena, str16_from_wstr(pak_filename));
     str_t path_str         = str_from_str16(tmp.arena, str16_from_wstr(path));
 
+    bool pak_only = unreal_pak_is_standalone(pak_filename_str);
+    if (pak_only && pak_order < CONFIG_MOD_ASSET_BASE_PRIORITY) {
+      pak_order = CONFIG_MOD_ASSET_BASE_PRIORITY;
+    }
+
     LOG_DEBUG("Pak filename: %.*s", STR_ARG(pak_filename_str));
     LOG_DEBUG("Pak order:    %u", pak_order);
     LOG_DEBUG("Path:         %.*s", STR_ARG(path_str));
     LOG_DEBUG("Load index:   %d", load_index);
 
+    if (pak_only) {
+      unreal_pak_only_mount_push();
+    }
     result = pak_file_mount_real(self, pak_filename, pak_order, path, load_index);
+    if (pak_only) {
+      unreal_pak_only_mount_pop();
+    }
     LOG_DEBUG("OK:           %s", result ? "true" : "false");
     LOG_DEBUG("===> PAK MOUNT (END)");
   }
@@ -369,6 +411,10 @@ io_dispatcher_mount_hook(void *self, fio_status_t *st, fio_env_t *env, fguid_t *
     LOG_DEBUG("Skipping IoStore mount: the .pak has no complete .utoc/.ucas pair");
   } else {
     ret = io_dispatcher_mount_real(self, st, env, guid, key);
+
+    if (ret && ret->err_code == IO_ERROR_OK) {
+      dump_asset_aes_key(key);
+    }
   }
 
   tmp_arena_t   tmp = scratch_begin(NULL);

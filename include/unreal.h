@@ -3153,6 +3153,12 @@ uclass_t *
 unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
 bool
+unreal_pak_is_standalone(str_t file_path);
+void
+unreal_pak_only_mount_push(void);
+void
+unreal_pak_only_mount_pop(void);
+bool
 unreal_is_pak_only_mount_active(void);
 
 bool

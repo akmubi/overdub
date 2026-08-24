@@ -1706,6 +1706,42 @@ unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t
 static THREAD_LOCAL int g_pak_only_mount_depth = 0;
 
 bool
+unreal_pak_is_standalone(str_t file_path)
+{
+  bool        result = false;
+  tmp_arena_t tmp    = scratch_begin(NULL);
+  {
+    str_t abs_file_path = file_path;
+    if (!path_is_abs(file_path)) {
+      abs_file_path = path_join(tmp.arena, globals.game_dir, file_path);
+    }
+
+    if (file_exists(abs_file_path)) {
+      str_t archive_base = path_trim_ext(abs_file_path);
+      str_t utoc_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".utoc"));
+      str_t ucas_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".ucas"));
+
+      result = !file_exists(utoc_path) || !file_exists(ucas_path);
+    }
+  }
+  scratch_end(tmp);
+  return result;
+}
+
+void
+unreal_pak_only_mount_push(void)
+{
+  g_pak_only_mount_depth += 1;
+}
+
+void
+unreal_pak_only_mount_pop(void)
+{
+  ASSERT(g_pak_only_mount_depth > 0);
+  g_pak_only_mount_depth -= 1;
+}
+
+bool
 unreal_is_pak_only_mount_active(void)
 {
   return g_pak_only_mount_depth > 0;
@@ -1727,10 +1763,7 @@ unreal_mount_pak(str_t file_path, int order)
     }
 
     if (file_exists(abs_file_path)) {
-      str_t archive_base = path_trim_ext(abs_file_path);
-      str_t utoc_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".utoc"));
-      str_t ucas_path    = str_push_concat(tmp.arena, archive_base, STR_LIT(".ucas"));
-      bool  pak_only     = !file_exists(utoc_path) || !file_exists(ucas_path);
+      bool pak_only  = unreal_pak_is_standalone(abs_file_path);
 
       /* if absolute path can be reduced to relative path - do it */
       str_t mount_file_path = abs_file_path;
@@ -1743,11 +1776,11 @@ unreal_mount_pak(str_t file_path, int order)
       if (!str16_is_empty(mount_file_path16)) {
 #if !defined BUILD_TEST_UI
         if (pak_only) {
-          g_pak_only_mount_depth += 1;
+          unreal_pak_only_mount_push();
         }
         result = pak_file_mount(globals.pak_file, mount_file_path16.data, order, NULL, true);
         if (pak_only) {
-          g_pak_only_mount_depth -= 1;
+          unreal_pak_only_mount_pop();
         }
 #else
         (void)order;
