@@ -1107,13 +1107,14 @@ trace_save(trace_tool_t *tool)
 static void
 trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
 {
+  static struct nk_rect last_window_bounds = {0};
   struct nk_context *ctx  = tool->ctx;
   const char        *name = "ufunction_tracer";
 
   if (tool->ui.closed) {
     trace_filter_dialog_close(tool);
-    if (!nk_window_is_closed(ctx, name)) {
-      nk_window_close(ctx, name);
+    if (!nk_window_is_hidden(ctx, name)) {
+      nk_window_show(ctx, name, NK_HIDDEN);
     }
     return;
   }
@@ -1121,12 +1122,25 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
   nk_window_set_maximize_bounds(ctx, nk_rect(0.0f, 0.0f, (float)vw, (float)vh));
 
   nk_flags flags =
-    NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MAXIMIZABLE;
+    NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MAXIMIZABLE | NK_WINDOW_CLOSE_BUTTON_HIDES;
 
   char title[256];
   stbsp_snprintf(title, sizeof(title), "UFunction Tracer - %s - %u calls", tool->capturing ? "capturing" : "stopped", tool->call_count);
 
-  if (nk_begin_titled(ctx, name, title, nk_rect(130.0f, 90.0f, 900.0f, 650.0f), flags)) {
+  const float min_w = 900.0f;
+  const float min_h = 650.0f;
+
+  if (last_window_bounds.x == 0 && last_window_bounds.y == 0 && last_window_bounds.w == 0 && last_window_bounds.h == 0) {
+    last_window_bounds = (struct nk_rect){
+      .x = 130.0f,
+      .y = 90.0f,
+      .w = min_w,
+      .h = min_h
+    };
+  }
+
+  if (nk_begin_titled(ctx, name, title, last_window_bounds, flags)) {
+    last_window_bounds = nk_window_get_bounds(ctx);
     nk_layout_row_begin(ctx, NK_DYNAMIC, 24.0f, 5);
     {
       nk_layout_row_push(ctx, 0.2f);
@@ -1256,7 +1270,7 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
   }
   nk_end(ctx);
 
-  if (nk_window_is_closed(ctx, name)) {
+  if (nk_window_is_hidden(ctx, name)) {
     tool->ui.closed = true;
     trace_filter_dialog_close(tool);
   }

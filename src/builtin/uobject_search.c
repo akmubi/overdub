@@ -116,14 +116,15 @@ ui_uobject_row(struct nk_context *ctx, struct nk_grid *grid, ui_text_cell_t type
 static void
 draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
 {
+  static struct nk_rect last_window_bounds = {0};
   struct nk_context *ctx = tool->ctx;
   ASSERT(ctx != NULL);
 
   const char *name = "uobject_search";
 
   if (tool->ui.closed) {
-    if (!nk_window_is_closed(ctx, name)) {
-      nk_window_close(ctx, name);
+    if (!nk_window_is_hidden(ctx, name)) {
+      nk_window_show(ctx, name, NK_HIDDEN);
     }
     return;
   }
@@ -131,7 +132,7 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
   nk_window_set_maximize_bounds(ctx, nk_rect(0.0f, 0.0f, (float)vw, (float)vh));
 
   nk_flags flags =
-    NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MAXIMIZABLE;
+    NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MAXIMIZABLE | NK_WINDOW_CLOSE_BUTTON_HIDES;
 
   static char title[256] = {0};
 
@@ -157,8 +158,19 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
 
   const float min_w = 700.0f;
   const float min_h = 500.0f;
+  
+  if (last_window_bounds.x == 0 && last_window_bounds.y == 0 && last_window_bounds.w == 0 && last_window_bounds.h == 0) {
+    last_window_bounds = (struct nk_rect){
+      .x = 120.0f,
+      .y = 80.0f,
+      .w = min_w,
+      .h = min_h
+    };
+  }
 
-  if (nk_begin_titled(ctx, name, title, nk_rect(120.0f, 80.0f, min_w, min_h), flags)) {
+  if (nk_begin_titled(ctx, name, title, last_window_bounds, flags)) {
+    last_window_bounds = nk_window_get_bounds(ctx);
+
     float search_h  = 28.0f;
     float filters_h = 20.0f;
     float gap_y     = ctx->style.window.spacing.y;
@@ -439,7 +451,7 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
   }
   nk_end(ctx);
 
-  if (nk_window_is_closed(ctx, name)) {
+  if (nk_window_is_hidden(ctx, name)) {
     tool->ui.closed = true;
   }
 }
