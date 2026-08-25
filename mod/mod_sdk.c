@@ -563,22 +563,17 @@ mod_keybind_is_down(keybind_t bind)
 }
 
 bool
-mod_keybind_was_down(keybind_t bind)
-{
-  const mod_host_api_t *host = mod_sdk_host();
-  return (host) ? host->keybind_was_down(bind) : false;
-}
-
-bool
 mod_keybind_is_pressed(keybind_t bind)
 {
-  return mod_keybind_is_down(bind) && !mod_keybind_was_down(bind);
+  const mod_host_api_t *host = mod_sdk_host();
+  return (host) ? host->keybind_is_pressed(bind) : false;
 }
 
 bool
 mod_keybind_is_released(keybind_t bind)
 {
-  return !mod_keybind_is_down(bind) && mod_keybind_was_down(bind);
+  const mod_host_api_t *host = mod_sdk_host();
+  return (host) ? host->keybind_is_released(bind) : false;
 }
 
 bool
@@ -589,16 +584,6 @@ mod_keybind_str_is_down(str_t keybind_str)
     return false;
   }
   return mod_keybind_is_down(bind);
-}
-
-bool
-mod_keybind_str_was_down(str_t keybind_str)
-{
-  keybind_t bind = {0};
-  if (!mod_keybind_parse(keybind_str, &bind)) {
-    return false;
-  }
-  return mod_keybind_was_down(bind);
 }
 
 bool
@@ -621,17 +606,39 @@ mod_keybind_str_is_released(str_t keybind_str)
   return mod_keybind_is_released(bind);
 }
 
-bool
-mod_input_event_covers_keybind(input_event_t *ev, keybind_t bind)
+static bool
+mod_keybind_key_matches_event(input_key_kind_t bind_key, input_key_kind_t event_key)
 {
-  bool has_event_key = false;
+  switch (bind_key) {
+  case INPUT_KEY_CTRL:  return event_key == INPUT_KEY_LEFT_CTRL  || event_key == INPUT_KEY_RIGHT_CTRL;
+  case INPUT_KEY_SHIFT: return event_key == INPUT_KEY_LEFT_SHIFT || event_key == INPUT_KEY_RIGHT_SHIFT;
+  case INPUT_KEY_ALT:   return event_key == INPUT_KEY_LEFT_ALT   || event_key == INPUT_KEY_RIGHT_ALT;
+  default:              return bind_key  == event_key;
+  }
+}
+
+bool
+mod_keybind_activated_by_event(keybind_t bind, input_event_t *ev)
+{
+  if (ev->kind != INPUT_EVENT_KEY_DOWN   &&
+      ev->kind != INPUT_EVENT_MOUSE_DOWN &&
+      ev->kind != INPUT_EVENT_MOUSE_DBLCLICK) {
+    return false;
+  }
+
+  if (ev->is_repeat) {
+    return false;
+  }
+
+  bool involved = false;
   for (int i = 0; i < bind.count; ++i) {
-    if (bind.keys[i] == ev->key) {
-      has_event_key = true;
+    if (mod_keybind_key_matches_event(bind.keys[i], ev->key)) {
+      involved = true;
       break;
     }
   }
-  return has_event_key;
+
+  return involved && mod_keybind_is_down(bind);
 }
 
 /* ========================================== HOOKING / SIGNATURE SCANNING ========================================== */

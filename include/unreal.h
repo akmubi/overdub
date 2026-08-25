@@ -5,6 +5,8 @@
 #include "str.h"
 #include "types.h"
 
+#define FNAME_NONE (fname_t){0}
+
 #define FNAME_MAX_BLOCK_BITS    13
 #define FNAME_BLOCK_OFFSET_BITS 16
 #define FNAME_MAX_BLOCKS        (1 << FNAME_MAX_BLOCK_BITS)

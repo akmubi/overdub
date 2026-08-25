@@ -335,9 +335,6 @@ mod_keybind_to_str(keybind_t bind, mod_arena_t arena);
 /* Returns whether the keybind is down in the current input state. */
 bool
 mod_keybind_is_down(keybind_t bind);
-/* Returns whether the keybind was down in the previous input state. */
-bool
-mod_keybind_was_down(keybind_t bind);
 /* Returns true on the frame a keybind changes from up to down. */
 bool
 mod_keybind_is_pressed(keybind_t bind);
@@ -347,9 +344,6 @@ mod_keybind_is_released(keybind_t bind);
 /* Parses a keybind string and checks its current state. Invalid strings return false. */
 bool
 mod_keybind_str_is_down(str_t keybind_str);
-/* Parses a keybind string and checks its previous state. Invalid strings return false. */
-bool
-mod_keybind_str_was_down(str_t keybind_str);
 /* Parses a keybind string and checks for an up to down transition. */
 bool
 mod_keybind_str_is_pressed(str_t keybind_str);
@@ -358,7 +352,7 @@ bool
 mod_keybind_str_is_released(str_t keybind_str);
 /* Returns whether the event key appears in the bind. It does not check event kind or other key states. */
 bool
-mod_input_event_covers_keybind(input_event_t *ev, keybind_t bind);
+mod_keybind_activated_by_event(keybind_t bind, input_event_t *ev);
 
 /* ========================================== HOOKING / SIGNATURE SCANNING ========================================== */
 

@@ -118,6 +118,11 @@ enum {
   INPUT_KEY_LEFT_ALT,
   INPUT_KEY_RIGHT_ALT,
 
+  /* keyboard: virtual modifiers (either left or right) */
+  INPUT_KEY_SHIFT,
+  INPUT_KEY_CTRL,
+  INPUT_KEY_ALT,
+
   /* keyboard: common */
   INPUT_KEY_SPACE,
   INPUT_KEY_ENTER,
@@ -209,6 +214,13 @@ struct input_event_s {
   float    analog_value;       // ANALOG only (trigger value range: 0.0 .. 1.0, stick value range: -1.0 .. 1.0)
 };
 
+typedef struct input_key_state_s input_key_state_t;
+struct input_key_state_s {
+  bool down;
+  bool pressed;
+  bool released;
+};
+
 #define KEYBIND_MAX_KEYS (10)
 #define KEYBIND_NULL     (keybind_t){.keys = {0}, .count = 0}
 
@@ -227,9 +239,18 @@ input_key_kind_t
 input_key_from_str(str_t name);
 
 bool
-input_key_is_down(input_key_kind_t kind);
+input_key_is_down(input_key_kind_t key);
 bool
-input_key_was_down(input_key_kind_t kind);
+input_key_is_pressed(input_key_kind_t key);
+bool
+input_key_is_released(input_key_kind_t key);
+bool
+input_key_is_bindable(input_key_kind_t key);
+
+void
+input_key_lost_focus(void);
+void
+input_key_clear_transient_state(void);
 
 str_t
 input_key_to_str(input_key_kind_t key);
@@ -273,8 +294,6 @@ keybind_clear(keybind_t *bind);
 bool
 keybind_is_down(keybind_t bind);
 bool
-keybind_was_down(keybind_t bind);
-bool
 keybind_is_pressed(keybind_t bind);
 bool
 keybind_is_released(keybind_t bind);
@@ -283,12 +302,6 @@ static inline bool
 keybind_str_is_down(str_t keybind_str)
 {
   return keybind_is_down(keybind_parse(keybind_str, KEYBIND_NULL));
-}
-
-static inline bool
-keybind_str_was_down(str_t keybind_str)
-{
-  return keybind_was_down(keybind_parse(keybind_str, KEYBIND_NULL));
 }
 
 static inline bool
@@ -305,6 +318,6 @@ keybind_str_is_released(str_t keybind_str)
 
 /* NOTE: used for input events */
 bool
-input_event_covers_keybind(input_event_t *ev, keybind_t bind);
+keybind_activated_by_event(keybind_t bind, input_event_t *ev);
 
 #endif /* INPUT_H */

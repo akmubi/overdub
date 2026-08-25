@@ -144,6 +144,11 @@ enum {
   INPUT_KEY_LEFT_ALT,
   INPUT_KEY_RIGHT_ALT,
 
+  /* keyboard: virtual modifiers (either left or right) */
+  INPUT_KEY_SHIFT,
+  INPUT_KEY_CTRL,
+  INPUT_KEY_ALT,
+
   /* keyboard: common */
   INPUT_KEY_SPACE,
   INPUT_KEY_ENTER,
@@ -191,10 +196,10 @@ enum {
   INPUT_KEY_MOUSE_WHEEL_DOWN,
 
   /* gamepad: buttons */
-  INPUT_KEY_GAMEPAD_FACE_BOTTOM,   // A / cross
-  INPUT_KEY_GAMEPAD_FACE_RIGHT,    // B / circle
-  INPUT_KEY_GAMEPAD_FACE_LEFT,     // X / square
-  INPUT_KEY_GAMEPAD_FACE_TOP,      // Y / triangle
+  INPUT_KEY_GAMEPAD_FACE_BOTTOM, // A / cross
+  INPUT_KEY_GAMEPAD_FACE_RIGHT,  // B / circle
+  INPUT_KEY_GAMEPAD_FACE_LEFT,   // X / square
+  INPUT_KEY_GAMEPAD_FACE_TOP,    // Y / triangle
   INPUT_KEY_GAMEPAD_LB,
   INPUT_KEY_GAMEPAD_RB,
   INPUT_KEY_GAMEPAD_LT,
@@ -240,7 +245,7 @@ struct input_event_s {
 #ifdef __cplusplus
 #  define KEYBIND_NULL (keybind_t){}
 #else
-#  define KEYBIND_NULL (keybind_t){0}
+#  define KEYBIND_NULL (keybind_t){.keys = {0}, .count = 0}
 #endif
 
 typedef struct keybind_s keybind_t;
@@ -377,7 +382,7 @@ typedef void (MOD_CALL *mod_deinit_fn_t)(mod_t m);
 
 typedef void (MOD_CALL *mod_cmd_fn_t)(mod_t m, str_t name, str_t args, void *user);
 
-#define MOD_ABI_VERSION MAKE_VERSION(1, 0, 1)
+#define MOD_ABI_VERSION MAKE_VERSION(1, 1, 0)
 
 typedef struct mod_api_s mod_api_t;
 struct mod_api_s {
@@ -468,7 +473,8 @@ struct mod_host_api_s {
   uint64_t         (MOD_CALL *keybind_utf8_len)       (keybind_t bind);
   uint64_t         (MOD_CALL *keybind_utf8_write)     (keybind_t bind, void *buf, uint64_t cap);
   bool             (MOD_CALL *keybind_is_down)        (keybind_t bind);
-  bool             (MOD_CALL *keybind_was_down)       (keybind_t bind);
+  bool             (MOD_CALL *keybind_is_pressed)     (keybind_t bind);
+  bool             (MOD_CALL *keybind_is_released)    (keybind_t bind);
 
   /* UOBJECT CREATE/DELETE LISTENERS */
 
@@ -496,16 +502,7 @@ struct mod_host_api_s {
   uint64_t (MOD_CALL *get_frame_counter)(void);
   float    (MOD_CALL *get_fps)(void);
 };
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_add)                   == 0x1e8, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)                == 0x1f0, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, map_find)                  == 0x1f8, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object)        == 0x200, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, static_construct_object)   == 0x208, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, add_gameplay_tag)          == 0x210, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, check_gameplay_tag_exists) == 0x218, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, get_frame_counter)         == 0x220, "invalid host API offset");
-MOD_STATIC_ASSERT(offsetof(mod_host_api_t, get_fps)                   == 0x228, "invalid host API offset");
-MOD_STATIC_ASSERT(sizeof(mod_host_api_t)                              == 0x230, "invalid host API size");
+MOD_STATIC_ASSERT(sizeof(mod_host_api_t) == 0x238, "invalid host API size");
 
 #ifdef __cplusplus
 }
