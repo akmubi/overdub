@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name:    Build and package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: >
+          msbuild overdub.sln
+          /m
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:TreatWarningAsError=true
+          /warnAsError
+
+      - name:  Get version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+              throw "Could not determine release version"
+          }
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name:  Download latest hibiki-bootstrap
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force bootstrap | Out-Null
+
+          gh release download `
+            --repo akmubi/hibiki-bootstrap `
+            --pattern XAPOFX1_5.dll `
+            --pattern dsound.dll `
+            --dir bootstrap
+
+      - name:  Create packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package\steam | Out-Null
+          New-Item -ItemType Directory -Force package\epic  | Out-Null
+          New-Item -ItemType Directory -Force package\xbox  | Out-Null
+
+          Copy-Item build\overdub.dll package\steam\
+          Copy-Item bootstrap\XAPOFX1_5.dll package\steam\
+
+          Copy-Item build\overdub.dll package\epic\
+          Copy-Item bootstrap\XAPOFX1_5.dll package\epic\
+
+          Copy-Item build\overdub.dll package\xbox\
+          Copy-Item bootstrap\dsound.dll package\xbox\
+
+          Compress-Archive `
+            -Path package\steam\* `
+            -DestinationPath "overdub-$env:VERSION.steam.zip"
+
+          Compress-Archive `
+            -Path package\epic\* `
+            -DestinationPath "overdub-$env:VERSION.epic.zip"
+
+          Compress-Archive `
+            -Path package\xbox\* `
+            -DestinationPath "overdub-$env:VERSION.xbox.zip"
+
+      - name:  Upload release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" `
+            "overdub-$env:VERSION.steam.zip" `
+            "overdub-$env:VERSION.epic.zip" `
+            "overdub-$env:VERSION.xbox.zip" `
+            --clobber
