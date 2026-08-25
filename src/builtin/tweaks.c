@@ -526,65 +526,56 @@ register_builtin_tweaks(mod_manager_t *manager)
       .id          = STR_CLIT(CFG_DISABLE_TUTORIALS),
       .label       = STR_CLIT("Disable tutorial pop-ups"),
       .description = STR_CLIT("Prevents tutorial pop-ups from appearing"),
-      .val =
-        {
-          .boolean =
-            {
-              .default_val = true,
-            },
+      .val = {
+        .boolean = {
+          .default_val = true,
         },
+      },
     },
     {
       .type        = MOD_OPTION_BOOL,
       .id          = STR_CLIT(CFG_RESTORE_JUKEBOX),
       .label       = STR_CLIT("Remember jukebox playback"),
       .description = STR_CLIT("Restores the jukebox track, playback state, repeat mode, and shuffle setting after stage transitions and game restarts"),
-      .val =
-        {
-          .boolean =
-            {
-              .default_val = true,
-            },
+      .val = {
+        .boolean = {
+          .default_val = true,
         },
+      },
     },
     {
       .type        = MOD_OPTION_KEYBIND,
       .id          = STR_CLIT(CFG_DEBUG_WIDGET_KEYBIND),
       .label       = STR_CLIT("Open Debug Widget"),
       .description = STR_CLIT("Opens Debug Widget that is inaccessible by default."),
-      .val =
-        {
-          .keybind =
-            {
-              .default_val = keybind_parse(STR_LIT("Gamepad_LeftThumbstick+Gamepad_RightShoulder"), KEYBIND_NULL),
-            },
+      .val = {
+        .keybind = {
+          .default_val = keybind_parse(STR_LIT("Gamepad_LeftThumbstick+Gamepad_RightShoulder"), KEYBIND_NULL),
         },
+      },
     },
     {
       .type        = MOD_OPTION_BOOL,
       .id          = STR_CLIT(CFG_ENABLE_INFINITE_JUMPS),
       .label       = STR_CLIT("Enable infinite jumps"),
       .description = STR_CLIT("Jump as high as you can, lol"),
-      .val =
-        {
-          .boolean =
-            {
-              .default_val = false,
-            },
+      .val = {
+        .boolean = {
+          .default_val = false,
         },
+      },
     }
   };
 
   mod_manifest_t manifest = {
-    .info =
-      {
-        .id          = STR_CLIT(MOD_ID),
-        .name        = STR_CLIT("Tweaks"),
-        .author      = STR_CLIT("akmubi"),
-        .description = STR_CLIT("Quality-of-life tweaks"),
-        .kind        = MOD_KIND_MOD,
-        .version     = MAKE_VERSION(0, 1, 0),
-      },
+    .info = {
+      .id          = STR_CLIT(MOD_ID),
+      .name        = STR_CLIT("Tweaks"),
+      .author      = STR_CLIT("akmubi"),
+      .description = STR_CLIT("Quality-of-life tweaks"),
+      .kind        = MOD_KIND_MOD,
+      .version     = MAKE_VERSION(0, 1, 0),
+    },
     .options      = options,
     .option_count = COUNTOF(options),
   };

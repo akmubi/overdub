@@ -1,5 +1,10 @@
-#if defined(_MSC_VER)
-#  pragma warning(push, 0) /* disable all warnings */
+#include "types.h"
+
+#if COMPILER_MSVC
+#  pragma warning(push, 0)
+#elif COMPILER_GCC
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
 #define STB_SPRINTF_IMPLEMENTATION
@@ -97,6 +102,8 @@ nk_runtime_font_rasterize(const void           *ttf,
 #  include "nuklear/d3d11/nuklear_d3d11.c"
 #endif
 
-#if defined(_MSC_VER)
+#if COMPILER_MSVC
 #  pragma warning(pop)
+#elif COMPILER_GCC
+#  pragma GCC diagnostic pop
 #endif

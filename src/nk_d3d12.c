@@ -414,6 +414,8 @@ nk_d3d12_place_glyph(int width, int height, int *x, int *y)
 static const struct nk_font_glyph *
 nk_d3d12_rasterize_glyph(struct nk_font *font, struct nk_d3d12_font_data *font_data, nk_glyph_id id, float height)
 {
+  (void)font;
+
   if (font_data->dynamic_glyph_count == NK_D3D12_DYNAMIC_GLYPH_CAPACITY) {
     return NULL;
   }

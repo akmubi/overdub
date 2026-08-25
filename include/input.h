@@ -210,7 +210,7 @@ struct input_event_s {
 };
 
 #define KEYBIND_MAX_KEYS (10)
-#define KEYBIND_NULL     (keybind_t){0}
+#define KEYBIND_NULL     (keybind_t){.keys = {0}, .count = 0}
 
 typedef struct keybind_s keybind_t;
 struct keybind_s {
