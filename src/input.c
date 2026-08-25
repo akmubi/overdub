@@ -178,55 +178,60 @@ static input_key_map_entry_t g_key_map[INPUT_KEY_MAX] = {
 void
 input_key_map_init(void)
 {
-  MASSERT(globals.name_pool != NULL, "name pool is missing");
+  static bool map_inited = false;
+  if (!map_inited) {
+    MASSERT(globals.name_pool != NULL, "name pool is missing");
 
-  /* resolve each UE4 key name to its cmp_idx by scanning the name pool */
-  fname_entry_allocator_t *entries    = &globals.name_pool->entries;
-  uint32_t                 num_blocks = entries->current_block + 1;
+    /* resolve each UE4 key name to its cmp_idx by scanning the name pool */
+    fname_entry_allocator_t *entries    = &globals.name_pool->entries;
+    uint32_t                 num_blocks = entries->current_block + 1;
 
-  for (uint32_t block = 0; block < num_blocks && block < FNAME_MAX_BLOCKS; ++block) {
-    uint8_t *base = entries->blocks[block];
-    if (!base) {
-      continue;
-    }
-
-    uint32_t end_offset = (1u << FNAME_BLOCK_OFFSET_BITS) * 2;
-    if (block == entries->current_block) {
-      end_offset = entries->current_byte_cursor;
-    }
-
-    uint32_t byte_offset = 0;
-    while (byte_offset < end_offset) {
-      fname_entry_t *entry = (fname_entry_t *)(base + byte_offset);
-      uint16_t       len   = entry->header.len;
-
-      if (len > 0 && !entry->header.is_wide) {
-        for (int i = 0; i < COUNTOF(g_key_map); ++i) {
-          if (g_key_map[i].cmp_idx != 0) {
-            continue; // already resolved
-          }
-
-          str_t ue_name    = g_key_map[i].ue_name;
-          str_t entry_name = str_make(entry->name.ansi, (uint64_t)len);
-
-          if (str_equal(ue_name, entry_name, 0)) {
-            uint32_t cmp_idx     = (block << FNAME_BLOCK_OFFSET_BITS) | (byte_offset / 2);
-            g_key_map[i].cmp_idx = cmp_idx;
-
-            // LOG_DEBUG("%.*s: cmp_idx: %d, block: %d, byte_offset: %d", STR_ARG(ue_name), cmp_idx, block,
-            // byte_offset);
-            break;
-          }
-        }
+    for (uint32_t block = 0; block < num_blocks && block < FNAME_MAX_BLOCKS; ++block) {
+      uint8_t *base = entries->blocks[block];
+      if (!base) {
+        continue;
       }
 
-      /* advance to next entry: header (2 bytes) + payload, aligned to 2 */
-      uint32_t entry_size = sizeof(fname_entry_header_t);
+      uint32_t end_offset = (1u << FNAME_BLOCK_OFFSET_BITS) * 2;
+      if (block == entries->current_block) {
+        end_offset = entries->current_byte_cursor;
+      }
 
-      entry_size  += entry->header.is_wide ? (len * 2) : len;
-      entry_size   = ALIGN_UP(entry_size, 2);
-      byte_offset += entry_size;
+      uint32_t byte_offset = 0;
+      while (byte_offset < end_offset) {
+        fname_entry_t *entry = (fname_entry_t *)(base + byte_offset);
+        uint16_t       len   = entry->header.len;
+
+        if (len > 0 && !entry->header.is_wide) {
+          for (int i = 0; i < COUNTOF(g_key_map); ++i) {
+            if (g_key_map[i].cmp_idx != 0) {
+              continue; // already resolved
+            }
+
+            str_t ue_name    = g_key_map[i].ue_name;
+            str_t entry_name = str_make(entry->name.ansi, (uint64_t)len);
+
+            if (str_equal(ue_name, entry_name, 0)) {
+              uint32_t cmp_idx     = (block << FNAME_BLOCK_OFFSET_BITS) | (byte_offset / 2);
+              g_key_map[i].cmp_idx = cmp_idx;
+
+              // LOG_DEBUG("%.*s: cmp_idx: %d, block: %d, byte_offset: %d", STR_ARG(ue_name), cmp_idx, block,
+              // byte_offset);
+              break;
+            }
+          }
+        }
+
+        /* advance to next entry: header (2 bytes) + payload, aligned to 2 */
+        uint32_t entry_size = sizeof(fname_entry_header_t);
+
+        entry_size  += entry->header.is_wide ? (len * 2) : len;
+        entry_size   = ALIGN_UP(entry_size, 2);
+        byte_offset += entry_size;
+      }
     }
+
+    map_inited = true;
   }
 }
 

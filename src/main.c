@@ -268,7 +268,7 @@ loader_init(HINSTANCE inst)
   ui_manager_preinit(&globals.ui_manager, &globals.mod_manager, &globals.perm);
 
   hook_chain_init();
-  scan_user_module_signatures();
+  signatures_init();
 
   globals.listeners = ARENA_PUSH_ARRAY_ZERO(&globals.perm, uobject_listener_t, CONFIG_UOBJECT_ARRAY_MAX_LISTENERS);
   ASSERT(globals.listeners != NULL);
