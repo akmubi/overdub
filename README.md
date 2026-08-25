@@ -1,4 +1,7 @@
 # Overdub
+
+[![CI](https://github.com/akmubi/overdub/actions/workflows/ci.yml/badge.svg)](https://github.com/akmubi/overdub/actions/workflows/ci.yml)
+
 Overdub is a mod loader and in-game mod manager for Hi-Fi RUSH. It supports native code, Unreal assets, Blueprint actors, etc.
 
 ## Features
