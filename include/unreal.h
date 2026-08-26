@@ -3130,6 +3130,8 @@ uclass_t *
 unreal_uclass_find(str_t name, bool ignore_case, bool exact_match);
 uobject_t *
 unreal_uobject_find_first_of(uclass_t *cls);
+uobject_t *
+unreal_uobject_find_first_of_by_name(uclass_t *cls, str_t name, bool ignore_case, bool exact_match);
 uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name);
 uobject_t *
