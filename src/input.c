@@ -772,6 +772,11 @@ keybind_parse(str_t str, keybind_t default_val)
       return default_val;
     }
 
+    /* A separator must always be followed by another non-empty token. */
+    if (end < str.len && end + 1 == str.len) {
+      return default_val;
+    }
+
     if (result.count >= KEYBIND_MAX_KEYS) {
       return default_val;
     }
@@ -899,6 +904,12 @@ keybind_is_valid(keybind_t bind)
     if (bind.keys[i] == INPUT_KEY_NONE || bind.keys[i] >= INPUT_KEY_MAX) {
       return false;
     }
+
+    for (int j = 0; j < i; ++j) {
+      if (bind.keys[i] == bind.keys[j]) {
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -906,16 +917,19 @@ keybind_is_valid(keybind_t bind)
 bool
 keybind_equal(keybind_t a, keybind_t b)
 {
-  if (a.count != b.count) {
+  if (a.count != b.count || a.count > KEYBIND_MAX_KEYS) {
     return false;
   }
+
+  bool matched[KEYBIND_MAX_KEYS] = {0};
 
   for (int i = 0; i < a.count; ++i) {
     bool found = false;
 
     for (int j = 0; j < b.count; ++j) {
-      if (a.keys[i] == b.keys[j]) {
-        found = true;
+      if (!matched[j] && a.keys[i] == b.keys[j]) {
+        matched[j] = true;
+        found      = true;
         break;
       }
     }
