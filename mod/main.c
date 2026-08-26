@@ -1,9 +1,11 @@
 #include "mod_sdk.h"
+#include "mod_unreal.h"
 
 static bool
 mod_init(const mod_host_api_t *host, mod_t m)
 {
   mod_sdk_init(host, m);
+  unreal_cache_objects();
 
   MOD_LOG_INFO("Hello from example mod!!!");
   return true;
