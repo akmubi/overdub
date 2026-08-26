@@ -11,7 +11,7 @@
 
 #include "mod_manager.h"
 
-#define MOD_HOST_ABI_VERSION MAKE_VERSION(1, 0, 1)
+#define MOD_HOST_ABI_VERSION MAKE_VERSION(1, 1, 0)
 
 typedef struct host_tmp_arena_s host_tmp_arena_t;
 struct host_tmp_arena_s {
@@ -91,7 +91,8 @@ struct mod_host_api_s {
   uint64_t         (MOD_CALL *keybind_utf8_len)       (keybind_t bind);
   uint64_t         (MOD_CALL *keybind_utf8_write)     (keybind_t bind, void *buf, uint64_t cap);
   bool             (MOD_CALL *keybind_is_down)        (keybind_t bind);
-  bool             (MOD_CALL *keybind_was_down)       (keybind_t bind);
+  bool             (MOD_CALL *keybind_is_pressed)     (keybind_t bind);
+  bool             (MOD_CALL *keybind_is_released)    (keybind_t bind);
 
   /* UOBJECT CREATE/DELETE LISTENERS */
 
@@ -119,16 +120,7 @@ struct mod_host_api_s {
   uint64_t (MOD_CALL *get_frame_counter)(void);
   float    (MOD_CALL *get_fps)(void);
 };
-STATIC_ASSERT(offsetof(mod_host_api_t, map_add)                   == 0x1e8, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, map_remove)                == 0x1f0, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, map_find)                  == 0x1f8, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, static_load_object)        == 0x200, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, static_construct_object)   == 0x208, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, add_gameplay_tag)          == 0x210, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, check_gameplay_tag_exists) == 0x218, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, get_frame_counter)         == 0x220, "invalid host API offset");
-STATIC_ASSERT(offsetof(mod_host_api_t, get_fps)                   == 0x228, "invalid host API offset");
-STATIC_ASSERT(sizeof(mod_host_api_t)                              == 0x230, "invalid host API size");
+STATIC_ASSERT(sizeof(mod_host_api_t) == 0x238, "invalid host API size");
 
 const mod_host_api_t *
 mod_host_api_get(void);

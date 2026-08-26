@@ -628,7 +628,7 @@ feed_input(ui_manager_t *manager, input_event_t *ev)
     int down = (ev->kind == INPUT_EVENT_KEY_DOWN) ? 1 : 0;
 
     nk_input_key(ctx, NK_KEY_SHIFT, (ev->modifiers & INPUT_MOD_SHIFT) != 0);
-    nk_input_key(ctx, NK_KEY_CTRL, (ev->modifiers & INPUT_MOD_CTRL) != 0);
+    nk_input_key(ctx, NK_KEY_CTRL,  (ev->modifiers & INPUT_MOD_CTRL) != 0);
 
     switch (ev->key) {
     case INPUT_KEY_BACKSPACE: {
@@ -752,14 +752,14 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
     return true;
   }
 
-  if (input_event_covers_keybind(ev, manager->mod_manager->cfg.overlay_toggle)) {
+  if (keybind_activated_by_event(manager->mod_manager->cfg.overlay_toggle, ev)) {
     if (keybind_is_pressed(manager->mod_manager->cfg.overlay_toggle)) {
       ui_mod_manager_toggle(&manager->main);
     }
     return true;
   }
 
-  if (input_event_covers_keybind(ev, manager->console.cfg.toggle_bind)) {
+  if (keybind_activated_by_event(manager->console.cfg.toggle_bind, ev)) {
     if (keybind_is_pressed(manager->console.cfg.toggle_bind)) {
       ui_console_toggle(&manager->console);
     }

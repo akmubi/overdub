@@ -2930,6 +2930,9 @@ unreal_uclass_find(str_t name, bool ignore_case, bool exact_match);
 /* Returns the first non-default object that is an instance of cls or one of its subclasses. */
 uobject_t *
 unreal_uobject_find_first_of(uclass_t *cls);
+/* Returns the first non-default object with a specified name that is an instance of cls or one of its subclasses. */
+uobject_t *
+unreal_uobject_find_first_of_by_name(uclass_t *cls, str_t name, bool ignore_case, bool exact_match);
 /* Finds a UClass by an exact, case-sensitive dotted outer-chain name. */
 uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name);

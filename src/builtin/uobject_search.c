@@ -622,7 +622,7 @@ tool_input(mod_handle_t h, input_event_t *ev)
   }
 
   keybind_t toggle_keybind = mod_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
-  if (input_event_covers_keybind(ev, toggle_keybind)) {
+  if (keybind_activated_by_event(toggle_keybind, ev)) {
     if (keybind_is_pressed(toggle_keybind)) {
       tool->ui.closed = !tool->ui.closed;
     }

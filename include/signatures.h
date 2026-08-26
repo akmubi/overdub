@@ -21,7 +21,9 @@
 
 #include "unreal_funcs.inc"
 
-bool
-scan_user_module_signatures(void);
+void
+signatures_init(void);
+void
+enable_input_hooks(void);
 
 #endif /* SIGNATURES_H */

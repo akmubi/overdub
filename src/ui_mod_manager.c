@@ -856,8 +856,14 @@ draw_code_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *m
         nk_tooltip(ctx, "Stop - Unload - Load - Start");
       }
 
-      if (ui_button_str(ctx, STR_LIT("Reload"))) {
-        mod_dll_reload(manager, mod_handle_make(m));
+      if (m->dll.state == MOD_DLL_STATE_LOADED) {
+        if (ui_button_str(ctx, STR_LIT("Unload"))) {
+          mod_dll_unload(manager, mod_handle_make(m));
+        }
+      } else if (m->dll.state == MOD_DLL_STATE_UNLOADED) {
+        if (ui_button_str(ctx, STR_LIT("Load"))) {
+          mod_dll_unload(manager, mod_handle_make(m));
+        }
       }
 
       nk_tree_pop(ctx);

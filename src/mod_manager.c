@@ -3183,8 +3183,13 @@ mod_manager_startup_load_cfg(mod_manager_t *manager)
     if (!mod_manager_load_cfg(manager)) {
       dir_create_recursive(path_join(tmp.arena, manager->game_dir, CONFIG_MOD_MANAGER_MOD_DIR_NAME));
 
+      str_t default_disabled_mods[] = {
+        STR_LIT("uobject-search"),
+        STR_LIT("ufunction-tracer"),
+      };
+
       mod_cfg_string_set(&manager->cfg.root_mod_dir, CONFIG_MOD_MANAGER_MOD_DIR_NAME);
-      manager->disabled_mods         = (str_array_t){0};
+      manager->disabled_mods         = str_array_make(default_disabled_mods, COUNTOF(default_disabled_mods));
       manager->mod_order.initial_ids = (str_array_t){0};
       manager->mod_order.count       = 0;
       manager->cfg.overlay_toggle    = keybind_parse(CONFIG_NK_OVERLAY_DEFAULT_TOGGLE_KEY, KEYBIND_NULL);

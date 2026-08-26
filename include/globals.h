@@ -2,6 +2,7 @@
 #define GLOBALS_H
 
 #include "arena.h"
+#include "input.h"
 #include "mod_manager.h"
 #include "sigscan.h"
 #include "ui_console.h"
@@ -15,7 +16,6 @@ struct globals_s {
   arena_t  perm;
   void    *module;
   bool     engine_inited;
-  bool     input_inited;
   uint32_t game_thread_id;
   str_t    game_dir;
 
@@ -45,8 +45,9 @@ struct globals_s {
   uint64_t hwnd;
 
   /* input */
-  bool prev_keys_down[INPUT_KEY_MAX];
-  bool keys_down[INPUT_KEY_MAX];
+  input_key_state_t keys[INPUT_KEY_MAX];
+  bool              consumed_down[INPUT_KEY_MAX];
+  float             wheel_delta;
 
   /* mod manager */
   mod_manager_t mod_manager;

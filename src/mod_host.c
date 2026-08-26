@@ -385,9 +385,15 @@ host_keybind_is_down(keybind_t bind)
 }
 
 static bool MOD_CALL
-host_keybind_was_down(keybind_t bind)
+host_keybind_is_pressed(keybind_t bind)
 {
-  return keybind_was_down(bind);
+  return keybind_is_pressed(bind);
+}
+
+static bool MOD_CALL
+host_keybind_is_released(keybind_t bind)
+{
+  return keybind_is_released(bind);
 }
 
 static bool MOD_CALL
@@ -581,7 +587,8 @@ static const mod_host_api_t g_host_api = {
   .keybind_utf8_len        = host_keybind_utf8_len,
   .keybind_utf8_write      = host_keybind_utf8_write,
   .keybind_is_down         = host_keybind_is_down,
-  .keybind_was_down        = host_keybind_was_down,
+  .keybind_is_pressed      = host_keybind_is_pressed,
+  .keybind_is_released     = host_keybind_is_released,
 
   /* UOBJECT CREATE/DELETE LISTENERS */
 

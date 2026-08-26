@@ -938,6 +938,32 @@ unreal_uobject_find_first_of(uclass_t *cls)
   return NULL;
 }
 
+uobject_t *
+unreal_uobject_find_first_of_by_name(uclass_t *cls, str_t name, bool ignore_case, bool exact_match)
+{
+  if (!cls) {
+    return NULL;
+  }
+
+  for (int i = 0; i < unreal_uobject_array_count(); ++i) {
+    uobject_t *obj = unreal_uobject_array_get_obj(i);
+    if (!obj) {
+      continue;
+    }
+
+
+    if (!unreal_uobject_is_a(obj, cls) || !unreal_uobject_is_default(obj)) {
+      continue;
+    }
+
+    if (unreal_fname_match_text(obj->name, name, ignore_case, exact_match)) {
+      return obj;
+    }
+  }
+
+  return NULL;
+}
+
 uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name)
 {
