@@ -9,50 +9,52 @@ permissions:
 
 jobs:
   release:
-    name:    Build and package
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Overdub
         uses: actions/checkout@v4
 
-      - name: Setup MSVC
+      - name: Checkout hibiki-bootstrap
+        uses: actions/checkout@v4
+        with:
+          repository: akmubi/hibiki-bootstrap
+          path: hibiki-bootstrap
+
+      - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build Overdub
         run: >
           msbuild overdub.sln
           /m
           /p:Configuration=Release
           /p:Platform=x64
-          /p:TreatWarningAsError=true
-          /warnAsError
 
-      - name:  Get version
+      - name: Build bootstrap DLLs
+        shell: cmd
+        run: |
+          cd hibiki-bootstrap
+          call build.bat steam overdub.dll
+          call build.bat epic overdub.dll
+          call build.bat xbox overdub.dll
+
+      - name: Get version
         shell: pwsh
         run: |
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
-
           if ([string]::IsNullOrWhiteSpace($version)) {
               throw "Could not determine release version"
           }
 
           "VERSION=$version" >> $env:GITHUB_ENV
 
-      - name:  Download latest hibiki-bootstrap
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          New-Item -ItemType Directory -Force bootstrap | Out-Null
-
-          gh release download `
-            --repo akmubi/hibiki-bootstrap `
-            --pattern XAPOFX1_5.dll `
-            --pattern dsound.dll `
-            --dir bootstrap
-
-      - name:  Create packages
+      - name: Create packages
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package\steam | Out-Null
@@ -60,13 +62,13 @@ jobs:
           New-Item -ItemType Directory -Force package\xbox  | Out-Null
 
           Copy-Item build\overdub.dll package\steam\
-          Copy-Item bootstrap\XAPOFX1_5.dll package\steam\
+          Copy-Item hibiki-bootstrap\build\steam\XAPOFX1_5.dll package\steam\
 
           Copy-Item build\overdub.dll package\epic\
-          Copy-Item bootstrap\XAPOFX1_5.dll package\epic\
+          Copy-Item hibiki-bootstrap\build\epic\XAPOFX1_5.dll package\epic\
 
           Copy-Item build\overdub.dll package\xbox\
-          Copy-Item bootstrap\dsound.dll package\xbox\
+          Copy-Item hibiki-bootstrap\build\xbox\dsound.dll package\xbox\
 
           Compress-Archive `
             -Path package\steam\* `
@@ -80,7 +82,7 @@ jobs:
             -Path package\xbox\* `
             -DestinationPath "overdub-$env:VERSION.xbox.zip"
 
-      - name:  Upload release assets
+      - name: Upload release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
