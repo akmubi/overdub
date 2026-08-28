@@ -3,6 +3,7 @@
 .code
 *.vscode*
 *.kdev4*
+*.code-workspace
 
 build
 tmp
@@ -20,4 +21,3 @@ tmp
 
 tags
 cscope.out
-
