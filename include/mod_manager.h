@@ -434,7 +434,7 @@ str_t
 mod_manager_get_config_path(mod_manager_t *manager, mod_handle_t h);
 str_t
 mod_manager_get_manifest_path(mod_manager_t *manager, mod_handle_t h);
-mod_arena_handle_t
+arena_t *
 mod_get_perm_arena(mod_manager_t *manager, mod_handle_t h);
 
 mod_handle_t
@@ -484,10 +484,10 @@ mod_dll_uobject_listener_register(mod_manager_t *manager, mod_handle_t h, uobjec
 void
 mod_dll_uobject_listener_deregister(mod_manager_t *manager, mod_handle_t h, uobject_listener_kind_t kind, uobject_on_notify_cb_t notify_cb, void *user);
 
-mod_arena_handle_t
+arena_t *
 mod_dll_arena_alloc(mod_manager_t *manager, mod_handle_t h, uint64_t reserve_size, uint64_t commit_size);
 bool
-mod_dll_arena_free(mod_manager_t *manager, mod_handle_t h, mod_arena_handle_t arena_h);
+mod_dll_arena_free(mod_manager_t *manager, mod_handle_t h, arena_t *arena);
 
 void
 mod_manager_dispatch_tick(mod_manager_t *manager, float delta);
@@ -568,11 +568,6 @@ mod_cfg_handle_t
 mod_cfg_handle_make(mod_option_runtime_t *rt);
 mod_option_runtime_t *
 mod_cfg_handle_resolve(mod_manager_t *manager, mod_cfg_handle_t h);
-
-mod_arena_handle_t
-mod_arena_handle_make(arena_t *arena);
-arena_t *
-mod_arena_handle_resolve(mod_arena_handle_t h);
 
 void
 mod_manager_apply_order_from_config(mod_manager_t *manager, str_array_t mod_order_ids);

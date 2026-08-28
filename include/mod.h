@@ -13,12 +13,10 @@ MOD_EXTERN_C_BEGIN
 
 typedef uint64_t mod_handle_t;
 typedef uint64_t mod_cfg_handle_t;
-typedef uint64_t mod_arena_handle_t;
 typedef version_t mod_version_t;
 
-#define MOD_HANDLE_INVALID       ((mod_handle_t)0)
-#define MOD_CFG_HANDLE_INVALID   ((mod_cfg_handle_t)0)
-#define MOD_ARENA_HANDLE_INVALID ((mod_arena_handle_t)0)
+#define MOD_HANDLE_INVALID     ((mod_handle_t)0)
+#define MOD_CFG_HANDLE_INVALID ((mod_cfg_handle_t)0)
 
 #define MOD_ABI_VERSION ((mod_version_t)MAKE_VERSION(2, 0, 0))
 
@@ -33,20 +31,9 @@ typedef version_t mod_version_t;
 #define MOD_LOG_INFO(MOD, ...)  mod_log((MOD), LOG_LEVEL_INFO,  __VA_ARGS__)
 #define MOD_LOG_DEBUG(MOD, ...) mod_log((MOD), LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define MOD_ARENA_PUSH_ARRAY(ARENA, T, N)       (T *)mod_arena_push((ARENA), (N) * sizeof(T), ALIGNOF(T))
-#define MOD_ARENA_PUSH_ARRAY_ZERO(ARENA, T, N)  (T *)mod_arena_push_zero((ARENA), (N) * sizeof(T), ALIGNOF(T))
-#define MOD_ARENA_PUSH(ARENA, T)                MOD_ARENA_PUSH_ARRAY((ARENA), T, 1)
-#define MOD_ARENA_PUSH_ZERO(ARENA, T)           MOD_ARENA_PUSH_ARRAY_ZERO((ARENA), T, 1)
-
 typedef struct mod_color_s mod_color_t;
 struct mod_color_s {
   uint8_t r, g, b, a;
-};
-
-typedef struct mod_tmp_arena_s mod_tmp_arena_t;
-struct mod_tmp_arena_s {
-  mod_arena_handle_t arena;
-  uint64_t           pos;
 };
 
 struct nk_context;
@@ -107,7 +94,7 @@ MOD_API float       mod_cfg_get_float(mod_cfg_handle_t cfg);
 MOD_API int         mod_cfg_get_enum(mod_cfg_handle_t cfg);
 MOD_API uint64_t    mod_cfg_get_string_len(mod_cfg_handle_t cfg);
 MOD_API uint64_t    mod_cfg_get_string_data(mod_cfg_handle_t cfg, void *buf, uint64_t cap);
-MOD_API str_t       mod_cfg_push_string(mod_cfg_handle_t cfg, mod_arena_handle_t arena);
+MOD_API str_t       mod_cfg_push_string(mod_cfg_handle_t cfg, arena_t *arena);
 MOD_API keybind_t   mod_cfg_get_keybind(mod_cfg_handle_t cfg);
 MOD_API mod_color_t mod_cfg_get_color(mod_cfg_handle_t cfg);
 MOD_API void        mod_cfg_set_bool(mod_cfg_handle_t cfg, bool value);
@@ -119,17 +106,9 @@ MOD_API void        mod_cfg_set_keybind(mod_cfg_handle_t cfg, keybind_t value);
 MOD_API void        mod_cfg_set_color(mod_cfg_handle_t cfg, mod_color_t value);
 
 /* Manager-owned arenas */
-MOD_API mod_arena_handle_t mod_get_perm(mod_handle_t mod);
-MOD_API mod_arena_handle_t mod_arena_create(mod_handle_t mod, uint64_t reserve_size, uint64_t commit_size);
-MOD_API void               mod_arena_destroy(mod_handle_t mod, mod_arena_handle_t arena);
-MOD_API void              *mod_arena_push(mod_arena_handle_t arena, uint64_t size, uint64_t alignment);
-MOD_API void              *mod_arena_push_zero(mod_arena_handle_t arena, uint64_t size, uint64_t alignment);
-MOD_API uint64_t           mod_arena_pos(mod_arena_handle_t arena);
-MOD_API void               mod_arena_reset(mod_arena_handle_t arena);
-MOD_API void               mod_arena_pop_to(mod_arena_handle_t arena, uint64_t pos);
-MOD_API void               mod_arena_pop(mod_arena_handle_t arena, uint64_t size);
-MOD_API mod_tmp_arena_t    mod_scratch_begin(mod_arena_handle_t conflict);
-MOD_API void               mod_scratch_end(mod_tmp_arena_t tmp);
+MOD_API arena_t *mod_get_perm(mod_handle_t mod);
+MOD_API arena_t *mod_arena_create(mod_handle_t mod, uint64_t reserve_size, uint64_t commit_size);
+MOD_API void     mod_arena_destroy(mod_handle_t mod, arena_t *arena);
 
 /* Manager-owned engine listeners and native hooks */
 MOD_API bool          mod_register_uobject_listener(mod_handle_t mod, uobject_listener_kind_t kind, uobject_on_notify_cb_t callback, void *user);

@@ -330,7 +330,7 @@ tweaks_init(mod_handle_t h)
   tweaks_t *tweaks = &g_tweaks;
   mem_zero(tweaks, sizeof(*tweaks));
 
-  tweaks->perm = mod_arena_handle_resolve(mod_get_perm(h));
+  tweaks->perm = mod_get_perm(h);
   ASSERT(tweaks->perm != NULL);
 
   tweaks->cfg.disable_tutorials_h     = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));

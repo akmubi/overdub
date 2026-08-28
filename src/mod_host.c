@@ -11,24 +11,6 @@
 
 #include <stdarg.h>
 
-static inline mod_tmp_arena_t
-mod_tmp_arena_make(tmp_arena_t tmp)
-{
-  return (mod_tmp_arena_t){
-    .arena = mod_arena_handle_make(tmp.arena),
-    .pos   = tmp.pos,
-  };
-}
-
-static inline tmp_arena_t
-mod_tmp_arena_resolve(mod_tmp_arena_t tmp)
-{
-  return (tmp_arena_t){
-    .arena = mod_arena_handle_resolve(tmp.arena),
-    .pos   = tmp.pos,
-  };
-}
-
 str_t MOD_CALL
 mod_get_mod_dir(mod_handle_t mod)
 {
@@ -141,14 +123,14 @@ mod_cfg_get_string_data(mod_cfg_handle_t cfg, void *buf, uint64_t cap)
 }
 
 str_t MOD_CALL
-mod_cfg_push_string(mod_cfg_handle_t cfg, mod_arena_handle_t arena)
+mod_cfg_push_string(mod_cfg_handle_t cfg, arena_t *arena)
 {
   uint64_t len = mod_cfg_get_string_len(cfg);
   if (len == 0) {
     return STR_NULL;
   }
 
-  uint8_t *data = mod_arena_push_zero(arena, len + 1, 1);
+  uint8_t *data = ARENA_PUSH_ARRAY_ZERO(arena, uint8_t, len + 1);
   if (!data) {
     return STR_NULL;
   }
@@ -210,82 +192,22 @@ mod_cfg_set_color(mod_cfg_handle_t cfg, mod_color_t value)
   mod_manager_cfg_set_color(&globals.mod_manager, cfg, value);
 }
 
-mod_arena_handle_t MOD_CALL
+arena_t *MOD_CALL
 mod_get_perm(mod_handle_t mod)
 {
   return mod_get_perm_arena(&globals.mod_manager, mod);
 }
 
-mod_arena_handle_t MOD_CALL
+arena_t *MOD_CALL
 mod_arena_create(mod_handle_t mod, uint64_t reserve_size, uint64_t commit_size)
 {
   return mod_dll_arena_alloc(&globals.mod_manager, mod, reserve_size, commit_size);
 }
 
 void MOD_CALL
-mod_arena_destroy(mod_handle_t mod, mod_arena_handle_t arena)
+mod_arena_destroy(mod_handle_t mod, arena_t *arena)
 {
   mod_dll_arena_free(&globals.mod_manager, mod, arena);
-}
-
-void *MOD_CALL
-mod_arena_push(mod_arena_handle_t arena, uint64_t size, uint64_t alignment)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  return resolved ? arena_push_aligned(resolved, size, alignment) : NULL;
-}
-
-void *MOD_CALL
-mod_arena_push_zero(mod_arena_handle_t arena, uint64_t size, uint64_t alignment)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  return resolved ? arena_push_zero_aligned(resolved, size, alignment) : NULL;
-}
-
-uint64_t MOD_CALL
-mod_arena_pos(mod_arena_handle_t arena)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  return resolved ? arena_get_used(resolved) : 0;
-}
-
-void MOD_CALL
-mod_arena_reset(mod_arena_handle_t arena)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  if (resolved) {
-    arena_reset(resolved);
-  }
-}
-
-void MOD_CALL
-mod_arena_pop_to(mod_arena_handle_t arena, uint64_t pos)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  if (resolved) {
-    arena_pop_to(resolved, pos);
-  }
-}
-
-void MOD_CALL
-mod_arena_pop(mod_arena_handle_t arena, uint64_t size)
-{
-  arena_t *resolved = mod_arena_handle_resolve(arena);
-  if (resolved) {
-    arena_pop(resolved, size);
-  }
-}
-
-mod_tmp_arena_t MOD_CALL
-mod_scratch_begin(mod_arena_handle_t conflict)
-{
-  return mod_tmp_arena_make(scratch_begin(mod_arena_handle_resolve(conflict)));
-}
-
-void MOD_CALL
-mod_scratch_end(mod_tmp_arena_t tmp)
-{
-  scratch_end(mod_tmp_arena_resolve(tmp));
 }
 
 bool MOD_CALL

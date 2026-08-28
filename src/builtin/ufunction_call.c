@@ -1088,8 +1088,8 @@ ufunc_call_init(search_tool_t *tool, mod_handle_t h)
     return false;
   }
 
-  dialog->model_arena  = mod_arena_handle_resolve(mod_arena_create(h, 32 * MB, 64 * KB));
-  dialog->result_arena = mod_arena_handle_resolve(mod_arena_create(h, 32 * MB, 64 * KB));
+  dialog->model_arena  = mod_arena_create(h, 32 * MB, 64 * KB);
+  dialog->result_arena = mod_arena_create(h, 32 * MB, 64 * KB);
   dialog->picker.slots = ARENA_PUSH_ARRAY(tool->perm, uint32_t, tool->cache.record_cap);
   dialog->func_slot    = RECORD_SLOT_INVALID;
   call_object_ref_set_none(&dialog->target);

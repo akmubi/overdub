@@ -484,7 +484,7 @@ tool_init(mod_handle_t h)
   search_tool_t *tool = &g_tool;
   mem_zero(tool, sizeof(*tool));
 
-  tool->perm             = mod_arena_handle_resolve(mod_get_perm_arena(&globals.mod_manager, h));
+  tool->perm             = mod_get_perm_arena(&globals.mod_manager, h);
   tool->cache.record_cap = (uint32_t)unreal_uobject_array_capacity();
   if (tool->cache.record_cap > 0) {
     tool->cache.records = ARENA_PUSH_ARRAY_ZERO(tool->perm, record_t, tool->cache.record_cap);
@@ -511,7 +511,7 @@ tool_init(mod_handle_t h)
   tool->cache.build_total  = (uint32_t)unreal_uobject_array_count();
   tool->cache.world        = (globals.gworld_ptr) ? *globals.gworld_ptr : NULL;
 
-  arena_t *string_arena = mod_arena_handle_resolve(mod_arena_create(h, 128 * MB, 1 * MB));
+  arena_t *string_arena = mod_arena_create(h, 128 * MB, 1 * MB);
   if (!string_arena) {
     LOG_ERROR("UObject Search: failed to create the string arena");
     return false;
@@ -550,8 +550,8 @@ tool_init(mod_handle_t h)
   tool->details.preview_tab  = NULL;
 
   for (int i = 0; i < COUNTOF(tool->details.tabs); ++i) {
-    tool->details.tabs[i].info_arena  = mod_arena_handle_resolve(mod_arena_create(h, 64 * MB, 64 * KB));
-    tool->details.tabs[i].value_arena = mod_arena_handle_resolve(mod_arena_create(h, 64 * MB, 64 * KB));
+    tool->details.tabs[i].info_arena  = mod_arena_create(h, 64 * MB, 64 * KB);
+    tool->details.tabs[i].value_arena = mod_arena_create(h, 64 * MB, 64 * KB);
 
     ASSERT(tool->details.tabs[i].info_arena != NULL);
     ASSERT(tool->details.tabs[i].value_arena != NULL);

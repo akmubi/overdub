@@ -45,18 +45,6 @@ mod_alloc_slot(mod_manager_t *manager, str_t id)
   return new_slot;
 }
 
-mod_arena_handle_t
-mod_arena_handle_make(arena_t *arena)
-{
-  return (mod_arena_handle_t)arena;
-}
-
-arena_t *
-mod_arena_handle_resolve(mod_arena_handle_t h)
-{
-  return (arena_t *)h;
-}
-
 bool
 mod_handle_is_valid(mod_manager_t *manager, mod_handle_t h)
 {
@@ -2167,28 +2155,28 @@ mod_dll_uobject_listener_deregister(mod_manager_t *manager, mod_handle_t h, uobj
   }
 }
 
-mod_arena_handle_t
+arena_t *
 mod_dll_arena_alloc(mod_manager_t *manager, mod_handle_t h, uint64_t reserve_size, uint64_t commit_size)
 {
   mod_t *m = mod_handle_resolve(manager, h);
   if (!m || !m->has_code) {
-    return MOD_ARENA_HANDLE_INVALID;
+    return NULL;
   }
 
   mod_dll_runtime_t *rt = &m->dll;
 
   if (rt->state != MOD_DLL_STATE_LOADED) {
-    return MOD_ARENA_HANDLE_INVALID;
+    return NULL;
   }
 
   mod_dll_arena_t *slot = rt->arena_first_free;
   if (!slot) {
-    return MOD_ARENA_HANDLE_INVALID;
+    return NULL;
   }
 
   arena_t arena = arena_new_dynamic(reserve_size, commit_size);
   if (!arena.backing) {
-    return MOD_ARENA_HANDLE_INVALID;
+    return NULL;
   }
 
   rt->arena_first_free = slot->next;
@@ -2197,18 +2185,16 @@ mod_dll_arena_alloc(mod_manager_t *manager, mod_handle_t h, uint64_t reserve_siz
   slot->occupied = true;
   slot->next     = NULL;
 
-  return mod_arena_handle_make(&slot->arena);
+  return &slot->arena;
 }
 
 bool
-mod_dll_arena_free(mod_manager_t *manager, mod_handle_t h, mod_arena_handle_t arena_h)
+mod_dll_arena_free(mod_manager_t *manager, mod_handle_t h, arena_t *arena)
 {
   mod_t *m = mod_handle_resolve(manager, h);
-  if (!m || !m->has_code || !arena_h) {
+  if (!m || !m->has_code || !arena) {
     return false;
   }
-
-  arena_t *arena = mod_arena_handle_resolve(arena_h);
 
   for (int i = 0; i < CONFIG_MOD_MAX_ARENAS; ++i) {
     mod_dll_arena_t *slot = &m->dll.arenas[i];
@@ -3407,16 +3393,16 @@ mod_manager_register_cmd(mod_manager_t *manager, mod_handle_t h, str_t name, str
   return true;
 }
 
-mod_arena_handle_t
+arena_t *
 mod_get_perm_arena(mod_manager_t *manager, mod_handle_t h)
 {
   mod_t *m = mod_handle_resolve(manager, h);
   if (!m) {
-    return MOD_ARENA_HANDLE_INVALID;
+    return NULL;
   }
 
   ASSERT(m->has_code);
-  return mod_arena_handle_make(&m->dll.perm);
+  return &m->dll.perm;
 }
 
 void

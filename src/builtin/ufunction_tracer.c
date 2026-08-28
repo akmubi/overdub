@@ -1284,7 +1284,7 @@ trace_init(mod_handle_t h)
   trace_tool_t *tool = &g_trace_tool;
   mem_zero(tool, sizeof(*tool));
 
-  tool->perm              = mod_arena_handle_resolve(mod_get_perm_arena(&globals.mod_manager, h));
+  tool->perm              = mod_get_perm_arena(&globals.mod_manager, h);
   tool->cfg.max_calls_h   = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_MAX_CALLS_ID));
   tool->cfg.open_window_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_OPEN_WINDOW_ID));
   tool->cfg.page_size_h   = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_PAGE_SIZE_ID));
