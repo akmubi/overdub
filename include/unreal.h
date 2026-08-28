@@ -3299,8 +3299,6 @@ bool
 unreal_fframe_step(fframe_t *stack, void *result);
 
 /* ================================================ CLASS INTROSPECTION ============================================= */
-fprop_t *
-unreal_ustruct_find_prop(ustruct_t *s, str_t name);
 ufunc_t *
 unreal_ustruct_find_func(ustruct_t *s, str_t name);
 
@@ -3310,79 +3308,6 @@ unreal_ustruct_find_func_fname(ustruct_t *s, fname_t name, bool ignore_num);
 void *
 unreal_get_mcast_sparse_delegate(uobject_t *s, fname_t name);
 
-/* ================================================= PROPERTY ACCESS ================================================ */
-static inline void *
-unreal_uprop_ptr(fprop_t *prop, void *container)
-{
-  return (uint8_t *)container + prop->offset_internal;
-}
-
-bool
-unreal_fprop_class_is(fprop_t *prop, fname_t name);
-bool
-unreal_fprop_class_is_a(fprop_t *prop, fname_t name);
-str_t
-unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena);
-
-uint64_t
-unreal_fprop_complete_size(fprop_t *prop);
-int32_t
-unreal_fprop_min_alignment(fprop_t *prop);
-void *
-unreal_fprop_value_at(fprop_t *prop, void *value, int32_t array_idx);
-void *
-unreal_fprop_value_in_container(fprop_t *prop, void *container, int32_t array_idx);
-
-bool
-unreal_fprop_initialize_value(fprop_t *prop, void *value);
-bool
-unreal_fprop_destroy_value(fprop_t *prop, void *value);
-bool
-unreal_fprop_clear_single_value(fprop_t *prop, void *value);
-bool
-unreal_fprop_clear_complete_value(fprop_t *prop, void *value);
-bool
-unreal_fprop_copy_single_value(fprop_t *prop, void *dst, const void *src);
-bool
-unreal_fprop_copy_complete_value(fprop_t *prop, void *dst, const void *src);
-
-bool
-unreal_fprop_copy_single_value_to_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
-unreal_fprop_copy_complete_value_to_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
-unreal_fprop_copy_single_value_from_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
-unreal_fprop_copy_complete_value_from_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
-unreal_fprop_single_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags);
-bool
-unreal_fprop_complete_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags);
-bool
-unreal_fprop_value_hash(fprop_t *prop, const void *value, uint32_t *out_hash);
-bool
-unreal_fprop_same_type(fprop_t *prop, fprop_t *other);
-
-uobject_t *
-unreal_fprop_get_object(fprop_obj_base_t *prop, const void *value);
-bool
-unreal_fprop_object_is_compatible(fprop_obj_base_t *prop, uobject_t *object);
-bool
-unreal_fprop_set_object(fprop_obj_base_t *prop, void *value, uobject_t *object);
-
-void
-unreal_fprop_initialize_in_container(fprop_t *prop, void *container);
-void
-unreal_fprop_destroy_in_container(fprop_t *prop, void *container);
-
-bool
-unreal_ustruct_initialize_struct(ustruct_t *struct_type, void *memory, int32_t array_dim);
-bool
-unreal_ustruct_destroy_struct(ustruct_t *struct_type, void *memory, int32_t array_dim);
-
-const wchar_t *
-unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner);
-
 /* =============================================== CONTAINER UTILITIES ============================================== */
 
 bool
@@ -3391,66 +3316,6 @@ int32_t
 unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx);
 int32_t
 unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash);
-
-int32_t
-unreal_array_num(const void *array, fprop_array_t *prop);
-void *
-unreal_array_get(void *array, fprop_array_t *prop, int32_t idx);
-int32_t
-unreal_array_add(void *array, fprop_array_t *prop, const void *value);
-void
-unreal_array_insert(void *array, fprop_array_t *prop, int32_t idx, const void *value);
-void
-unreal_array_remove(void *array, fprop_array_t *prop, int32_t idx);
-void
-unreal_array_resize(void *array, fprop_array_t *prop, int32_t size);
-void
-unreal_array_set(void *array, fprop_array_t *prop, int32_t idx, const void *value, bool size_to_fit);
-bool
-unreal_array_clear(void *array, fprop_array_t *prop);
-
-int32_t
-unreal_set_num(const void *set, fprop_set_t *prop);
-int32_t
-unreal_set_max_index(const void *set, fprop_set_t *prop);
-bool
-unreal_set_is_valid_index(const void *set, fprop_set_t *prop, int32_t idx);
-const void *
-unreal_set_get(const void *set, fprop_set_t *prop, int32_t idx);
-int32_t
-unreal_set_find_index(const void *set, fprop_set_t *prop, const void *value);
-bool
-unreal_set_contains(const void *set, fprop_set_t *prop, const void *value);
-void
-unreal_set_add(void *set, fprop_set_t *prop, const void *value);
-bool
-unreal_set_remove(void *set, fprop_set_t *prop, const void *value);
-bool
-unreal_set_clear(void *set, fprop_set_t *prop);
-
-int32_t
-unreal_map_num(const void *map, fprop_map_t *prop);
-int32_t
-unreal_map_max_index(const void *map, fprop_map_t *prop);
-bool
-unreal_map_is_valid_index(const void *map, fprop_map_t *prop, int32_t idx);
-const void *
-unreal_map_get_key(const void *map, fprop_map_t *prop, int32_t idx);
-void *
-unreal_map_get_value(void *map, fprop_map_t *prop, int32_t idx);
-int32_t
-unreal_map_find_index(const void *map, fprop_map_t *prop, const void *key);
-void *
-unreal_map_find_value_ptr(void *map, fprop_map_t *prop, const void *key);
-bool
-unreal_map_clear(void *map, fprop_map_t *prop);
-
-void
-unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val);
-bool
-unreal_map_remove(void *map, fprop_map_t *prop, const void *key);
-bool
-unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val);
 
 /* =================================================== DATA TABLE =================================================== */
 

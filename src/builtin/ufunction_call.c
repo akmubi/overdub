@@ -8,6 +8,7 @@
 #include "str.h"
 #include "ui_nuklear.h"
 #include "unreal.h"
+#include "unreal_prop.h"
 
 #include "vendor_stb.h"
 
@@ -210,23 +211,32 @@ call_prop_is_supported(fprop_t *prop)
     return false;
   }
 
-  fname_t supported[] = {
-    globals.unreal.bool_prop,       globals.unreal.byte_prop,       globals.unreal.int8_prop,
-    globals.unreal.int16_prop,      globals.unreal.int_prop,        globals.unreal.int32_prop,
-    globals.unreal.int64_prop,      globals.unreal.uint16_prop,     globals.unreal.uint32_prop,
-    globals.unreal.uint64_prop,     globals.unreal.float_prop,      globals.unreal.double_prop,
-    globals.unreal.name_prop,       globals.unreal.str_prop,        globals.unreal.text_prop,
-    globals.unreal.obj_prop,        globals.unreal.class_prop,      globals.unreal.soft_obj_prop,
-    globals.unreal.soft_class_prop, globals.unreal.struct_prop,     globals.unreal.array_prop,
-    globals.unreal.enum_prop,
-  };
-
-  for (int i = 0; i < COUNTOF(supported); ++i) {
-    if (unreal_fprop_class_is(prop, supported[i])) {
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_BOOL:
+    case UNREAL_PROP_KIND_BYTE:
+    case UNREAL_PROP_KIND_INT8:
+    case UNREAL_PROP_KIND_INT16:
+    case UNREAL_PROP_KIND_INT32:
+    case UNREAL_PROP_KIND_INT64:
+    case UNREAL_PROP_KIND_UINT16:
+    case UNREAL_PROP_KIND_UINT32:
+    case UNREAL_PROP_KIND_UINT64:
+    case UNREAL_PROP_KIND_FLOAT:
+    case UNREAL_PROP_KIND_DOUBLE:
+    case UNREAL_PROP_KIND_NAME:
+    case UNREAL_PROP_KIND_STRING:
+    case UNREAL_PROP_KIND_TEXT:
+    case UNREAL_PROP_KIND_OBJECT:
+    case UNREAL_PROP_KIND_CLASS:
+    case UNREAL_PROP_KIND_SOFT_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_CLASS:
+    case UNREAL_PROP_KIND_STRUCT:
+    case UNREAL_PROP_KIND_ARRAY:
+    case UNREAL_PROP_KIND_ENUM:
       return true;
-    }
+    default:
+      return false;
   }
-  return false;
 }
 
 static void
@@ -236,25 +246,28 @@ call_value_set_default(call_value_t *node)
     return;
   }
 
-  fprop_t *prop = node->prop;
-  if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "false");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "0.0");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int8_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int16_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int_prop)    ||
-             unreal_fprop_class_is(prop, globals.unreal.int32_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int64_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.uint16_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint32_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint64_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "0");
-  } else {
-    node->input[0] = '\0';
+  switch (unreal_fprop_get_kind(node->prop)) {
+    case UNREAL_PROP_KIND_BOOL:
+      str_write_fmt(node->input, sizeof(node->input), "false");
+      break;
+    case UNREAL_PROP_KIND_FLOAT:
+    case UNREAL_PROP_KIND_DOUBLE:
+      str_write_fmt(node->input, sizeof(node->input), "0.0");
+      break;
+    case UNREAL_PROP_KIND_BYTE:
+    case UNREAL_PROP_KIND_INT8:
+    case UNREAL_PROP_KIND_INT16:
+    case UNREAL_PROP_KIND_INT32:
+    case UNREAL_PROP_KIND_INT64:
+    case UNREAL_PROP_KIND_UINT16:
+    case UNREAL_PROP_KIND_UINT32:
+    case UNREAL_PROP_KIND_UINT64:
+    case UNREAL_PROP_KIND_ENUM:
+      str_write_fmt(node->input, sizeof(node->input), "0");
+      break;
+    default:
+      node->input[0] = '\0';
+      break;
   }
 }
 
@@ -666,30 +679,6 @@ call_value_literal(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_value_
 }
 
 static bool
-call_import_literal(fprop_t *prop, void *value, uobject_t *owner, str_t literal, arena_t *arena)
-{
-  if (!prop || !value || str_is_empty(literal)) {
-    return false;
-  }
-
-  str16_t wide = str16_from_str(arena, literal);
-  if (!wide.data) {
-    return false;
-  }
-
-  const wchar_t *end = unreal_fprop_import_text_direct(prop, (const wchar_t *)wide.data, value, owner);
-  if (!end) {
-    return false;
-  }
-
-  while (*end == L' ' || *end == L'\t' || *end == L'\r' || *end == L'\n') {
-    end += 1;
-  }
-
-  return *end == L'\0';
-}
-
-static bool
 call_apply_value(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_value_t *node, uint8_t *value, uobject_t *owner, arena_t *arena)
 {
   if (!node || !node->supported || !value) {
@@ -738,56 +727,58 @@ call_apply_value(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_value_t 
       return false;
     }
 
-    *(uobject_t **)value = selected;
-    return true;
+    return unreal_fprop_set_object((fprop_obj_base_t *)node->prop, value, selected);
   }
 
   str_t literal = call_value_literal(tool, dialog, node, arena);
-  return call_import_literal(node->prop, value, owner, literal, arena);
-}
-
-static int64_t
-call_read_integer(fprop_t *prop, void *value)
-{
-  if (unreal_fprop_class_is(prop, globals.unreal.byte_prop))   return *(uint8_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int8_prop))   return *(int8_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int16_prop))  return *(int16_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int_prop))    return *(int32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int32_prop))  return *(int32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int64_prop))  return *(int64_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) return *(uint16_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) return *(uint32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) return (int64_t)*(uint64_t *)value;
-
-  return 0;
+  return unreal_fprop_import_text(node->prop, value, owner, literal, arena);
 }
 
 static void
 call_result_format_leaf(call_result_t *result, fprop_t *prop, void *value, arena_t *arena)
 {
-  if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
-    fprop_bool_t *bp   = (fprop_bool_t *)prop;
-    uint8_t       byte = *((uint8_t *)value + bp->byte_offset);
-    str_write_fmt(result->value, sizeof(result->value), "%s", (byte & bp->field_mask) ? "true" : "false");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%.9g", (double)*(float *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%.17g", *(double *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%llu", (unsigned long long)*(uint64_t *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int8_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int16_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int_prop)    ||
-             unreal_fprop_class_is(prop, globals.unreal.int32_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int64_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.uint16_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%lld", (long long)call_read_integer(prop, value));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
+  unreal_prop_kind_t kind = unreal_fprop_get_kind(prop);
+
+  if (kind == UNREAL_PROP_KIND_BOOL) {
+    bool boolean = false;
+    if (unreal_fprop_read_bool(prop, value, &boolean)) {
+      str_write_fmt(result->value, sizeof(result->value), "%s", boolean ? "true" : "false");
+    }
+  } else if (kind == UNREAL_PROP_KIND_FLOAT) {
+    double real = 0.0;
+    if (unreal_fprop_read_real(prop, value, &real)) {
+      str_write_fmt(result->value, sizeof(result->value), "%.9g", real);
+    }
+  } else if (kind == UNREAL_PROP_KIND_DOUBLE) {
+    double real = 0.0;
+    if (unreal_fprop_read_real(prop, value, &real)) {
+      str_write_fmt(result->value, sizeof(result->value), "%.17g", real);
+    }
+  } else if (kind == UNREAL_PROP_KIND_BYTE   ||
+             kind == UNREAL_PROP_KIND_INT8   ||
+             kind == UNREAL_PROP_KIND_INT16  ||
+             kind == UNREAL_PROP_KIND_INT32  ||
+             kind == UNREAL_PROP_KIND_INT64  ||
+             kind == UNREAL_PROP_KIND_UINT16 ||
+             kind == UNREAL_PROP_KIND_UINT32 ||
+             kind == UNREAL_PROP_KIND_UINT64) {
+    unreal_prop_integer_t integer = {0};
+    if (unreal_fprop_read_integer(prop, value, &integer)) {
+      if (integer.is_signed) {
+        str_write_fmt(result->value, sizeof(result->value), "%lld", (long long)(int64_t)integer.value);
+      } else {
+        str_write_fmt(result->value, sizeof(result->value), "%llu", (unsigned long long)integer.value);
+      }
+    }
+  } else if (kind == UNREAL_PROP_KIND_ENUM) {
     fprop_enum_t *enum_prop = (fprop_enum_t *)prop;
-    int64_t       integer   = enum_prop->underlying_prop ? call_read_integer(&enum_prop->underlying_prop->base, value) : 0;
-    str_t         name      = STR_NULL;
+    unreal_prop_integer_t integer_value = {0};
+    if (!unreal_fprop_read_integer(prop, value, &integer_value)) {
+      str_write_fmt(result->value, sizeof(result->value), "<unavailable>");
+      return;
+    }
+    int64_t integer = (int64_t)integer_value.value;
+    str_t   name    = STR_NULL;
     if (enum_prop->uenum) {
       for (int32_t i = 0; i < enum_prop->uenum->names.num; ++i) {
         if (enum_prop->uenum->names.data[i].value == integer) {
@@ -802,20 +793,24 @@ call_result_format_leaf(call_result_t *result, fprop_t *prop, void *value, arena
     } else {
       str_write_fmt(result->value, sizeof(result->value), "%lld", (long long)integer);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.name_prop)) {
-    str_t text = unreal_fname_to_str(*(fname_t *)value, arena);
-    str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.str_prop)) {
+  } else if (kind == UNREAL_PROP_KIND_NAME) {
+    fname_t name = {0};
+    if (unreal_fprop_read_name(prop, value, &name)) {
+      str_t text = unreal_fname_to_str(name, arena);
+      str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(text));
+    }
+  } else if (kind == UNREAL_PROP_KIND_STRING) {
     str_t text = unreal_fstring_to_str(*(fstring_t *)value, arena);
     str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.text_prop)) {
+  } else if (kind == UNREAL_PROP_KIND_TEXT) {
     ftext_t   *text         = (ftext_t *)value;
-    fstring_t *display      = (text->text_data.obj && text->text_data.obj->vtable) ? text->text_data.obj->vtable->get_display_string(text->text_data.obj) : NULL;
+    fstring_t *display      = (text->text_data.obj && text->text_data.obj->vtable && text->text_data.obj->vtable->get_display_string)
+                              ? text->text_data.obj->vtable->get_display_string(text->text_data.obj)
+                              : NULL;
     str_t      display_text = display ? unreal_fstring_to_str(*display, arena) : STR_NULL;
     str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(display_text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    uobject_t *obj = *(uobject_t **)value;
+  } else if (kind == UNREAL_PROP_KIND_OBJECT || kind == UNREAL_PROP_KIND_CLASS) {
+    uobject_t *obj = unreal_fprop_get_object((fprop_obj_base_t *)prop, value);
     if (!obj) {
       str_write_fmt(result->value, sizeof(result->value), "None");
     } else if (!unreal_uobject_is_valid(obj)) {
@@ -826,8 +821,7 @@ call_result_format_leaf(call_result_t *result, fprop_t *prop, void *value, arena
       str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(name));
       str_write_fmt(result->tooltip, sizeof(result->tooltip), "%.*s", STR_ARG(full_name));
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+  } else if (kind == UNREAL_PROP_KIND_SOFT_OBJECT || kind == UNREAL_PROP_KIND_SOFT_CLASS) {
     call_fsoft_object_ptr_t *soft  = (call_fsoft_object_ptr_t *)value;
     str_t                    asset = unreal_fname_to_str(soft->path.asset_path_name, arena);
     str_t                    sub   = unreal_fstring_to_str(soft->path.sub_path_string, arena);

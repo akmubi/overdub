@@ -47,6 +47,7 @@ SRCS_TEST_UI :=                     \
   src/ui_mod_manager.c              \
   src/ui_nuklear.c                  \
   src/unreal.c                      \
+  src/unreal_prop.c                 \
   src/vendor.c                      \
   src/vendor_kb.c                   \
   src/builtin/cache.c               \
@@ -125,4 +126,3 @@ clean:
 -include $(OBJS_RELEASE:.o=.d)
 -include $(OBJS_TEST_UI:.o=.d)
 -include $(OBJS_TEST_LUA:.o=.d)
-

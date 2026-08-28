@@ -247,6 +247,9 @@
     <ClCompile Include="src\unreal.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\unreal_prop.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\vendor.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='TestUI|x64'">false</ExcludedFromBuild>
     </ClCompile>
@@ -297,6 +300,7 @@
     <ClInclude Include="include\ui_mod_manager.h" />
     <ClInclude Include="include\ui_nuklear.h" />
     <ClInclude Include="include\unreal.h" />
+    <ClInclude Include="include\unreal_prop.h" />
     <ClInclude Include="include\vendor_minhook.h" />
     <ClInclude Include="include\vendor_kb.h" />
     <ClInclude Include="include\vendor_nuklear.h" />

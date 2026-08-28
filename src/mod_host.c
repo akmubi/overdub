@@ -7,6 +7,7 @@
 #include "scratch.h"
 #include "sigscan.h"
 #include "unreal.h"
+#include "unreal_prop.h"
 
 #include <windows.h>
 
