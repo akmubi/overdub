@@ -168,6 +168,24 @@ mod/build/<Configuration>/example.dll
 
 A mod project should use the matching public headers from `include/` and link `build/overdub.lib`.
 
+### Building a mod outside the Overdub repository
+
+The Makefile and Visual Studio project accept an Overdub source-tree location (so the mod does not need to be inside this repository). Point both include lookup and import-library lookup at the matching Overdub build with one setting.
+
+Make:
+```sh
+make OVERDUB_DIR=/path/to/overdub CONFIG=release MOD_NAME=example
+```
+
+MSBuild:
+```batch
+msbuild mod.vcxproj /p:OverdubDir=C:\path\to\overdub /p:Configuration=Release /p:Platform=x64 /p:ModName=example
+```
+
+For multiple mod projects, set the `OVERDUB_DIR` environment variable once instead. The Makefile reads it directly, and `mod.vcxproj` uses it when `OverdubDir` was not supplied as an MSBuild property. If neither setting is present, the included in-repository templates continue to default to `..`.
+
+If `build/overdub.lib` is missing, the mod build automatically builds Overdub first with the same Debug or Release configuration. An invalid `OVERDUB_DIR` or a failed Overdub build stops the mod build with an explicit error.
+
 ## 4. Minimal Native Mod
 
 ```c

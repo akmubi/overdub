@@ -57,6 +57,12 @@
 
   <PropertyGroup>
     <ModName Condition="'$(ModName)'==''">mod</ModName>
+    <OverdubDir Condition="'$(OverdubDir)'=='' and '$(OVERDUB_DIR)'!=''">$(OVERDUB_DIR)</OverdubDir>
+    <OverdubDir Condition="'$(OverdubDir)'==''">$(ProjectDir)..</OverdubDir>
+    <OverdubIncludeDirectory Condition="'$(OverdubIncludeDirectory)'==''">$(OverdubDir)\include</OverdubIncludeDirectory>
+    <OverdubVendorDirectory Condition="'$(OverdubVendorDirectory)'==''">$(OverdubDir)\vendor</OverdubVendorDirectory>
+    <OverdubImportLibrary Condition="'$(OverdubImportLibrary)'==''">$(OverdubDir)\build\overdub.lib</OverdubImportLibrary>
+    <OverdubProject Condition="'$(OverdubProject)'==''">$(OverdubDir)\overdub.vcxproj</OverdubProject>
     <OutDir>$(ProjectDir)build\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)build\obj\$(Configuration)\</IntDir>
     <TargetName>$(ModName)</TargetName>
@@ -74,13 +80,12 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\include;$(ProjectDir)..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OverdubIncludeDirectory);$(OverdubVendorDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>overdub.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(ProjectDir)..\build;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(OverdubImportLibrary);%(AdditionalDependencies)</AdditionalDependencies>
       <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <DataExecutionPrevention>true</DataExecutionPrevention>
@@ -125,8 +130,25 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="..\include\mod.h" />
+    <ClInclude Include="$(OverdubIncludeDirectory)\mod.h" />
   </ItemGroup>
+
+  <Target Name="CheckOverdubSdk" BeforeTargets="ClCompile;Link">
+    <Error Condition="!Exists('$(OverdubIncludeDirectory)\mod.h')"
+           Text="Missing $(OverdubIncludeDirectory)\mod.h. Set OverdubDir or OVERDUB_DIR to the Overdub source directory." />
+    <Error Condition="!Exists('$(OverdubImportLibrary)') and !Exists('$(OverdubProject)')"
+           Text="Missing $(OverdubImportLibrary) and $(OverdubProject). Cannot build Overdub automatically." />
+    <Message Condition="!Exists('$(OverdubImportLibrary)')"
+             Importance="high"
+             Text="$(OverdubImportLibrary) is missing; building $(OverdubProject) ($(Configuration)|$(Platform))." />
+    <MSBuild Condition="!Exists('$(OverdubImportLibrary)')"
+             Projects="$(OverdubProject)"
+             Targets="Build"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
+    <Error Condition="!Exists('$(OverdubImportLibrary)')"
+           Text="The Overdub build completed without producing $(OverdubImportLibrary)." />
+  </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

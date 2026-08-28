@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="..\include\mod.h">
+    <ClInclude Include="$(OverdubIncludeDirectory)\mod.h">
       <Filter>Mod</Filter>
     </ClInclude>
   </ItemGroup>
