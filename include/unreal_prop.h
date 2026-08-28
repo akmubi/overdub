@@ -3,6 +3,8 @@
 
 #include "unreal.h"
 
+MOD_EXTERN_C_BEGIN
+
 /* FProperty metadata and lookup. */
 typedef enum unreal_prop_kind_e {
   UNREAL_PROP_KIND_UNKNOWN,
@@ -44,53 +46,53 @@ struct unreal_prop_integer_s {
   bool     is_signed;
 };
 
-fprop_t *
+MOD_API fprop_t *
 unreal_ustruct_find_prop(ustruct_t *s, str_t name);
 
-unreal_prop_kind_t
+MOD_API unreal_prop_kind_t
 unreal_fprop_get_kind(fprop_t *prop);
-bool
+MOD_API bool
 unreal_fprop_struct_is(fprop_t *prop, fname_t struct_name);
-bool
+MOD_API bool
 unreal_fprop_class_is(fprop_t *prop, fname_t name);
-bool
+MOD_API bool
 unreal_fprop_class_is_a(fprop_t *prop, fname_t name);
-str_t
+MOD_API str_t
 unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena);
 
-bool
+MOD_API bool
 unreal_fprop_read_bool(fprop_t *prop, const void *value, bool *out);
-bool
+MOD_API bool
 unreal_fprop_read_integer(fprop_t *prop, const void *value, unreal_prop_integer_t *out);
-bool
+MOD_API bool
 unreal_fprop_read_real(fprop_t *prop, const void *value, double *out);
-bool
+MOD_API bool
 unreal_fprop_read_name(fprop_t *prop, const void *value, fname_t *out);
 
-bool
+MOD_API bool
 unreal_fprop_write_bool(fprop_t *prop, void *value, bool input);
-bool
+MOD_API bool
 unreal_fprop_write_integer(fprop_t *prop, void *value, unreal_prop_integer_t input);
-bool
+MOD_API bool
 unreal_fprop_write_real(fprop_t *prop, void *value, double input);
-bool
+MOD_API bool
 unreal_fprop_write_name(fprop_t *prop, void *value, fname_t input);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_fprop_get_object(fprop_obj_base_t *prop, const void *value);
-uobject_t *
+MOD_API uobject_t *
 unreal_fprop_get_referenced_object(fprop_t *prop, const void *value);
-bool
+MOD_API bool
 unreal_fprop_object_is_compatible(fprop_obj_base_t *prop, uobject_t *object);
-bool
+MOD_API bool
 unreal_fprop_set_object(fprop_obj_base_t *prop, void *value, uobject_t *object);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_fweak_object_resolve(fweak_object_ptr_t weak);
-str_t
+MOD_API str_t
 unreal_fscript_delegate_push_summary(const fscript_delegate_t *delegate, arena_t *arena);
 /* NOTE: value_size is the readable size of one property element, not its complete fixed-array size */
-str_t
+MOD_API str_t
 unreal_fprop_push_value_summary(fprop_t *prop, const void *value, int32_t value_size, arena_t *arena);
 
 static inline void *
@@ -99,120 +101,122 @@ unreal_uprop_ptr(fprop_t *prop, void *container)
   return (uint8_t *)container + prop->offset_internal;
 }
 
-uint64_t
+MOD_API uint64_t
 unreal_fprop_complete_size(fprop_t *prop);
-int32_t
+MOD_API int32_t
 unreal_fprop_min_alignment(fprop_t *prop);
-void *
+MOD_API void *
 unreal_fprop_value_at(fprop_t *prop, void *value, int32_t array_idx);
-void *
+MOD_API void *
 unreal_fprop_value_in_container(fprop_t *prop, void *container, int32_t array_idx);
 
-bool
+MOD_API bool
 unreal_fprop_initialize_value(fprop_t *prop, void *value);
-bool
+MOD_API bool
 unreal_fprop_destroy_value(fprop_t *prop, void *value);
-bool
+MOD_API bool
 unreal_fprop_clear_single_value(fprop_t *prop, void *value);
-bool
+MOD_API bool
 unreal_fprop_clear_complete_value(fprop_t *prop, void *value);
-bool
+MOD_API bool
 unreal_fprop_copy_single_value(fprop_t *prop, void *dst, const void *src);
-bool
+MOD_API bool
 unreal_fprop_copy_complete_value(fprop_t *prop, void *dst, const void *src);
 
-bool
+MOD_API bool
 unreal_fprop_copy_single_value_to_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
+MOD_API bool
 unreal_fprop_copy_complete_value_to_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
+MOD_API bool
 unreal_fprop_copy_single_value_from_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
+MOD_API bool
 unreal_fprop_copy_complete_value_from_script_vm(fprop_t *prop, void *dst, const void *src);
-bool
+MOD_API bool
 unreal_fprop_single_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags);
-bool
+MOD_API bool
 unreal_fprop_complete_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags);
-bool
+MOD_API bool
 unreal_fprop_value_hash(fprop_t *prop, const void *value, uint32_t *out_hash);
-bool
+MOD_API bool
 unreal_fprop_same_type(fprop_t *prop, fprop_t *other);
 
-void
+MOD_API void
 unreal_fprop_initialize_in_container(fprop_t *prop, void *container);
-void
+MOD_API void
 unreal_fprop_destroy_in_container(fprop_t *prop, void *container);
 
-bool
+MOD_API bool
 unreal_ustruct_initialize_struct(ustruct_t *struct_type, void *memory, int32_t array_dim);
-bool
+MOD_API bool
 unreal_ustruct_destroy_struct(ustruct_t *struct_type, void *memory, int32_t array_dim);
 
-const wchar_t *
+MOD_API const wchar_t *
 unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner);
 
 /* NOTE: imports one initialized property element transactionally. text uses engine's ImportText literal syntax */
-bool
+MOD_API bool
 unreal_fprop_import_text(fprop_t *prop, void *value, uobject_t *owner, str_t text, arena_t *arena);
 
 /* Reflected dynamic containers. Indices are Unreal's zero-based sparse/array indices. */
-int32_t
+MOD_API int32_t
 unreal_array_num(const void *array, fprop_array_t *prop);
-void *
+MOD_API void *
 unreal_array_get(void *array, fprop_array_t *prop, int32_t idx);
-int32_t
+MOD_API int32_t
 unreal_array_add(void *array, fprop_array_t *prop, const void *value);
-void
+MOD_API void
 unreal_array_insert(void *array, fprop_array_t *prop, int32_t idx, const void *value);
-void
+MOD_API void
 unreal_array_remove(void *array, fprop_array_t *prop, int32_t idx);
-void
+MOD_API void
 unreal_array_resize(void *array, fprop_array_t *prop, int32_t size);
-void
+MOD_API void
 unreal_array_set(void *array, fprop_array_t *prop, int32_t idx, const void *value, bool size_to_fit);
-bool
+MOD_API bool
 unreal_array_clear(void *array, fprop_array_t *prop);
 
-int32_t
+MOD_API int32_t
 unreal_set_num(const void *set, fprop_set_t *prop);
-int32_t
+MOD_API int32_t
 unreal_set_max_index(const void *set, fprop_set_t *prop);
-bool
+MOD_API bool
 unreal_set_is_valid_index(const void *set, fprop_set_t *prop, int32_t idx);
-const void *
+MOD_API const void *
 unreal_set_get(const void *set, fprop_set_t *prop, int32_t idx);
-int32_t
+MOD_API int32_t
 unreal_set_find_index(const void *set, fprop_set_t *prop, const void *value);
-bool
+MOD_API bool
 unreal_set_contains(const void *set, fprop_set_t *prop, const void *value);
-void
+MOD_API void
 unreal_set_add(void *set, fprop_set_t *prop, const void *value);
-bool
+MOD_API bool
 unreal_set_remove(void *set, fprop_set_t *prop, const void *value);
-bool
+MOD_API bool
 unreal_set_clear(void *set, fprop_set_t *prop);
 
-int32_t
+MOD_API int32_t
 unreal_map_num(const void *map, fprop_map_t *prop);
-int32_t
+MOD_API int32_t
 unreal_map_max_index(const void *map, fprop_map_t *prop);
-bool
+MOD_API bool
 unreal_map_is_valid_index(const void *map, fprop_map_t *prop, int32_t idx);
-const void *
+MOD_API const void *
 unreal_map_get_key(const void *map, fprop_map_t *prop, int32_t idx);
-void *
+MOD_API void *
 unreal_map_get_value(void *map, fprop_map_t *prop, int32_t idx);
-int32_t
+MOD_API int32_t
 unreal_map_find_index(const void *map, fprop_map_t *prop, const void *key);
-void *
+MOD_API void *
 unreal_map_find_value_ptr(void *map, fprop_map_t *prop, const void *key);
-bool
+MOD_API bool
 unreal_map_clear(void *map, fprop_map_t *prop);
-void
+MOD_API void
 unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val);
-bool
+MOD_API bool
 unreal_map_remove(void *map, fprop_map_t *prop, const void *key);
-bool
+MOD_API bool
 unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val);
+
+MOD_EXTERN_C_END
 
 #endif /* UNREAL_PROP_H */

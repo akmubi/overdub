@@ -19,6 +19,24 @@ TMAP_DEFINE_FUNCS(unreal_tmap_fname_uint8ptr, tmap_fname_uint8ptr_t, fname_t, ui
 
 /* ===================================================== FNAME ====================================================== */
 
+fname_pool_t *
+unreal_get_name_pool(void)
+{
+  return globals.name_pool;
+}
+
+fuobject_array_t *
+unreal_get_object_array(void)
+{
+  return globals.uobjects;
+}
+
+uworld_t *
+unreal_get_current_world(void)
+{
+  return globals.gworld_ptr ? *globals.gworld_ptr : NULL;
+}
+
 static inline int
 u32_count_digits(uint32_t v)
 {
@@ -462,6 +480,22 @@ static uint32_t g_fcrc_table[256] = {
   0x89B8FD09, 0x8D79E0BE, 0x803AC667, 0x84FBDBD0, 0x9ABC8BD5, 0x9E7D9662, 0x933EB0BB, 0x97FFAD0C,
   0xAFB010B1, 0xAB710D06, 0xA6322BDF, 0xA2F33668, 0xBCB4666D, 0xB8757BDA, 0xB5365D03, 0xB1F740B4,
 };
+
+fstring_t
+unreal_fstring_view_from_str16(str16_t s)
+{
+  return (fstring_t){
+    .data = s.data,
+    .len  = (int32_t)s.len,
+    .max  = (int32_t)s.len,
+  };
+}
+
+str16_t
+unreal_fstring_view_to_str16(fstring_t fs)
+{
+  return str16_from_wstr_with_cap(fs.data, fs.len);
+}
 
 fstring_t
 unreal_fstring_from_str(str_t s, arena_t *arena)
@@ -1879,6 +1913,28 @@ unreal_udata_table_find_row(udata_table_t *table, fname_t row_name)
 }
 
 /* ================================================= GAMEPLAY TAGS ================================================== */
+
+bool
+unreal_add_gameplay_tag(fname_t tag_name)
+{
+  if (unreal_fname_is_none(tag_name) || globals.num_custom_tags >= CONFIG_MAX_CUSTOM_GAMEPLAY_TAGS) {
+    return false;
+  }
+
+  globals.custom_tags[globals.num_custom_tags++].tag_name = tag_name;
+  return true;
+}
+
+bool
+unreal_check_gameplay_tag_exists(fname_t tag_name)
+{
+  if (unreal_fname_is_none(tag_name)) {
+    return false;
+  }
+
+  fgameplay_tag_t tag = unreal_gameplay_tags_manager_request_tag(tag_name);
+  return !unreal_fname_is_none(tag.tag_name);
+}
 
 bool
 unreal_gameplay_tags_manager_add(fname_t tag_name)

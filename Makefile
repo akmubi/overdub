@@ -59,6 +59,7 @@ SRCS_TEST_UI :=                     \
   src/builtin/ufunction_call.c      \
   src/builtin/ufunction_tracer.c    \
   src/builtin/tweaks.c              \
+  test/test_ui_signatures.c         \
   test/test_ui_overview.c           \
   test/test_ui_style_configurator.c
 
@@ -76,15 +77,15 @@ all: debug
 
 debug: $(OBJS_DEBUG) | $(BUILD_DIR)
 	@printf "LINK\t$(BUILD_DIR)/overdub.dll\n"
-	@$(CC) -o $(BUILD_DIR)/overdub.dll $(OBJS_DEBUG) $(LDFLAGS_COMMON) $(LDFLAGS_DEBUG) $(LIBS_DLL)
+	@$(CC) -o $(BUILD_DIR)/overdub.dll $(OBJS_DEBUG) $(LDFLAGS_COMMON) $(LDFLAGS_DEBUG) -Wl,--out-implib,$(BUILD_DIR)/overdub.lib $(LIBS_DLL)
 
 release: $(OBJS_RELEASE) | $(BUILD_DIR)
 	@printf "LINK\t$(BUILD_DIR)/overdub.dll\n"
-	@$(CC) -o $(BUILD_DIR)/overdub.dll $(OBJS_RELEASE) $(LDFLAGS_COMMON) $(LDFLAGS_RELEASE) $(LIBS_DLL)
+	@$(CC) -o $(BUILD_DIR)/overdub.dll $(OBJS_RELEASE) $(LDFLAGS_COMMON) $(LDFLAGS_RELEASE) -Wl,--out-implib,$(BUILD_DIR)/overdub.lib $(LIBS_DLL)
 
 test_ui: test/test_ui.c $(OBJS_TEST_UI) | $(BUILD_DIR)
 	@printf "LINK\t$(BUILD_DIR)/overdub_test_ui.exe\n"
-	@$(CC) $(CFLAGS_COMMON) -Wno-missing-braces -g3 -O0 -DBUILD_TEST_UI -o $(BUILD_DIR)/overdub_test_ui.exe test/test_ui.c $(OBJS_TEST_UI) $(LIBS_TEST_UI)
+	@$(CC) $(CFLAGS_COMMON) -Wno-missing-braces -g3 -O0 -DBUILD_TEST_UI -DOVERDUB_STATIC -o $(BUILD_DIR)/overdub_test_ui.exe test/test_ui.c $(OBJS_TEST_UI) $(LIBS_TEST_UI)
 	@printf "RUN\t$(BUILD_DIR)/overdub_test_ui.exe\n"
 	@wine $(BUILD_DIR)/overdub_test_ui.exe
 
@@ -101,17 +102,17 @@ $(BUILD_DIR) $(OBJ_DIR_DEBUG) $(OBJ_DIR_RELEASE) $(OBJ_DIR_TEST) $(OBJ_DIR_TEST_
 $(OBJ_DIR_DEBUG)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@printf "CC\t$@\n"
-	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -DBUILD_DEBUG -MMD -MP -c $< -o $@
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -DBUILD_DEBUG -DOVERDUB_BUILD_DLL -MMD -MP -c $< -o $@
 
 $(OBJ_DIR_RELEASE)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@printf "CC\t$@\n"
-	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) -DBUILD_RELEASE -MMD -MP -c $< -o $@
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) -DBUILD_RELEASE -DOVERDUB_BUILD_DLL -MMD -MP -c $< -o $@
 
 $(OBJ_DIR_TEST_UI)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@printf "CC\t$@\n"
-	@$(CC) $(CFLAGS_COMMON) -g3 -O0 -DBUILD_TEST_UI -MMD -MP -c $< -o $@
+	@$(CC) $(CFLAGS_COMMON) -g3 -O0 -DBUILD_TEST_UI -DOVERDUB_STATIC -MMD -MP -c $< -o $@
 
 $(OBJ_DIR_TEST_LUA)/%.o: %.c
 	@mkdir -p $(dir $@)

@@ -594,32 +594,113 @@ ui_input_event_from_win32(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam, inpu
   return false;
 }
 
+static void
+test_input_key_down(input_key_state_t *key)
+{
+  if (!key->down) {
+    key->pressed = true;
+  }
+  key->down = true;
+}
+
+static void
+test_input_key_up(input_key_state_t *key)
+{
+  if (key->down) {
+    key->released = true;
+  }
+  key->down = false;
+}
+
+static void
+test_input_sync_virtual_modifier(input_key_kind_t key)
+{
+  input_key_kind_t virt, left, right;
+
+  switch (key) {
+  case INPUT_KEY_LEFT_CTRL:
+  case INPUT_KEY_RIGHT_CTRL:
+    virt  = INPUT_KEY_CTRL;
+    left  = INPUT_KEY_LEFT_CTRL;
+    right = INPUT_KEY_RIGHT_CTRL;
+    break;
+
+  case INPUT_KEY_LEFT_SHIFT:
+  case INPUT_KEY_RIGHT_SHIFT:
+    virt  = INPUT_KEY_SHIFT;
+    left  = INPUT_KEY_LEFT_SHIFT;
+    right = INPUT_KEY_RIGHT_SHIFT;
+    break;
+
+  case INPUT_KEY_LEFT_ALT:
+  case INPUT_KEY_RIGHT_ALT:
+    virt  = INPUT_KEY_ALT;
+    left  = INPUT_KEY_LEFT_ALT;
+    right = INPUT_KEY_RIGHT_ALT;
+    break;
+
+  default:
+    return;
+  }
+
+  input_key_state_t *state = &globals.keys[virt];
+  bool               down  = globals.keys[left].down || globals.keys[right].down;
+  if (down) {
+    test_input_key_down(state);
+  } else {
+    test_input_key_up(state);
+  }
+}
+
 static bool
 on_input_event(input_event_t *ev)
 {
-  globals.keys_down[INPUT_KEY_MOUSE_WHEEL_UP]   = false;
-  globals.keys_down[INPUT_KEY_MOUSE_WHEEL_DOWN] = false;
+  ASSERT(ev->key < INPUT_KEY_MAX);
 
   switch (ev->kind) {
   case INPUT_EVENT_KEY_DOWN:
   case INPUT_EVENT_MOUSE_DOWN:
-  case INPUT_EVENT_MOUSE_DBLCLICK:
-    globals.keys_down[ev->key] = true;
-    break;
-  case INPUT_EVENT_KEY_UP:
-  case INPUT_EVENT_MOUSE_UP:
-    globals.keys_down[ev->key] = false;
-    break;
-  case INPUT_EVENT_MOUSE_WHEEL:
-    /* MOUSE_WHEEL_UP or MOUSE_WHEEL_DOWN */
-    globals.keys_down[ev->key] = true;
-    break;
-  case INPUT_EVENT_APP_ACTIVATION:
-    if (!ev->app_activated) {
-      /* out of focus, all held keys should be released */
-      mem_zero(globals.keys_down, sizeof(globals.keys_down));
+  case INPUT_EVENT_MOUSE_DBLCLICK: {
+    if (ev->key != INPUT_KEY_NONE) {
+      test_input_key_down(&globals.keys[ev->key]);
+      test_input_sync_virtual_modifier(ev->key);
     }
     break;
+  }
+
+  case INPUT_EVENT_KEY_UP:
+  case INPUT_EVENT_MOUSE_UP: {
+    if (ev->key != INPUT_KEY_NONE) {
+      test_input_key_up(&globals.keys[ev->key]);
+      test_input_sync_virtual_modifier(ev->key);
+    }
+    break;
+  }
+
+  case INPUT_EVENT_MOUSE_WHEEL: {
+    if (ev->wheel_delta > 0.0f) {
+      globals.keys[INPUT_KEY_MOUSE_WHEEL_UP].pressed = true;
+    } else if (ev->wheel_delta < 0.0f) {
+      globals.keys[INPUT_KEY_MOUSE_WHEEL_DOWN].pressed = true;
+    }
+    globals.wheel_delta += ev->wheel_delta;
+    break;
+  }
+
+  case INPUT_EVENT_APP_ACTIVATION: {
+    if (!ev->app_activated) {
+      /* out of focus, all held keys should be released */
+      input_key_lost_focus();
+    }
+    break;
+  }
+  }
+
+  bool force_consume = false;
+  if ((ev->kind == INPUT_EVENT_KEY_UP || ev->kind == INPUT_EVENT_MOUSE_UP) &&
+      ev->key != INPUT_KEY_NONE && globals.consumed_down[ev->key]) {
+    globals.consumed_down[ev->key] = false;
+    force_consume                  = true;
   }
 
   bool        consumed = false;
@@ -656,7 +737,14 @@ on_input_event(input_event_t *ev)
 #else
   (void)consumer;
 #endif
-  return consumed;
+
+  if (consumed &&
+      (ev->kind == INPUT_EVENT_KEY_DOWN || ev->kind == INPUT_EVENT_MOUSE_DOWN) &&
+      ev->key != INPUT_KEY_NONE) {
+    globals.consumed_down[ev->key] = true;
+  }
+
+  return consumed || force_consume;
 }
 
 static LRESULT CALLBACK
@@ -1409,6 +1497,7 @@ main(int argc, char **argv)
   }
 
   mod_manager_start_dlls(&globals.mod_manager);
+  globals.engine_inited = true;
 
   uint64_t frame_time_prev = time_now_us();
   int      running         = 1;
@@ -1472,8 +1561,6 @@ main(int argc, char **argv)
     }
     ASSERT(SUCCEEDED(hr));
 
-    mem_copy(globals.prev_keys_down, globals.keys_down, sizeof(globals.prev_keys_down));
-
     scratch_reset();
     if (text_profile && globals.frame_counter == 60) {
       profiler_reset();
@@ -1482,6 +1569,7 @@ main(int argc, char **argv)
       running = 0;
     }
     globals.frame_counter += 1;
+    input_key_clear_transient_state();
 
     frame_time_prev = frame_time_now;
   }

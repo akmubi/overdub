@@ -4,7 +4,7 @@
 #include "file.h"
 #include "globals.h"
 #include "log.h"
-#include "mod_host.h"
+#include "mod.h"
 #include "path.h"
 #include "scratch.h"
 
@@ -199,13 +199,13 @@ ufunc_is(ufunc_t *func, str_t func_name)
 static bool
 should_disable_tutorials(tweaks_t *tweaks)
 {
-  return tweaks && tweaks->inited && mod_cfg_get_bool(&globals.mod_manager, tweaks->cfg.disable_tutorials_h);
+  return tweaks && tweaks->inited && mod_manager_cfg_get_bool(&globals.mod_manager, tweaks->cfg.disable_tutorials_h);
 }
 
 static bool
 should_restore_jbox_music(tweaks_t *tweaks)
 {
-  return tweaks && tweaks->inited && mod_cfg_get_bool(&globals.mod_manager, tweaks->cfg.restore_jbox_h);
+  return tweaks && tweaks->inited && mod_manager_cfg_get_bool(&globals.mod_manager, tweaks->cfg.restore_jbox_h);
 }
 
 static bool
@@ -325,12 +325,12 @@ tweaks_on_jbox_controller_delete(uobject_t *obj, int32_t idx, void *user)
 }
 
 static bool MOD_CALL
-tweaks_init(const mod_host_api_t *host, mod_handle_t h)
+tweaks_init(mod_handle_t h)
 {
   tweaks_t *tweaks = &g_tweaks;
   mem_zero(tweaks, sizeof(*tweaks));
 
-  tweaks->perm = mod_arena_handle_resolve(host->get_perm(h));
+  tweaks->perm = mod_arena_handle_resolve(mod_get_perm(h));
   ASSERT(tweaks->perm != NULL);
 
   tweaks->cfg.disable_tutorials_h     = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DISABLE_TUTORIALS));
@@ -340,16 +340,18 @@ tweaks_init(const mod_host_api_t *host, mod_handle_t h)
 
 
   void *jbox_play_music_addr = NULL;
-  host->sigscan("JukeboxPlayMusic", "48 89 5C 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 4C 8B F2 48 8B F9", 0, 0, NULL, &jbox_play_music_addr);
+  sigscan_entry_t jbox_play_music_sig = SIG_ENTRY_DIRECT(jbox_play_music_addr,
+                                                          "48 89 5C 24 ? 48 89 7C 24 ? 41 56 48 83 EC ? 4C 8B F2 48 8B F9");
+  mod_sigscan(&jbox_play_music_sig);
   tweaks->jbox.play_music = jbox_play_music_addr;
 
-  tweaks->jbox.state_path = path_join(tweaks->perm, host->get_mod_dir(h), STR_LIT("jukebox_state.ini"));
+  tweaks->jbox.state_path = path_join(tweaks->perm, mod_get_mod_dir(h), STR_LIT("jukebox_state.ini"));
   tweaks_load_jbox_state(&tweaks->jbox.saved_state, tweaks->jbox.state_path);
 
   tweaks->jbox.controller_cls_name = unreal_fname_from_str(STR_LIT("JukeBoxController_BP_C"), FNAME_FIND);
 
-  host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_CREATE, tweaks_on_jbox_controller_create, NULL);
-  host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_DELETE, tweaks_on_jbox_controller_delete, NULL);
+  mod_register_uobject_listener(h, UOBJECT_LISTENER_KIND_CREATE, tweaks_on_jbox_controller_create, NULL);
+  mod_register_uobject_listener(h, UOBJECT_LISTENER_KIND_DELETE, tweaks_on_jbox_controller_delete, NULL);
 
   uclass_t *jbox_controller_cls = unreal_uclass_find(STR_LIT("JukeBoxController_BP_C"), false, true);
   if (jbox_controller_cls) {
@@ -387,7 +389,7 @@ tweaks_process_event_pre(mod_handle_t h, uobject_t *self, ufunc_t *func, void *p
     should_consume = true;
   }
 
-  if (mod_cfg_get_bool(&globals.mod_manager, tweaks->cfg.enable_infinite_jumps_h)) {
+  if (mod_manager_cfg_get_bool(&globals.mod_manager, tweaks->cfg.enable_infinite_jumps_h)) {
     if (func && unreal_fname_match_text(func->name, STR_LIT("CanJumpInternal"), false, true)) {
       *((uint8_t *)params) = 1;
       should_consume = true;
@@ -496,7 +498,7 @@ tweaks_tick(mod_handle_t h, float delta)
     }
   }
 
-  if (keybind_is_pressed(mod_cfg_get_keybind(&globals.mod_manager, tweaks->cfg.debug_widget_keybind_h))) {
+  if (keybind_is_pressed(mod_manager_cfg_get_keybind(&globals.mod_manager, tweaks->cfg.debug_widget_keybind_h))) {
     static uclass_t *debug_cls  = NULL;
     static ufunc_t  *debug_show = NULL;
 

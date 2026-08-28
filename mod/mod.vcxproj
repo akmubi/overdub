@@ -74,12 +74,13 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\include;$(ProjectDir)..\vendor;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>overdub.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\build;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ImportLibrary>$(IntDir)$(TargetName).lib</ImportLibrary>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
       <DataExecutionPrevention>true</DataExecutionPrevention>
@@ -121,20 +122,10 @@
 
   <ItemGroup>
     <ClCompile Include="main.c" />
-    <ClCompile Include="mod_sdk.c" />
-    <ClCompile Include="mod_unreal.c" />
-    <ClCompile Include="mod_nuklear.c">
-      <WarningLevel>TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="mod_api.h" />
-    <ClInclude Include="mod_sdk.h" />
-    <ClInclude Include="mod_unreal.h" />
-    <ClInclude Include="mod_nuklear.h">
-      <WarningLevel>TurnOffAllWarnings</WarningLevel>
-    </ClInclude>
+    <ClInclude Include="..\include\mod.h" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

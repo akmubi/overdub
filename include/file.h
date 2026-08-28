@@ -4,6 +4,8 @@
 #include "types.h"
 #include "str.h"
 
+MOD_EXTERN_C_BEGIN
+
 typedef uint8_t dir_entry_kind_t;
 enum {
   DIR_ENTRY_FILE,
@@ -24,47 +26,49 @@ struct dir_entry_list_s {
   int          count;
 };
 
-bool
+MOD_API bool
 file_exists(str_t path);
-uint64_t
+MOD_API uint64_t
 file_size(str_t path);
 
-str_t
+MOD_API str_t
 file_read_all(str_t path, arena_t *arena);
-bool
+MOD_API bool
 file_write(str_t s, str_t path);
-bool
+MOD_API bool
 file_write_lines(str_list_t lines, str_t path);
-bool
+MOD_API bool
 file_copy(str_t dst, str_t src);
-bool
+MOD_API bool
 file_delete(str_t path);
 
-bool
+MOD_API bool
 dir_exists(str_t path);
 
 /* create a directory (does nothing if it already exists) */
-bool
+MOD_API bool
 dir_create(str_t path);
 
 /* create a directory and all parent directories */
-bool
+MOD_API bool
 dir_create_recursive(str_t path);
 
 /* list the contents of a directory (excludes "." and "..") */
-dir_entry_list_t
+MOD_API dir_entry_list_t
 dir_list(str_t path, arena_t *arena);
 
 /* list contents matching a wildcard pattern (e.g. "*.dll") */
-dir_entry_list_t
+MOD_API dir_entry_list_t
 dir_list_filter(str_t path, str_t pattern, arena_t *arena);
 
 /* delete a directory (must be empty) */
-bool
+MOD_API bool
 dir_delete(str_t path);
 
 /* delete a directory and all its contents recursively */
-bool
+MOD_API bool
 dir_delete_recursive(str_t path);
+
+MOD_EXTERN_C_END
 
 #endif /* FILE_H */

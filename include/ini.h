@@ -4,6 +4,8 @@
 #include "str.h"
 #include "arena.h"
 
+MOD_EXTERN_C_BEGIN
+
 typedef struct ini_section_s ini_section_t;
 struct ini_section_s {
   ini_section_t *next;
@@ -19,17 +21,19 @@ struct ini_section_list_s {
   int            count;
 };
 
-bool
+MOD_API bool
 ini_is_line_section(str_t line);
-bool
+MOD_API bool
 ini_parse_section_header(str_t line, str_t *out_name, str_t *out_arg);
 
-ini_section_list_t
+MOD_API ini_section_list_t
 ini_parse_sections(arena_t *arena, str_array_t lines);
 
-bool
+MOD_API bool
 ini_parse_kv(str_t line, str_t *out_key, str_t *out_value);
-str_array_t
+MOD_API str_array_t
 ini_split_lines(arena_t *arena, str_t text);
+
+MOD_EXTERN_C_END
 
 #endif /* INI_H */

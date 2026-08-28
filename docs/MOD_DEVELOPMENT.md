@@ -3,7 +3,7 @@
 This guide covers the parts of Unreal Engine and Overdub that are directly useful when making a mod for Hi-Fi RUSH. It assumes basic C/C++ knowledge.
 Hi-Fi RUSH uses a modified Unreal Engine 4.27 build. Public UE 4.27 source is useful for reference, but always verify addresses, layouts, and behavior against the game build you support.
 
-The public SDK is in [`mod/`](../mod/). A mod should not depend on private loader structures in `src/` or `include/`.
+The public SDK headers are in [`include/`](../include/). Include [`mod.h`](../include/mod.h) for the lifecycle ABI and mod-owned resources, and include the other public headers for shared utility, Unreal, and Nuklear APIs. Mods link against the small `build/overdub.lib` import library; the implementations live in `overdub.dll`.
 
 ## 1. Choose a Mod Type
 
@@ -166,36 +166,35 @@ Output:
 mod/build/<Configuration>/example.dll
 ```
 
-A separate project should compile the matching SDK files from `mod/`.
+A mod project should use the matching public headers from `include/` and link `build/overdub.lib`.
 
 ## 4. Minimal Native Mod
 
 ```c
-#include "mod_sdk.h"
+#include "mod.h"
 
 static bool
-example_init(const mod_host_api_t *host, mod_t mod)
+example_init(mod_handle_t mod)
 {
-  if (!mod_sdk_init(host, mod)) {
-    return false;
-  }
-
-  MOD_LOG_INFO("Example mod started");
+  MOD_LOG_INFO(mod, "Example mod started");
   return true;
 }
 
 static void
-example_deinit(mod_t mod)
+example_deinit(mod_handle_t mod)
 {
-  (void)mod;
-  MOD_LOG_INFO("Example mod stopped");
+  MOD_LOG_INFO(mod, "Example mod stopped");
+}
+
+MOD_ABI_VERSION_ENTRY()
+{
+  return MOD_ABI_VERSION;
 }
 
 MOD_ENTRY()
 {
   static const mod_api_t api = {
     .struct_size = sizeof(mod_api_t),
-    .abi_version = MOD_ABI_VERSION,
     .init        = example_init,
     .deinit      = example_deinit,
   };
@@ -210,7 +209,6 @@ MOD_ENTRY()
 ```c
 struct mod_api_s {
   uint32_t                  struct_size;
-  mod_version_t             abi_version;
   mod_init_fn_t             init;
   mod_deinit_fn_t           deinit;
   mod_tick_fn_t             tick;
@@ -224,15 +222,9 @@ struct mod_api_s {
 };
 ```
 
-Always set `struct_size` and `abi_version`. Major and minor ABI versions must match the loader. Patch differences are ignored. A patch release may append optional host functions; SDK wrappers check `struct_size` before using them.
+Always export `mod_abi_version()` and set `struct_size`. Major and minor ABI versions must match the loader; patch differences are ignored. `mod_entry()` remains focused on returning the callback table.
 
-If a mod requires an optional capability rather than merely using it when available, reject the host explicitly during `init`. For example:
-```c
-if (!unreal_map_helpers_available()) {
-  MOD_LOG_ERROR("this mod requires reflected map helpers");
-  return false;
-}
-```
+Before loading a mod, Overdub checks every symbol it imports from `overdub.dll`. If the mod was linked against a newer API, the error lists the exact missing function names. After loading, Overdub calls `mod_abi_version()` and rejects incompatible callback ABIs before resolving `mod_entry()`.
 
 ## 5. Lifecycle and Cleanup
 
@@ -251,7 +243,7 @@ static int g_counter;
 
 Reset per-run state in `init`, and clear pointers in `deinit`.
 
-After `deinit`, Overdub removes SDK-managed hooks, UObject listeners, commands, and mod arenas.
+After `deinit`, Overdub removes manager-owned hooks, UObject listeners, commands, and mod arenas.
 
 The mod must clean up anything Overdub does not own, such as threads, OS handles, external allocations, hooks, patches , etc.
 
@@ -274,7 +266,7 @@ Do not log every frame or every reflected call in normal use.
 ### Permanent arena
 
 ```c
-mod_arena_t arena = mod_get_perm();
+mod_arena_handle_t arena = mod_get_perm(mod);
 ```
 
 Use it for state that lives for one active run of the mod. It is destroyed after `deinit`.
@@ -287,18 +279,14 @@ typedef struct {
 static state_t *g_state;
 
 static bool
-example_init(const mod_host_api_t *host, mod_t mod)
+example_init(mod_handle_t mod)
 {
-  if (!mod_sdk_init(host, mod)) {
-    return false;
-  }
-
-  g_state = MOD_ARENA_PUSH_ZERO(mod_get_perm(), state_t);
+  g_state = MOD_ARENA_PUSH_ZERO(mod_get_perm(mod), state_t);
   return g_state != NULL;
 }
 
 static void
-example_deinit(mod_t mod)
+example_deinit(mod_handle_t mod)
 {
   (void)mod;
   g_state = NULL;
@@ -308,7 +296,7 @@ example_deinit(mod_t mod)
 ### Dynamic arena
 
 ```c
-mod_arena_t arena = mod_arena_create(64 * MB, 64 * KB);
+mod_arena_handle_t arena = mod_arena_create(mod, 64 * MB, 64 * KB);
 ```
 
 Use a dynamic arena when a subsystem needs its own reset or destroy point.
@@ -316,7 +304,7 @@ Use a dynamic arena when a subsystem needs its own reset or destroy point.
 ### Scratch arena
 
 ```c
-tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_INVALID);
+mod_tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_HANDLE_INVALID);
 
 /* temporary allocations */
 
@@ -325,7 +313,7 @@ mod_scratch_end(tmp);
 
 Scratch pointers become invalid at `mod_scratch_end`. Never store them.
 
-Treat `mod_t`, `mod_cfg_t`, and `mod_arena_t` as opaque handles. Do not cast them to pointers or depend on their representation.
+Treat `mod_handle_t`, `mod_cfg_handle_t`, and `mod_arena_handle_t` as opaque handles. Do not cast them to pointers or depend on their representation.
 
 ## 8. Unreal Runtime Basics
 
@@ -342,7 +330,7 @@ The outer chain is not an inheritance chain.
 
 Every actor is a UObject, but many UObjects are not actors. Classes, functions, assets, etc. are also UObjects.
 
-A UObject contains a class, name, outer, flags, and an index in the global UObject array. Overdub exposes the current target layouts through `mod_unreal.h`.
+A UObject contains a class, name, outer, flags, and an index in the global UObject array. Overdub exposes the current target layouts through `include/unreal.h`.
 
 ### Object lifetime
 
@@ -371,12 +359,10 @@ Function /Script/Engine.Actor.K2_DestroyActor
 
 ## 9. Finding UObjects
 
-Include the Unreal helpers and initialize their common cache:
+Include the Unreal helpers. Overdub initializes the shared runtime state before starting mods:
 
 ```c
-#include "mod_unreal.h"
-
-unreal_cache_objects();
+#include "unreal.h"
 ```
 
 Find a class by full name:
@@ -435,11 +421,11 @@ on_deleted(uobject_t *obj, int32_t idx, void *user)
 Register them during `init`:
 
 ```c
-if (!mod_register_uobject_listener(UOBJECT_LISTENER_KIND_CREATE, on_created, NULL)) {
+if (!mod_register_uobject_listener(mod, UOBJECT_LISTENER_KIND_CREATE, on_created, NULL)) {
   return false;
 }
 
-if (!mod_register_uobject_listener(UOBJECT_LISTENER_KIND_DELETE, on_deleted, NULL)) {
+if (!mod_register_uobject_listener(mod, UOBJECT_LISTENER_KIND_DELETE, on_deleted, NULL)) {
   return false;
 }
 ```
@@ -468,18 +454,18 @@ Start with plain numeric values, names, and object pointers. Use the SDK helpers
 Do not infer offsets from a C declaration.
 
 ```c
-/* NOTE: error handling is omitted for briefty */
+/* NOTE: error handling is omitted for brevity */
 static bool
 call_set_count(uobject_t *obj, int32_t value)
 {
   if (!obj || !unreal_uobject_is_valid(obj)) {
-    return;
+    return false;
   }
 
   ufunc_t *func       = unreal_ustruct_find_func((ustruct_t *)obj->cls, STR_LIT("SetCount"));
   fprop_t *count_prop = unreal_ustruct_find_prop((ustruct_t *)func, STR_LIT("Count"));
 
-  tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_INVALID);
+  mod_tmp_arena_t tmp = mod_scratch_begin(MOD_ARENA_HANDLE_INVALID);
   {
     uint8_t *params = MOD_ARENA_PUSH_ARRAY_ZERO(tmp.arena, uint8_t, func->params_size);
     int32_t *count  = (int32_t *)unreal_uprop_ptr(count_prop, params);
@@ -500,8 +486,8 @@ This example is only valid when `Count` is really a plain `int32_t`. Complex inp
 A mod can observe or replace game-thread reflected calls:
 
 ```c
-bool pe_pre(mod_t mod, uobject_t *obj, ufunc_t *func, void *params);
-void pe_post(mod_t mod, uobject_t *obj, ufunc_t *func, void *params, bool consumed);
+bool pe_pre(mod_handle_t mod, uobject_t *obj, ufunc_t *func, void *params);
+void pe_post(mod_handle_t mod, uobject_t *obj, ufunc_t *func, void *params, bool consumed);
 ```
 
 Returning `true` from `pe_pre` consumes the call and skips the original `ProcessEvent`. Use this carefully. The original may produce return values, update state, run Blueprint logic, etc.
@@ -519,17 +505,13 @@ Never keep the `params` pointer after the callback.
 Get handles during `init`:
 
 ```c
-static mod_cfg_t g_enabled_cfg;
+static mod_cfg_handle_t g_enabled_cfg;
 
 static bool
-example_init(const mod_host_api_t *host, mod_t mod)
+example_init(mod_handle_t mod)
 {
-  if (!mod_sdk_init(host, mod)) {
-    return false;
-  }
-
-  g_enabled_cfg = mod_get_cfg_by_id(STR_LIT("feature_enabled"));
-  return g_enabled_cfg != MOD_CFG_INVALID;
+  g_enabled_cfg = mod_get_cfg_by_id(mod, STR_LIT("feature_enabled"));
+  return g_enabled_cfg != MOD_CFG_HANDLE_INVALID;
 }
 ```
 
@@ -549,14 +531,14 @@ Direct input callback:
 
 ```c
 static bool
-example_input(mod_t mod, input_event_t *event)
+example_input(mod_handle_t mod, input_event_t *event)
 {
   (void)mod;
 
   if (event->kind == INPUT_EVENT_KEY_DOWN &&
       event->key == INPUT_KEY_F8 &&
       !event->is_repeat) {
-    MOD_LOG_INFO("F8 pressed");
+    MOD_LOG_INFO(mod, "F8 pressed");
     return true;
   }
 
@@ -570,7 +552,7 @@ For a configured keybind, polling from `tick` is often simpler:
 
 ```c
 keybind_t bind = mod_cfg_get_keybind(g_action_key_cfg);
-if (mod_keybind_is_pressed(bind)) {
+if (keybind_is_pressed(bind)) {
   /* run once */
 }
 ```
@@ -583,19 +565,18 @@ Register commands during `init`:
 
 ```c
 static void
-example_command(mod_t mod, str_t name, str_t args, void *user)
+example_command(mod_handle_t mod, str_t name, str_t args, void *user)
 {
-  (void)mod;
   (void)name;
   (void)user;
 
-  MOD_LOG_INFO("args: " STR_FMT, STR_ARG(args));
+  MOD_LOG_INFO(mod, "args: " STR_FMT, STR_ARG(args));
 }
 
 static bool
-register_commands(void)
+register_commands(mod_handle_t mod)
 {
-  return mod_register_cmd(STR_LIT("example.run"), STR_LIT("Runs the example command"), example_command, NULL);
+  return mod_register_cmd(mod, STR_LIT("example.run"), STR_LIT("Runs the example command"), example_command, NULL);
 }
 ```
 
@@ -603,15 +584,15 @@ Prefix command names to avoid collisions with other mods.
 
 ## 17. Custom UI
 
-Include the matching Overdub Nuklear wrapper:
+Include Overdub's public Nuklear header:
 
 ```c
-#include "mod_nuklear.h"
+#include "vendor_nuklear.h"
 ```
 
 ```c
 static void
-example_draw_panel(mod_t mod, struct nk_context *ctx)
+example_draw_panel(mod_handle_t mod, struct nk_context *ctx)
 {
   (void)mod;
 
@@ -624,7 +605,7 @@ example_draw_panel(mod_t mod, struct nk_context *ctx)
 }
 ```
 
-Overdub uses a modified Nuklear version. Compile against the SDK shipped with the target Overdub version.
+Overdub uses a modified Nuklear version. Compile against the public headers shipped with the target Overdub version and call the implementation exported by `overdub.dll`.
 
 Nuklear is immediate mode. Rebuild controls every frame, keep persistent UI state in the mod, and never store the context pointer. Do not block or issue D3D12 rendering directly from mod UI callbacks.
 
@@ -662,7 +643,7 @@ Resolve and install it:
 
 ```c
 static bool
-install_target_hook(void)
+install_target_hook(mod_handle_t mod)
 {
   void *target = NULL;
 
@@ -670,19 +651,20 @@ install_target_hook(void)
     .name    = "target",
     .pattern = "48 89 5C 24 ?? 57 48 83 EC ??",
     .pp      = &target,
+    .kind    = SIG_DIRECT,
     .op_off  = 0,
     .deref   = 0,
   };
 
-  if (mod_sigscan(&entry) != SIGSCAN_ERR_OK || !target) {
+  if (mod_sigscan(&entry) != SIG_ERR_OK || !target) {
     return false;
   }
 
-  if (!mod_hook_create(target, target_hook, (void **)&g_target_real)) {
+  if (!mod_hook_create(mod, target, target_hook, (void **)&g_target_real)) {
     return false;
   }
 
-  return mod_hook_enable(target);
+  return mod_hook_enable(mod, target);
 }
 ```
 
@@ -690,11 +672,11 @@ The pattern above is only an example.
 
 A detour must match the real ABI, parameters, return type, and calling thread. It must also handle recursion and shutdown correctly. Call the original when the caller depends on its side effects or return value.
 
-Overdub snapshots the main executable's unpacked executable sections before loading mods, so SDK signature scans are stable if another SDK or direct MinHook detour later changes live code. Scan results are translated by RVA and always point into the live module.
+Overdub snapshots the main executable's unpacked executable sections before loading mods, so signature scans are stable if another mod or direct MinHook detour later changes live code. Scan results are translated by RVA and always point into the live module.
 
-SDK hooks on the same target form a chain. The most recently enabled hook runs first, and the `original` pointer returned to each mod is a stable next-call thunk. Disabling or removing a hook rewires the chain without changing another mod's stored pointer. Hooks installed directly with MinHook do not join this chain and can still conflict with it.
+Managed hooks on the same target form a chain. The most recently enabled hook runs first, and the `original` pointer returned to each mod is a stable next-call thunk. Disabling or removing a hook rewires the chain without changing another mod's stored pointer. Hooks installed directly with MinHook do not join this chain and can still conflict with it.
 
-Hooks created through the SDK are removed after `deinit`. Manual hooks and patches are the mod's responsibility.
+Hooks created through the mod API are removed after `deinit`. Manual hooks and patches are the mod's responsibility.
 
 ## 19. Assets and Blueprint Actors
 
@@ -726,10 +708,10 @@ Common asset problems include the wrong cooked target, an incorrect package or g
 ### Logging
 
 ```c
-MOD_LOG_DEBUG("value: %d", value);
-MOD_LOG_INFO("mod started");
-MOD_LOG_WARN("object not found");
-MOD_LOG_ERROR("failed to install hook");
+MOD_LOG_DEBUG(mod, "value: %d", value);
+MOD_LOG_INFO(mod, "mod started");
+MOD_LOG_WARN(mod, "object not found");
+MOD_LOG_ERROR(mod, "failed to install hook");
 ```
 
 Log initialization stages and failures with enough context to reproduce them. Avoid hot-path spam.
@@ -805,7 +787,6 @@ When reporting a crash, keep:
 ## 21. Reload-Safe Checklist
 ### `init`
 - reset per-run globals
-- call `mod_sdk_init`
 - acquire required config handles
 - allocate state
 - resolve required classes and functions
@@ -841,10 +822,10 @@ When this guide and the implementation disagree, check the code.
 | Loader entry and main callbacks  | `src/main.c`                             |
 | Signatures and core engine hooks | `src/signatures.c`                       |
 | Manifest parser and lifecycle    | `src/mod_manager.c`                      |
-| Host API                         | `src/mod_host.c`, `include/mod_host.h`   |
-| Public mod ABI                   | `mod/mod_api.h`                          |
-| SDK wrappers                     | `mod/mod_sdk.h`, `mod/mod_sdk.c`         |
-| Unreal helpers                   | `mod/mod_unreal.h`, `mod/mod_unreal.c`   |
-| Nuklear helpers                  | `mod/mod_nuklear.h`, `mod/mod_nuklear.c` |
+| Exported mod operations          | `src/mod_host.c`, `include/mod.h`        |
+| Public mod ABI                   | `include/mod.h`                          |
+| Shared utility APIs              | `include/`, `src/`                       |
+| Unreal helpers                   | `include/unreal.h`, `src/unreal.c`       |
+| Nuklear API                      | `include/vendor_nuklear.h`, `vendor/`    |
 | D3D12 overlay                    | `src/nk_d3d12.c`                         |
 | Built-in tool examples           | `src/builtin/`                           |

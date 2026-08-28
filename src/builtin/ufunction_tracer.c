@@ -1205,7 +1205,7 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
     }
 
     uint32_t call_root_count = trace_call_root_count(tool);
-    uint32_t page_size       = (uint32_t)MAX_VAL(1, mod_cfg_get_int(&globals.mod_manager, tool->cfg.page_size_h));
+    uint32_t page_size       = (uint32_t)MAX_VAL(1, mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.page_size_h));
     uint32_t page_count      = trace_page_count(call_root_count, page_size);
     if (tool->ui.page_idx >= page_count) {
       tool->ui.page_idx = page_count - 1;
@@ -1279,10 +1279,8 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
 }
 
 static bool MOD_CALL
-trace_init(const mod_host_api_t *host, mod_handle_t h)
+trace_init(mod_handle_t h)
 {
-  UNUSED_VAR(host);
-
   trace_tool_t *tool = &g_trace_tool;
   mem_zero(tool, sizeof(*tool));
 
@@ -1291,7 +1289,7 @@ trace_init(const mod_host_api_t *host, mod_handle_t h)
   tool->cfg.open_window_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_OPEN_WINDOW_ID));
   tool->cfg.page_size_h   = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_PAGE_SIZE_ID));
 
-  tool->max_call_count = (uint32_t)MAX_VAL(1, mod_cfg_get_int(&globals.mod_manager, tool->cfg.max_calls_h));
+  tool->max_call_count = (uint32_t)MAX_VAL(1, mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.max_calls_h));
 
   tool->ui.capture_filter_input     = ARENA_PUSH_ARRAY_ZERO(tool->perm, char, TRACE_FILTER_TEXT_CAP);
   tool->ui.capture_filter_input_len = 0;
@@ -1379,7 +1377,7 @@ trace_input(mod_handle_t h, input_event_t *ev)
     return false;
   }
 
-  keybind_t toggle = mod_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
+  keybind_t toggle = mod_manager_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
   if (keybind_activated_by_event(toggle, ev)) {
     if (keybind_is_pressed(toggle)) {
       tool->ui.closed = !tool->ui.closed;

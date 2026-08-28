@@ -5,7 +5,13 @@
 #include "str.h"
 #include "types.h"
 
-#define FNAME_NONE (fname_t){0}
+MOD_EXTERN_C_BEGIN
+
+#ifdef __cplusplus
+#  define FNAME_NONE fname_t{}
+#else
+#  define FNAME_NONE (fname_t){0}
+#endif
 
 #define FNAME_MAX_BLOCK_BITS    13
 #define FNAME_BLOCK_OFFSET_BITS 16
@@ -2064,7 +2070,7 @@ typedef struct foverride_s {
 
 typedef struct fsubobject_init_s {
   struct uobject_s *subobject;
-  struct uobject_s *template;
+  struct uobject_s *template_obj;
 } fsubobject_init_t;
 
 typedef TARRAY_INLINE(foverride_t,       8) foverrides_t;
@@ -3026,51 +3032,58 @@ STATIC_ASSERT(sizeof(ugameplay_tags_manager_t)                                  
 
 /* ===================================================== FNAME ====================================================== */
 
-bool
+MOD_API fname_pool_t *
+unreal_get_name_pool(void);
+MOD_API fuobject_array_t *
+unreal_get_object_array(void);
+MOD_API uworld_t *
+unreal_get_current_world(void);
+
+MOD_API bool
 unreal_fname_equal(fname_t a, fname_t b, bool ignore_num);
-uint32_t
+MOD_API uint32_t
 unreal_fname_hash(fname_t name);
-bool
+MOD_API bool
 unreal_fname_is_none(fname_t name);
-fname_entry_t *
+MOD_API fname_entry_t *
 unreal_fname_entry_get(uint32_t cmp_idx);
 
-uint64_t
+MOD_API uint64_t
 unreal_fname_utf8_len(fname_t name);
-uint64_t
+MOD_API uint64_t
 unreal_fname_utf8_write(uint8_t *buf, uint64_t max_len, fname_t name);
-str_t
+MOD_API str_t
 unreal_fname_to_str(fname_t fname, arena_t *perm);
-fname_t
+MOD_API fname_t
 unreal_fname_from_str(str_t s, efind_name_t find_type);
 
 typedef bool (*fname_pool_iter_cb_t)(fname_t name, fname_entry_t *entry, void *user);
-void
+MOD_API void
 unreal_fname_pool_iterate(fname_pool_iter_cb_t cb, void *user);
 
-bool
+MOD_API bool
 unreal_fname_entry_match_text(fname_entry_t *entry, str_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_entry_match_text16(fname_entry_t *entry, str16_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_match_text(fname_t name, str_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_match_text16(fname_t name, str16_t text, bool ignore_case, bool exact_match);
 
 /* ==================================================== FSTRING ===================================================== */
-fstring_t
+MOD_API fstring_t
 unreal_fstring_view_from_str16(str16_t s);
-str16_t
+MOD_API str16_t
 unreal_fstring_view_to_str16(fstring_t fs);
-fstring_t
+MOD_API fstring_t
 unreal_fstring_from_str(str_t s, arena_t *perm);
-str_t
+MOD_API str_t
 unreal_fstring_to_str(fstring_t fs, arena_t *perm);
-uint32_t
+MOD_API uint32_t
 unreal_fstring_hash(fstring_t str);
 
 /* =================================================== FIOSTATUS ==================================================== */
-str_t
+MOD_API str_t
 unreal_fio_status_to_str(fio_status_t status, arena_t *perm);
 
 /* ==================================================== UOBJECT ===================================================== */
@@ -3160,7 +3173,7 @@ struct unreal_common_s {
   fname_t int_vector;
 };
 
-void
+MOD_API void
 unreal_common_collect(unreal_common_t *common);
 
 typedef enum {
@@ -3180,164 +3193,172 @@ struct uobject_listener_s {
   void                        *user;
 };
 
-void
+MOD_API void
 uobject_listener_destroy_cb(fuobject_listener_t *self);
-void
+MOD_API void
 uobject_listener_on_notify_cb(fuobject_listener_t *self, const uobject_t *obj, int32_t idx);
-void
+MOD_API void
 uobject_listener_on_shutdown_cb(fuobject_listener_t *self);
 
-void
+MOD_API void
 unreal_register_uobject_listener(uobject_listener_kind_t kind, uobject_on_notify_cb_t notify_cb, void *user);
-void
+MOD_API void
 unreal_deregister_object_listener(uobject_listener_kind_t kind, uobject_on_notify_cb_t notify_cb, void *user);
 
-void
+MOD_API void
 unreal_uobject_listener_add(uobject_listener_t *listener);
-void
+MOD_API void
 unreal_uobject_listener_del(uobject_listener_t *listener);
 
-fuobject_item_t *
+MOD_API fuobject_item_t *
 unreal_uobject_array_get_item(int idx);
-bool
+MOD_API bool
 unreal_uobject_array_item_is_valid(fuobject_item_t *item);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_array_get_obj(int idx);
-bool
+MOD_API bool
 unreal_uobject_is_a(uobject_t *obj, uclass_t *cls);
-bool
+MOD_API bool
 unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent);
-bool
+MOD_API bool
 unreal_uobject_is_default(uobject_t *obj);
-bool
+MOD_API bool
 unreal_uobject_is_valid(uobject_t *obj);
 
-uint64_t
+MOD_API uint64_t
 unreal_uobject_get_name_len(uobject_t *obj);
-uint64_t
+MOD_API uint64_t
 unreal_uobject_write_name(uobject_t *obj, uint8_t *dst, uint64_t cap);
-str_t
+MOD_API str_t
 unreal_uobject_push_name(uobject_t *obj, arena_t *perm);
 
-bool
+MOD_API bool
 unreal_outer_chain_contains(uobject_t *obj, str_t str, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_super_chain_contains(uclass_t *cls, str_t str, bool ignore_case, bool exact_match);
 
-uint64_t
+MOD_API uint64_t
 unreal_uobject_get_full_name_len(uobject_t *obj);
-uint64_t
+MOD_API uint64_t
 unreal_uobject_write_full_name(uobject_t *obj, uint8_t *dst, uint64_t cap);
-str_t
+MOD_API str_t
 unreal_uobject_push_full_name(uobject_t *obj, arena_t *perm);
 
-int
+MOD_API int
 unreal_uobject_array_count(void);
-int
+MOD_API int
 unreal_uobject_array_capacity(void);
-int
+MOD_API int
 unreal_uobject_array_num_chunks(void);
-int
+MOD_API int
 unreal_uobject_array_max_chunks(void);
 
-int
+MOD_API int
 unreal_uobject_array_first_gc_index(void);
-int
+MOD_API int
 unreal_uobject_array_last_non_gc_index(void);
-bool
+MOD_API bool
 unreal_uobject_array_is_open_for_disregard_for_gc(void);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find(str_t name, bool ignore_case, bool exact_match);
-uclass_t *
+MOD_API uclass_t *
 unreal_uclass_find(str_t name, bool ignore_case, bool exact_match);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_first_of(uclass_t *cls);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_first_of_by_name(uclass_t *cls, str_t name, bool ignore_case, bool exact_match);
-uclass_t *
+MOD_API uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_by_full_name(uclass_t *cls, str_t full_name);
 
-void
+MOD_API void
 unreal_process_event(uobject_t *self, ufunc_t *func, void *params);
 /* Calls the virtual ProcessEvent entry so normal Overdub hooks/listeners observe the call. */
-void
+MOD_API void
 unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
-void
+MOD_API void
 unreal_despawn_actor(uobject_t *actor);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_static_construct_object(fstatic_construct_obj_params_t *params);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
-uclass_t *
+MOD_API uclass_t *
 unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
-bool
+MOD_API bool
 unreal_pak_is_standalone(str_t file_path);
-void
+MOD_API void
 unreal_pak_only_mount_push(void);
-void
+MOD_API void
 unreal_pak_only_mount_pop(void);
-bool
+MOD_API bool
 unreal_is_pak_only_mount_active(void);
 
-bool
+MOD_API bool
 unreal_mount_pak(str_t file_path, int order);
-bool
+MOD_API bool
 unreal_mount_iostore(str_t file_path, int order);
 
-fnative_func_ptr_t
+MOD_API fnative_func_ptr_t
 unreal_get_native(uint8_t opcode);
-bool
+MOD_API bool
 unreal_fframe_step(fframe_t *stack, void *result);
 
 /* ================================================ CLASS INTROSPECTION ============================================= */
-ufunc_t *
+MOD_API ufunc_t *
 unreal_ustruct_find_func(ustruct_t *s, str_t name);
 
-ufunc_t *
+MOD_API ufunc_t *
 unreal_ustruct_find_func_fname(ustruct_t *s, fname_t name, bool ignore_num);
 
-void *
+MOD_API void *
 unreal_get_mcast_sparse_delegate(uobject_t *s, fname_t name);
 
 /* =============================================== CONTAINER UTILITIES ============================================== */
 
-bool
+MOD_API bool
 unreal_tbit_array_is_set(tbit_array_t *bits, int32_t idx);
-int32_t
+MOD_API int32_t
 unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx);
-int32_t
+MOD_API int32_t
 unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash);
 
 /* =================================================== DATA TABLE =================================================== */
 
-tmap_fname_uint8ptr_t *
+MOD_API tmap_fname_uint8ptr_t *
 unreal_udata_table_get_row_map(udata_table_t *table);
-void
+MOD_API void
 unreal_udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
-void
+MOD_API void
 unreal_udata_table_remove_row(udata_table_t *table, fname_t row_name);
-void
+MOD_API void
 unreal_udata_table_empty(udata_table_t *table);
-uint8_t *
+MOD_API uint8_t *
 unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
 
 /* ============================================= GAMEPLAY TAGS MANAGER ============================================== */
 
-bool
+/* Queue a tag for Overdub to add when the engine tag tree is ready. */
+MOD_API bool
+unreal_add_gameplay_tag(fname_t tag_name);
+MOD_API bool
+unreal_check_gameplay_tag_exists(fname_t tag_name);
+
+MOD_API bool
 unreal_gameplay_tags_manager_add(fname_t tag_name);
-void
+MOD_API void
 unreal_gameplay_tags_manager_broadcast_tree_changed(void);
 
-fgameplay_tag_t
+MOD_API fgameplay_tag_t
 unreal_gameplay_tags_manager_request_tag(fname_t tag_name);
+
+MOD_EXTERN_C_END
 
 #endif /* UE_TYPES_H */

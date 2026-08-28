@@ -6,7 +6,7 @@
 #include "ini.h"
 #include "input.h"
 #include "log.h"
-#include "mod_host.h"
+#include "mod.h"
 #include "path.h"
 #include "scratch.h"
 #include "sigscan.h"
@@ -1451,7 +1451,7 @@ mod_get_options_info(mod_manager_t *manager, mod_handle_t h, mod_option_info_t *
 }
 
 str_t
-mod_get_mod_dir(mod_manager_t *manager, mod_handle_t h)
+mod_manager_get_mod_dir(mod_manager_t *manager, mod_handle_t h)
 {
   if (!manager) {
     return STR_NULL;
@@ -1466,7 +1466,7 @@ mod_get_mod_dir(mod_manager_t *manager, mod_handle_t h)
 }
 
 str_t
-mod_get_config_path(mod_manager_t *manager, mod_handle_t h)
+mod_manager_get_config_path(mod_manager_t *manager, mod_handle_t h)
 {
   if (!manager) {
     return STR_NULL;
@@ -1481,7 +1481,7 @@ mod_get_config_path(mod_manager_t *manager, mod_handle_t h)
 }
 
 str_t
-mod_get_manifest_path(mod_manager_t *manager, mod_handle_t h)
+mod_manager_get_manifest_path(mod_manager_t *manager, mod_handle_t h)
 {
   if (!manager) {
     return STR_NULL;
@@ -1515,7 +1515,7 @@ mod_cfg_get_by_id(mod_manager_t *manager, mod_handle_t h, str_t id)
 }
 
 bool
-mod_cfg_get_bool(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_bool(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1527,7 +1527,7 @@ mod_cfg_get_bool(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 int
-mod_cfg_get_int(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_int(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1539,7 +1539,7 @@ mod_cfg_get_int(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 float
-mod_cfg_get_float(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_float(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1551,7 +1551,7 @@ mod_cfg_get_float(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 int
-mod_cfg_get_enum(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_enum(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1563,7 +1563,7 @@ mod_cfg_get_enum(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 uint64_t
-mod_cfg_get_string_len(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_string_len(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1576,7 +1576,7 @@ mod_cfg_get_string_len(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 uint64_t
-mod_cfg_get_string_data(mod_manager_t *manager, mod_cfg_handle_t h, void *buf, uint64_t cap)
+mod_manager_cfg_get_string_data(mod_manager_t *manager, mod_cfg_handle_t h, void *buf, uint64_t cap)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1604,7 +1604,7 @@ mod_cfg_get_string(mod_manager_t *manager, mod_cfg_handle_t h, arena_t *arena)
 }
 
 keybind_t
-mod_cfg_get_keybind(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_keybind(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1616,7 +1616,7 @@ mod_cfg_get_keybind(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 mod_color_t
-mod_cfg_get_color(mod_manager_t *manager, mod_cfg_handle_t h)
+mod_manager_cfg_get_color(mod_manager_t *manager, mod_cfg_handle_t h)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1628,7 +1628,7 @@ mod_cfg_get_color(mod_manager_t *manager, mod_cfg_handle_t h)
 }
 
 void
-mod_cfg_set_bool(mod_manager_t *manager, mod_cfg_handle_t h, bool val)
+mod_manager_cfg_set_bool(mod_manager_t *manager, mod_cfg_handle_t h, bool val)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1640,7 +1640,7 @@ mod_cfg_set_bool(mod_manager_t *manager, mod_cfg_handle_t h, bool val)
 }
 
 void
-mod_cfg_set_int(mod_manager_t *manager, mod_cfg_handle_t h, int val)
+mod_manager_cfg_set_int(mod_manager_t *manager, mod_cfg_handle_t h, int val)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1653,7 +1653,7 @@ mod_cfg_set_int(mod_manager_t *manager, mod_cfg_handle_t h, int val)
 }
 
 void
-mod_cfg_set_float(mod_manager_t *manager, mod_cfg_handle_t h, float val)
+mod_manager_cfg_set_float(mod_manager_t *manager, mod_cfg_handle_t h, float val)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1665,7 +1665,7 @@ mod_cfg_set_float(mod_manager_t *manager, mod_cfg_handle_t h, float val)
 }
 
 void
-mod_cfg_set_enum(mod_manager_t *manager, mod_cfg_handle_t h, int val)
+mod_manager_cfg_set_enum(mod_manager_t *manager, mod_cfg_handle_t h, int val)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1683,7 +1683,7 @@ mod_cfg_set_enum(mod_manager_t *manager, mod_cfg_handle_t h, int val)
 }
 
 void
-mod_cfg_set_string(mod_manager_t *manager, mod_cfg_handle_t h, str_t val)
+mod_manager_cfg_set_string(mod_manager_t *manager, mod_cfg_handle_t h, str_t val)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1697,7 +1697,7 @@ mod_cfg_set_string(mod_manager_t *manager, mod_cfg_handle_t h, str_t val)
 }
 
 void
-mod_cfg_set_keybind(mod_manager_t *manager, mod_cfg_handle_t h, keybind_t bind)
+mod_manager_cfg_set_keybind(mod_manager_t *manager, mod_cfg_handle_t h, keybind_t bind)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -1710,7 +1710,7 @@ mod_cfg_set_keybind(mod_manager_t *manager, mod_cfg_handle_t h, keybind_t bind)
 }
 
 void
-mod_cfg_set_color(mod_manager_t *manager, mod_cfg_handle_t h, mod_color_t color)
+mod_manager_cfg_set_color(mod_manager_t *manager, mod_cfg_handle_t h, mod_color_t color)
 {
   mod_option_runtime_t *opt  = mod_cfg_handle_resolve(manager, h);
   mod_option_info_t    *info = mod_option_info_get(manager, h);
@@ -2339,6 +2339,344 @@ err_msg_set(err_msg_t *err, str_t msg)
   mem_copy(err->msg, msg.data, err->len);
 }
 
+static void
+err_msg_append(err_msg_t *err, str_t msg)
+{
+  if (!err || str_is_empty(msg) || err->len >= (int)sizeof(err->msg)) {
+    return;
+  }
+
+  uint64_t available = sizeof(err->msg) - (uint64_t)err->len;
+  uint64_t written   = MIN_VAL(msg.len, available);
+  mem_copy(err->msg + err->len, msg.data, written);
+  err->len += (int)written;
+}
+
+static bool
+mod_pe_range_is_valid(uint64_t file_size, uint64_t offset, uint64_t size)
+{
+  return offset <= file_size && size <= file_size - offset;
+}
+
+typedef struct mod_pe_file_s mod_pe_file_t;
+struct mod_pe_file_s {
+  uint8_t              *data;
+  uint64_t              size;
+  IMAGE_FILE_HEADER     file_header;
+  IMAGE_SECTION_HEADER *sections;
+  uint32_t              size_of_headers;
+  IMAGE_DATA_DIRECTORY  import_directory;
+  bool                  is_pe64;
+};
+
+static bool
+mod_pe_file_parse(str_t file, mod_pe_file_t *pe)
+{
+  if (!pe || !file.data || !mod_pe_range_is_valid(file.len, 0, sizeof(IMAGE_DOS_HEADER))) {
+    return false;
+  }
+
+  IMAGE_DOS_HEADER dos = {0};
+  mem_copy(&dos, file.data, sizeof(dos));
+  if (dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0) {
+    return false;
+  }
+
+  uint64_t nt_offset = (uint64_t)dos.e_lfanew;
+  if (!mod_pe_range_is_valid(file.len, nt_offset, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER))) {
+    return false;
+  }
+
+  DWORD signature = 0;
+  mem_copy(&signature, file.data + nt_offset, sizeof(signature));
+  if (signature != IMAGE_NT_SIGNATURE) {
+    return false;
+  }
+
+  uint64_t file_header_offset = nt_offset + sizeof(signature);
+  mem_copy(&pe->file_header, file.data + file_header_offset, sizeof(pe->file_header));
+
+  uint64_t optional_offset = file_header_offset + sizeof(IMAGE_FILE_HEADER);
+  if (!mod_pe_range_is_valid(file.len, optional_offset, pe->file_header.SizeOfOptionalHeader)) {
+    return false;
+  }
+
+  WORD optional_magic = 0;
+  if (pe->file_header.SizeOfOptionalHeader < sizeof(optional_magic)) {
+    return false;
+  }
+  mem_copy(&optional_magic, file.data + optional_offset, sizeof(optional_magic));
+
+  if (optional_magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+    IMAGE_OPTIONAL_HEADER64 optional = {0};
+    if (pe->file_header.SizeOfOptionalHeader < sizeof(optional)) {
+      return false;
+    }
+
+    mem_copy(&optional, file.data + optional_offset, sizeof(optional));
+    pe->size_of_headers  = optional.SizeOfHeaders;
+    pe->import_directory = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    pe->is_pe64          = true;
+  } else if (optional_magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+    IMAGE_OPTIONAL_HEADER32 optional = {0};
+    if (pe->file_header.SizeOfOptionalHeader < sizeof(optional)) {
+      return false;
+    }
+
+    mem_copy(&optional, file.data + optional_offset, sizeof(optional));
+    pe->size_of_headers  = optional.SizeOfHeaders;
+    pe->import_directory = optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    pe->is_pe64          = false;
+  } else {
+    return false;
+  }
+
+  uint64_t sections_offset = optional_offset + pe->file_header.SizeOfOptionalHeader;
+  uint64_t sections_size   = (uint64_t)pe->file_header.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
+  if (!mod_pe_range_is_valid(file.len, sections_offset, sections_size)) {
+    return false;
+  }
+
+  pe->data     = file.data;
+  pe->size     = file.len;
+  pe->sections = (IMAGE_SECTION_HEADER *)(file.data + sections_offset);
+  return true;
+}
+
+static uint8_t *
+mod_pe_rva_to_ptr(mod_pe_file_t *pe, uint32_t rva, uint64_t required_size, uint64_t *available_out)
+{
+  if (!pe) {
+    return NULL;
+  }
+
+  if (rva < pe->size_of_headers) {
+    uint64_t available = pe->size - MIN_VAL((uint64_t)rva, pe->size);
+    if (required_size <= available) {
+      if (available_out) {
+        *available_out = available;
+      }
+      return pe->data + rva;
+    }
+    return NULL;
+  }
+
+  for (uint16_t i = 0; i < pe->file_header.NumberOfSections; ++i) {
+    IMAGE_SECTION_HEADER section = {0};
+    mem_copy(&section, &pe->sections[i], sizeof(section));
+
+    uint64_t section_start = section.VirtualAddress;
+    uint64_t section_span  = MAX_VAL(section.Misc.VirtualSize, section.SizeOfRawData);
+    uint64_t section_end   = section_start + section_span;
+    if ((uint64_t)rva < section_start || (uint64_t)rva >= section_end) {
+      continue;
+    }
+
+    uint64_t delta = (uint64_t)rva - section_start;
+    if (delta > section.SizeOfRawData) {
+      return NULL;
+    }
+
+    uint64_t available = section.SizeOfRawData - delta;
+    uint64_t offset    = (uint64_t)section.PointerToRawData + delta;
+    if (required_size > available || !mod_pe_range_is_valid(pe->size, offset, available)) {
+      return NULL;
+    }
+
+    if (available_out) {
+      *available_out = available;
+    }
+    return pe->data + offset;
+  }
+
+  return NULL;
+}
+
+static str_t
+mod_pe_read_cstr(mod_pe_file_t *pe, uint32_t rva)
+{
+  uint64_t available = 0;
+  uint8_t *data      = mod_pe_rva_to_ptr(pe, rva, 1, &available);
+  if (!data) {
+    return STR_NULL;
+  }
+
+  uint64_t len = calc_cstr_len_with_cap((const char *)data, available);
+  if (len == available) {
+    return STR_NULL;
+  }
+  return str_make(data, len);
+}
+
+static bool
+mod_pe_check_import(HMODULE overdub, str_t name, err_msg_t *err, bool *header_written)
+{
+  bool        found = false;
+  tmp_arena_t tmp   = scratch_begin(NULL);
+  {
+    char *cstr = str_push_cstr(tmp.arena, name);
+
+    found = cstr && GetProcAddress(overdub, cstr) != NULL;
+  }
+  scratch_end(tmp);
+
+  if (!found) {
+    if (!*header_written) {
+      err_msg_set(err, STR_LIT("Missing Overdub API functions:"));
+      *header_written = true;
+    }
+    err_msg_append(err, STR_LIT("\n    "));
+    err_msg_append(err, name);
+  }
+  return found;
+}
+
+static bool
+mod_pe_check_ordinal_import(HMODULE overdub, WORD ordinal, err_msg_t *err, bool *header_written)
+{
+  if (GetProcAddress(overdub, MAKEINTRESOURCEA(ordinal))) {
+    return true;
+  }
+
+  if (!*header_written) {
+    err_msg_set(err, STR_LIT("Missing Overdub API functions:"));
+    *header_written = true;
+  }
+
+  char ordinal_buf[16] = {0};
+  str_write_fmt(ordinal_buf, sizeof(ordinal_buf), "\n    #%u", ordinal);
+  err_msg_append(err, str_from_cstr(ordinal_buf));
+  return false;
+}
+
+static bool
+mod_pe_preflight_overdub_imports(str_t path, err_msg_t *err)
+{
+  bool        ok      = false;
+  bool        missing = false;
+  tmp_arena_t tmp     = scratch_begin(NULL);
+  {
+    str_t file = file_read_all(path, tmp.arena);
+    if (!str_is_empty(file)) {
+      mod_pe_file_t pe = {0};
+      if (mod_pe_file_parse(file, &pe)) {
+        if (pe.import_directory.VirtualAddress != 0 && pe.import_directory.Size != 0) {
+          HMODULE overdub = NULL;
+          DWORD   flags   = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+          if (GetModuleHandleExW(flags, (LPCWSTR)(uintptr_t)&mod_pe_preflight_overdub_imports, &overdub)) {
+            uint64_t                 descriptor_bytes = 0;
+            IMAGE_IMPORT_DESCRIPTOR *descriptors      = (IMAGE_IMPORT_DESCRIPTOR *)mod_pe_rva_to_ptr(&pe, pe.import_directory.VirtualAddress, sizeof(IMAGE_IMPORT_DESCRIPTOR), &descriptor_bytes);
+            if (descriptors) {
+              uint64_t descriptor_count = MIN_VAL(descriptor_bytes, pe.import_directory.Size) / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+              bool     header_written   = false;
+
+              ok = true;
+              for (uint64_t descriptor_idx = 0; descriptor_idx < descriptor_count && ok; ++descriptor_idx) {
+                IMAGE_IMPORT_DESCRIPTOR descriptor = {0};
+                mem_copy(&descriptor, &descriptors[descriptor_idx], sizeof(descriptor));
+
+                if (descriptor.Name == 0 && descriptor.FirstThunk == 0 && descriptor.OriginalFirstThunk == 0) {
+                  break;
+                }
+
+                str_t dll_name = mod_pe_read_cstr(&pe, descriptor.Name);
+                if (str_is_empty(dll_name)) {
+                  err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid imported DLL name"));
+                  ok = false;
+                  break;
+                }
+
+                if (!str_equal(dll_name, STR_LIT("overdub.dll"), STR_CMP_FLAG_IGNORE_CASE)) {
+                  continue;
+                }
+
+                uint32_t thunk_rva  = descriptor.OriginalFirstThunk ? descriptor.OriginalFirstThunk : descriptor.FirstThunk;
+                uint32_t thunk_size = pe.is_pe64                    ? sizeof(IMAGE_THUNK_DATA64)    : sizeof(IMAGE_THUNK_DATA32);
+
+                for (uint64_t thunk_idx = 0;; ++thunk_idx) {
+                  uint64_t thunk_offset = thunk_idx * thunk_size;
+                  if (thunk_offset > UINT32_MAX || thunk_rva > UINT32_MAX - (uint32_t)thunk_offset) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import thunk"));
+                    ok = false;
+                    break;
+                  }
+
+                  uint8_t *thunk_ptr = mod_pe_rva_to_ptr(&pe, thunk_rva + (uint32_t)thunk_offset, thunk_size, NULL);
+                  if (!thunk_ptr) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import thunk"));
+                    ok = false;
+                    break;
+                  }
+
+                  uint64_t thunk_value = 0;
+                  if (pe.is_pe64) {
+                    IMAGE_THUNK_DATA64 thunk = {0};
+                    mem_copy(&thunk, thunk_ptr, sizeof(thunk));
+                    thunk_value = thunk.u1.AddressOfData;
+                  } else {
+                    IMAGE_THUNK_DATA32 thunk = {0};
+                    mem_copy(&thunk, thunk_ptr, sizeof(thunk));
+                    thunk_value = thunk.u1.AddressOfData;
+                  }
+
+                  if (thunk_value == 0) {
+                    break;
+                  }
+
+                  bool is_ordinal = pe.is_pe64 ? IMAGE_SNAP_BY_ORDINAL64(thunk_value) : IMAGE_SNAP_BY_ORDINAL32((DWORD)thunk_value);
+                  if (is_ordinal) {
+                    WORD ordinal = pe.is_pe64 ? IMAGE_ORDINAL64(thunk_value) : IMAGE_ORDINAL32((DWORD)thunk_value);
+                    missing     |= !mod_pe_check_ordinal_import(overdub, ordinal, err, &header_written);
+                    continue;
+                  }
+
+                  if (thunk_value > UINT32_MAX) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import name RVA"));
+                    ok = false;
+                    break;
+                  }
+
+                  uint32_t name_rva = (uint32_t)thunk_value;
+                  if (name_rva > UINT32_MAX - sizeof(WORD)) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import name RVA"));
+                    ok = false;
+                    break;
+                  }
+
+                  if (!mod_pe_rva_to_ptr(&pe, name_rva, sizeof(WORD) + 1, NULL)) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import name"));
+                    ok = false;
+                    break;
+                  }
+
+                  str_t import_name = mod_pe_read_cstr(&pe, name_rva + sizeof(WORD));
+                  if (str_is_empty(import_name)) {
+                    err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import name"));
+                    ok = false;
+                    break;
+                  }
+
+                  missing |= !mod_pe_check_import(overdub, import_name, err, &header_written);
+                }
+              }
+            } else {
+              err_msg_set(err, STR_LIT("failed to inspect DLL imports: invalid import directory"));
+            }
+          } else {
+            err_msg_set(err, STR_LIT("failed to inspect DLL imports: Overdub module not found"));
+          }
+        }
+      } else {
+        err_msg_set(err, STR_LIT("failed to inspect DLL imports: malformed PE image"));
+      }
+    } else {
+      err_msg_set(err, STR_LIT("failed to inspect DLL imports: could not read file"));
+    }
+  }
+  scratch_end(tmp);
+  return ok && !missing;
+}
+
 bool
 mod_dll_load(mod_manager_t *manager, mod_handle_t h)
 {
@@ -2378,6 +2716,11 @@ mod_dll_load(mod_manager_t *manager, mod_handle_t h)
     return false;
   }
 
+  if (!mod_pe_preflight_overdub_imports(m->manifest.dll.path, &m->dll.err_msg)) {
+    m->dll.err_stage = MOD_DLL_ERROR_LOAD;
+    return false;
+  }
+
   HMODULE dll = mod_win32_load_library(m->manifest.dll.path);
   if (!dll) {
     m->dll.err_stage = MOD_DLL_ERROR_LOAD;
@@ -2385,7 +2728,24 @@ mod_dll_load(mod_manager_t *manager, mod_handle_t h)
     return false;
   }
 
-  FARPROC entry_proc = mod_win32_get_proc(dll, MOD_DLL_ENTRY_EXPORT);
+  FARPROC abi_version_proc = mod_win32_get_proc(dll, MOD_ABI_VERSION_EXPORT);
+  if (!abi_version_proc) {
+    mod_win32_free_library(dll);
+    m->dll.err_stage = MOD_DLL_ERROR_LOAD;
+    err_msg_set(&m->dll.err_msg, STR_LIT("missing mod_abi_version export"));
+    return false;
+  }
+
+  mod_abi_version_fn_t mod_abi_version = (mod_abi_version_fn_t)(uintptr_t)abi_version_proc;
+  mod_version_t        abi_version     = mod_abi_version();
+  if (!mod_abi_compatible(MOD_ABI_VERSION, abi_version)) {
+    mod_win32_free_library(dll);
+    m->dll.err_stage = MOD_DLL_ERROR_LOAD;
+    err_msg_set(&m->dll.err_msg, STR_LIT("incompatible ABI version"));
+    return false;
+  }
+
+  FARPROC entry_proc = mod_win32_get_proc(dll, MOD_ENTRY_EXPORT);
   if (!entry_proc) {
     mod_win32_free_library(dll);
     m->dll.err_stage = MOD_DLL_ERROR_LOAD;
@@ -2393,9 +2753,8 @@ mod_dll_load(mod_manager_t *manager, mod_handle_t h)
     return false;
   }
 
-  mod_entry_fn_t mod_entry = (mod_entry_fn_t)(uintptr_t)entry_proc;
-
-  const mod_api_t *mod_api = mod_entry();
+  mod_entry_fn_t   mod_entry = (mod_entry_fn_t)(uintptr_t)entry_proc;
+  const mod_api_t *mod_api   = mod_entry();
   if (!mod_api) {
     mod_win32_free_library(dll);
     m->dll.err_stage = MOD_DLL_ERROR_LOAD;
@@ -2406,7 +2765,6 @@ mod_dll_load(mod_manager_t *manager, mod_handle_t h)
   #define API_HAS_FIELD(API, NAME) \
     ((API)->struct_size >= (offsetof(mod_api_t, NAME) + sizeof((API)->NAME)))
 
-  version_t                 abi_version      = API_HAS_FIELD(mod_api, abi_version)      ? mod_api->abi_version      : (version_t){0};
   mod_init_fn_t             init             = API_HAS_FIELD(mod_api, init)             ? mod_api->init             : NULL;
   mod_deinit_fn_t           deinit           = API_HAS_FIELD(mod_api, deinit)           ? mod_api->deinit           : NULL;
   mod_tick_fn_t             tick             = API_HAS_FIELD(mod_api, tick)             ? mod_api->tick             : NULL;
@@ -2419,13 +2777,6 @@ mod_dll_load(mod_manager_t *manager, mod_handle_t h)
   mod_draw_config_fn_t      draw_config      = API_HAS_FIELD(mod_api, draw_config)      ? mod_api->draw_config      : NULL;
 
   #undef API_HAS_FIELD
-
-  if (!mod_abi_compatible((version_t)MOD_HOST_ABI_VERSION, abi_version)) {
-    mod_win32_free_library(dll);
-    m->dll.err_stage = MOD_DLL_ERROR_LOAD;
-    err_msg_set(&m->dll.err_msg, STR_LIT("incompatible ABI version"));
-    return false;
-  }
 
   m->dll.dll_handle = dll;
   m->dll.state      = MOD_DLL_STATE_LOADED;
@@ -2536,7 +2887,7 @@ mod_dll_start(mod_manager_t *manager, mod_handle_t h)
 
   mod_dll_arenas_init_free_list(&m->dll);
 
-  if (!m->dll.funcs.init(mod_host_api_get(), mod_handle_make(m))) {
+  if (!m->dll.funcs.init(mod_handle_make(m))) {
     mod_cleanup_dll_runtime(m);
 
     m->dll.err_stage = MOD_DLL_ERROR_INIT;
@@ -3021,7 +3372,7 @@ mod_manager_dispatch_command(mod_manager_t *manager, str_t name, str_t args)
 }
 
 bool
-mod_register_cmd(mod_manager_t *manager, mod_handle_t h, str_t name, str_t description, mod_cmd_fn_t cb, void *user)
+mod_manager_register_cmd(mod_manager_t *manager, mod_handle_t h, str_t name, str_t description, mod_cmd_fn_t cb, void *user)
 {
   if (!cb || str_is_empty(name)) {
     return false;

@@ -282,7 +282,7 @@ struct tool_cache_s {
 typedef struct ufunc_call_dialog_s ufunc_call_dialog_t;
 
 bool
-ufunc_call_init(search_tool_t *tool, const mod_host_api_t *host, mod_handle_t h);
+ufunc_call_init(search_tool_t *tool, mod_handle_t h);
 void
 ufunc_call_open(search_tool_t *tool, record_t *func_record, record_t *suggested_target);
 void

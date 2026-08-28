@@ -20,22 +20,36 @@ ifeq ($(origin CC), default)
   endif
 endif
 
+ifeq ($(origin CXX), default)
+  ifeq ($(OS),Windows_NT)
+    CXX := g++
+  else
+    CXX := x86_64-w64-mingw32-g++
+  endif
+endif
+
 BUILD_DIR := build/$(CONFIG)
 TARGET    := $(BUILD_DIR)/$(MOD_NAME).dll
 
-SRCS := mod_sdk.c mod_unreal.c mod_nuklear.c
-OBJS := $(SRCS:%.c=$(BUILD_DIR)/%.o)
+SRCS := $(MOD_SRC)
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(SRCS))) \
+        $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(filter %.cpp,$(SRCS)))
 DEPS := $(OBJS:.o=.d)
 
-COMMON_WARNINGS := -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
-COMMON_FLAGS    := $(COMMON_WARNINGS) -ffunction-sections -fdata-sections -MMD -MP
+OVERDUB_LIB := ../build/overdub.lib
 
-CFLAGS := -std=c11 $(COMMON_FLAGS)
+COMMON_WARNINGS := -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers
+COMMON_FLAGS    := $(COMMON_WARNINGS) -I../include -I../vendor -ffunction-sections -fdata-sections -MMD -MP
+
+CFLAGS   := -std=c11 $(COMMON_FLAGS)
+CXXFLAGS := -std=c++20 $(COMMON_FLAGS)
 
 ifeq ($(CONFIG),debug)
-  CFLAGS += -O0 -g3 -DBUILD_DEBUG
+  CFLAGS   += -O0 -g3 -DBUILD_DEBUG
+  CXXFLAGS += -O0 -g3 -DBUILD_DEBUG
 else ifeq ($(CONFIG),release)
-  CFLAGS += -O2 -DNDEBUG -DBUILD_RELEASE
+  CFLAGS   += -O2 -DNDEBUG -DBUILD_RELEASE
+  CXXFLAGS += -O2 -DNDEBUG -DBUILD_RELEASE
 else
   $(error CONFIG must be debug or release)
 endif
@@ -45,21 +59,24 @@ LDFLAGS := -shared -static -static-libgcc -static-libstdc++ \
            -Wl,--exclude-all-symbols \
            -Wl,--out-implib,$(BUILD_DIR)/lib$(MOD_NAME).a
 
-LDLIBS := -luser32
+LDLIBS := $(OVERDUB_LIB)
+LINKER := $(if $(filter %.cpp,$(SRCS)),$(CXX),$(CC))
 
 .PHONY: all clean
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) $(OVERDUB_LIB)
 	@mkdir -p $(@D)
-	$(CC) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+	$(LINKER) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/mod_nuklear.o: CFLAGS += -w
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -rf build

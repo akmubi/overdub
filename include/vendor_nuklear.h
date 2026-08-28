@@ -10,6 +10,10 @@
 #  pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
+#ifndef NK_API
+#  define NK_API MOD_API
+#endif
+
 #include "nuklear/include/nuklear.h"
 
 #if COMPILER_MSVC

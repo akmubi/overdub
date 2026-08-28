@@ -6,6 +6,8 @@
 #include "types.h"
 #include "unreal.h"
 
+MOD_EXTERN_C_BEGIN
+
 typedef uint8_t input_event_kind_t;
 enum {
   INPUT_EVENT_KEY_DOWN,
@@ -222,7 +224,11 @@ struct input_key_state_s {
 };
 
 #define KEYBIND_MAX_KEYS (10)
-#define KEYBIND_NULL     (keybind_t){.keys = {0}, .count = 0}
+#ifdef __cplusplus
+#  define KEYBIND_NULL keybind_t{}
+#else
+#  define KEYBIND_NULL (keybind_t){.keys = {0}, .count = 0}
+#endif
 
 typedef struct keybind_s keybind_t;
 struct keybind_s {
@@ -230,72 +236,72 @@ struct keybind_s {
   uint8_t          count;
 };
 
-void
+MOD_API void
 input_key_map_init(void);
 
-input_key_kind_t
+MOD_API input_key_kind_t
 input_key_from_fname(fname_t key_name);
-input_key_kind_t
+MOD_API input_key_kind_t
 input_key_from_str(str_t name);
 
-bool
+MOD_API bool
 input_key_is_down(input_key_kind_t key);
-bool
+MOD_API bool
 input_key_is_pressed(input_key_kind_t key);
-bool
+MOD_API bool
 input_key_is_released(input_key_kind_t key);
-bool
+MOD_API bool
 input_key_is_bindable(input_key_kind_t key);
 
-void
+MOD_API void
 input_key_lost_focus(void);
-void
+MOD_API void
 input_key_clear_transient_state(void);
 
-str_t
+MOD_API str_t
 input_key_to_str(input_key_kind_t key);
-str_t
+MOD_API str_t
 input_event_kind_to_str(input_event_kind_t kind);
 
-input_event_t
+MOD_API input_event_t
 input_event_from_key_event(input_event_kind_t kind, fkey_event_t *e);
-input_event_t
+MOD_API input_event_t
 input_event_from_character_event(fcharacter_event_t *e);
-input_event_t
+MOD_API input_event_t
 input_event_from_pointer_event(input_event_kind_t kind, fpointer_event_t *e);
-input_event_t
+MOD_API input_event_t
 input_event_from_analog_event(fanalog_input_event_t *e);
-input_event_t
+MOD_API input_event_t
 input_event_from_app_activation_event(bool app_activated);
 
-bool
+MOD_API bool
 input_event_is_mouse(input_event_t *ev);
-bool
+MOD_API bool
 input_event_is_keyboard(input_event_t *ev);
-bool
+MOD_API bool
 input_event_is_gamepad(input_event_t *ev);
 
-keybind_t
+MOD_API keybind_t
 keybind_parse(str_t str, keybind_t default_val);
-uint64_t
+MOD_API uint64_t
 keybind_utf8_len(keybind_t bind);
-uint64_t
+MOD_API uint64_t
 keybind_utf8_write(keybind_t bind, void *buf, uint64_t cap);
-str_t
+MOD_API str_t
 keybind_to_str(keybind_t bind, arena_t *arena);
-bool
+MOD_API bool
 keybind_is_valid(keybind_t bind);
-bool
+MOD_API bool
 keybind_equal(keybind_t a, keybind_t b);
-void
+MOD_API void
 keybind_clear(keybind_t *bind);
 
 /* NOTE: used in engine tick */
-bool
+MOD_API bool
 keybind_is_down(keybind_t bind);
-bool
+MOD_API bool
 keybind_is_pressed(keybind_t bind);
-bool
+MOD_API bool
 keybind_is_released(keybind_t bind);
 
 static inline bool
@@ -317,7 +323,9 @@ keybind_str_is_released(str_t keybind_str)
 }
 
 /* NOTE: used for input events */
-bool
+MOD_API bool
 keybind_activated_by_event(keybind_t bind, input_event_t *ev);
+
+MOD_EXTERN_C_END
 
 #endif /* INPUT_H */

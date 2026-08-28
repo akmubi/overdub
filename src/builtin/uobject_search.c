@@ -8,7 +8,7 @@
 #include "globals.h"
 #include "input.h"
 #include "log.h"
-#include "mod_host.h"
+#include "mod.h"
 #include "mod_manager.h"
 #include "nk_d3d12.h"
 #include "profiler.h"
@@ -41,7 +41,7 @@ progress_pct(uint32_t current, uint32_t max)
 bool
 work_budget_exhausted(search_tool_t *tool, uint64_t start_us)
 {
-  uint64_t work_budget_us = (uint64_t)mod_cfg_get_int(&globals.mod_manager, tool->cfg.work_budget_h);
+  uint64_t work_budget_us = (uint64_t)mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.work_budget_h);
   return time_now_us() - start_us >= work_budget_us;
 }
 
@@ -58,7 +58,7 @@ get_page_count(slot_list_t *results, uint32_t page_size)
 static void
 clamp_page(search_tool_t *tool, slot_list_t *results)
 {
-  uint32_t max_results = (uint32_t)mod_cfg_get_int(&globals.mod_manager, tool->cfg.max_results_h);
+  uint32_t max_results = (uint32_t)mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.max_results_h);
   uint32_t page_count  = get_page_count(results, max_results);
   if (tool->ui.page_index >= page_count) {
     tool->ui.page_index = page_count - 1;
@@ -341,7 +341,7 @@ draw_window(search_tool_t *tool, unsigned int vw, unsigned int vh)
 
     clamp_page(tool, &tool->search.visible);
 
-    uint32_t max_results = (uint32_t)mod_cfg_get_int(&globals.mod_manager, tool->cfg.max_results_h);
+    uint32_t max_results = (uint32_t)mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.max_results_h);
     uint32_t page_size   = (uint32_t)NK_MAX(max_results, 1);
     uint32_t page_count  = get_page_count(&tool->search.visible, page_size);
     uint32_t start_idx   = tool->ui.page_index * page_size;
@@ -479,7 +479,7 @@ tool_work_tick(search_tool_t *tool)
 }
 
 static bool MOD_CALL
-tool_init(const mod_host_api_t *host, mod_handle_t h)
+tool_init(mod_handle_t h)
 {
   search_tool_t *tool = &g_tool;
   mem_zero(tool, sizeof(*tool));
@@ -511,7 +511,7 @@ tool_init(const mod_host_api_t *host, mod_handle_t h)
   tool->cache.build_total  = (uint32_t)unreal_uobject_array_count();
   tool->cache.world        = (globals.gworld_ptr) ? *globals.gworld_ptr : NULL;
 
-  arena_t *string_arena = mod_arena_handle_resolve(host->arena_create(h, 128 * MB, 1 * MB));
+  arena_t *string_arena = mod_arena_handle_resolve(mod_arena_create(h, 128 * MB, 1 * MB));
   if (!string_arena) {
     LOG_ERROR("UObject Search: failed to create the string arena");
     return false;
@@ -550,8 +550,8 @@ tool_init(const mod_host_api_t *host, mod_handle_t h)
   tool->details.preview_tab  = NULL;
 
   for (int i = 0; i < COUNTOF(tool->details.tabs); ++i) {
-    tool->details.tabs[i].info_arena  = mod_arena_handle_resolve(host->arena_create(h, 64 * MB, 64 * KB));
-    tool->details.tabs[i].value_arena = mod_arena_handle_resolve(host->arena_create(h, 64 * MB, 64 * KB));
+    tool->details.tabs[i].info_arena  = mod_arena_handle_resolve(mod_arena_create(h, 64 * MB, 64 * KB));
+    tool->details.tabs[i].value_arena = mod_arena_handle_resolve(mod_arena_create(h, 64 * MB, 64 * KB));
 
     ASSERT(tool->details.tabs[i].info_arena != NULL);
     ASSERT(tool->details.tabs[i].value_arena != NULL);
@@ -562,13 +562,13 @@ tool_init(const mod_host_api_t *host, mod_handle_t h)
     tool->details.tabs[i].next = &tool->details.tabs[i + 1];
   }
 
-  if (!ufunc_call_init(tool, host, h)) {
+  if (!ufunc_call_init(tool, h)) {
     LOG_ERROR("UObject Search: failed to initialize the UFunction call dialog");
     return false;
   }
 
-  ASSERT(host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_CREATE, on_uobject_created, tool));
-  ASSERT(host->register_uobject_listener(h, UOBJECT_LISTENER_KIND_DELETE, on_uobject_deleted, tool));
+  ASSERT(mod_register_uobject_listener(h, UOBJECT_LISTENER_KIND_CREATE, on_uobject_created, tool));
+  ASSERT(mod_register_uobject_listener(h, UOBJECT_LISTENER_KIND_DELETE, on_uobject_deleted, tool));
 
   tool->ctx    = globals.ui_manager.ctx;
   tool->handle = h;
@@ -621,7 +621,7 @@ tool_input(mod_handle_t h, input_event_t *ev)
     return false;
   }
 
-  keybind_t toggle_keybind = mod_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
+  keybind_t toggle_keybind = mod_manager_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
   if (keybind_activated_by_event(toggle_keybind, ev)) {
     if (keybind_is_pressed(toggle_keybind)) {
       tool->ui.closed = !tool->ui.closed;

@@ -4,6 +4,8 @@
 #include "types.h"
 #include "arena.h"
 
+MOD_EXTERN_C_BEGIN
+
 #define SCRATCH_POOL_SIZE (2)
 
 typedef struct scratch_s scratch_t;
@@ -12,20 +14,22 @@ struct scratch_s {
   arena_t arenas[SCRATCH_POOL_SIZE];
 };
 
-arena_t *
+MOD_API arena_t *
 scratch_get(arena_t *conflict);
 
-tmp_arena_t
+MOD_API tmp_arena_t
 scratch_begin(arena_t *conflict);
-void
+MOD_API void
 scratch_end(tmp_arena_t tmp);
 
-void
+MOD_API void
 scratch_reset(void);
-void
+MOD_API void
 scratch_destroy(void);
 
-bool
+MOD_API bool
 scratch_has_conflict(arena_t *conflict);
+
+MOD_EXTERN_C_END
 
 #endif /* SCRATCH_H */

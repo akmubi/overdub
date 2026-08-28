@@ -5,39 +5,13 @@
 #include "hook_chain.h"
 #include "ini.h"
 #include "input.h"
+#include "mod.h"
 #include "str.h"
 #include "types.h"
 #include "unreal.h"
 #include "version.h"
 
 #include "vendor_nuklear.h"
-
-#define MOD_HANDLE_INVALID       ((mod_handle_t)0)
-#define MOD_CFG_HANDLE_INVALID   ((mod_cfg_handle_t)0)
-#define MOD_ARENA_HANDLE_INVALID ((mod_arena_handle_t)0)
-
-typedef uint64_t mod_handle_t;
-typedef uint64_t mod_cfg_handle_t;
-typedef uint64_t mod_arena_handle_t;
-
-#define MOD_CALL             __cdecl
-#define MOD_DLL_ENTRY_EXPORT "mod_entry"
-
-typedef struct mod_host_api_s mod_host_api_t;
-
-typedef bool(MOD_CALL *mod_init_fn_t)(const mod_host_api_t *host, mod_handle_t h);
-typedef void(MOD_CALL *mod_deinit_fn_t)(mod_handle_t h);
-
-typedef void(MOD_CALL *mod_tick_fn_t)(mod_handle_t h, float delta);
-typedef bool(MOD_CALL *mod_input_fn_t)(mod_handle_t h, input_event_t *ev);
-
-typedef bool(MOD_CALL *mod_pe_pre_fn_t)(mod_handle_t h, uobject_t *obj, ufunc_t *func, void *params);
-typedef void(MOD_CALL *mod_pe_post_fn_t)(mod_handle_t h, uobject_t *obj, ufunc_t *func, void *params, bool consumed);
-typedef bool(MOD_CALL *mod_func_invoke_pre_fn_t)(mod_handle_t h, ufunc_t *func, uobject_t *obj, fframe_t *stack, void *result);
-typedef void(MOD_CALL *mod_func_invoke_post_fn_t)(mod_handle_t h, ufunc_t *func, uobject_t *obj, fframe_t *stack, void *result, bool consumed);
-typedef void(MOD_CALL *mod_draw_panel_fn_t) (mod_handle_t h, struct nk_context *ctx);
-typedef void(MOD_CALL *mod_draw_config_fn_t)(mod_handle_t h, struct nk_context *ctx);
-typedef void(MOD_CALL *mod_cmd_fn_t)(mod_handle_t h, str_t name, str_t args, void *user);
 
 typedef uint8_t mod_kind_t;
 enum {
@@ -138,11 +112,6 @@ struct mod_blueprint_info_s {
   str_t                    custom_attach_class_path; // required when attach_to is MOD_SPAWN_CONTEXT_CUSTOM
   bool                     auto_spawn;
   keybind_t                default_spawn_keybind;
-};
-
-typedef struct mod_color_s mod_color_t;
-struct mod_color_s {
-  uint8_t r, g, b, a;
 };
 
 typedef struct mod_option_info_s mod_option_info_t;
@@ -460,11 +429,11 @@ mod_get_blueprints_info(mod_manager_t *manager, mod_handle_t h, mod_blueprint_in
 int
 mod_get_options_info(mod_manager_t *manager, mod_handle_t h, mod_option_info_t *out, int cap);
 str_t
-mod_get_mod_dir(mod_manager_t *manager, mod_handle_t h);
+mod_manager_get_mod_dir(mod_manager_t *manager, mod_handle_t h);
 str_t
-mod_get_config_path(mod_manager_t *manager, mod_handle_t h);
+mod_manager_get_config_path(mod_manager_t *manager, mod_handle_t h);
 str_t
-mod_get_manifest_path(mod_manager_t *manager, mod_handle_t h);
+mod_manager_get_manifest_path(mod_manager_t *manager, mod_handle_t h);
 mod_arena_handle_t
 mod_get_perm_arena(mod_manager_t *manager, mod_handle_t h);
 
@@ -473,7 +442,7 @@ mod_register(mod_manager_t *manager, mod_manifest_t *manifest);
 mod_handle_t
 mod_register_builtin(mod_manager_t *manager, mod_manifest_t *manifest, mod_dll_runtime_funcs_t funcs);
 bool
-mod_register_cmd(mod_manager_t *manager, mod_handle_t h, str_t name, str_t description, mod_cmd_fn_t fn, void *user);
+mod_manager_register_cmd(mod_manager_t *manager, mod_handle_t h, str_t name, str_t description, mod_cmd_fn_t fn, void *user);
 
 bool
 mod_dll_load(mod_manager_t *manager, mod_handle_t h);
@@ -546,37 +515,37 @@ mod_cfg_revert(mod_manager_t *manager, mod_handle_t h);
 mod_cfg_handle_t
 mod_cfg_get_by_id(mod_manager_t *manager, mod_handle_t h, str_t id);
 bool
-mod_cfg_get_bool(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_bool(mod_manager_t *manager, mod_cfg_handle_t h);
 int
-mod_cfg_get_int(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_int(mod_manager_t *manager, mod_cfg_handle_t h);
 float
-mod_cfg_get_float(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_float(mod_manager_t *manager, mod_cfg_handle_t h);
 int
-mod_cfg_get_enum(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_enum(mod_manager_t *manager, mod_cfg_handle_t h);
 uint64_t
-mod_cfg_get_string_len(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_string_len(mod_manager_t *manager, mod_cfg_handle_t h);
 uint64_t
-mod_cfg_get_string_data(mod_manager_t *manager, mod_cfg_handle_t h, void *buf, uint64_t cap);
+mod_manager_cfg_get_string_data(mod_manager_t *manager, mod_cfg_handle_t h, void *buf, uint64_t cap);
 str_t
 mod_cfg_get_string(mod_manager_t *manager, mod_cfg_handle_t h, arena_t *arena);
 keybind_t
-mod_cfg_get_keybind(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_keybind(mod_manager_t *manager, mod_cfg_handle_t h);
 mod_color_t
-mod_cfg_get_color(mod_manager_t *manager, mod_cfg_handle_t h);
+mod_manager_cfg_get_color(mod_manager_t *manager, mod_cfg_handle_t h);
 void
-mod_cfg_set_bool(mod_manager_t *manager, mod_cfg_handle_t h, bool val);
+mod_manager_cfg_set_bool(mod_manager_t *manager, mod_cfg_handle_t h, bool val);
 void
-mod_cfg_set_int(mod_manager_t *manager, mod_cfg_handle_t h, int val);
+mod_manager_cfg_set_int(mod_manager_t *manager, mod_cfg_handle_t h, int val);
 void
-mod_cfg_set_float(mod_manager_t *manager, mod_cfg_handle_t h, float val);
+mod_manager_cfg_set_float(mod_manager_t *manager, mod_cfg_handle_t h, float val);
 void
-mod_cfg_set_enum(mod_manager_t *manager, mod_cfg_handle_t h, int val);
+mod_manager_cfg_set_enum(mod_manager_t *manager, mod_cfg_handle_t h, int val);
 void
-mod_cfg_set_string(mod_manager_t *manager, mod_cfg_handle_t h, str_t val);
+mod_manager_cfg_set_string(mod_manager_t *manager, mod_cfg_handle_t h, str_t val);
 void
-mod_cfg_set_keybind(mod_manager_t *manager, mod_cfg_handle_t h, keybind_t bind);
+mod_manager_cfg_set_keybind(mod_manager_t *manager, mod_cfg_handle_t h, keybind_t bind);
 void
-mod_cfg_set_color(mod_manager_t *manager, mod_cfg_handle_t h, mod_color_t color);
+mod_manager_cfg_set_color(mod_manager_t *manager, mod_cfg_handle_t h, mod_color_t color);
 
 bool
 mod_cfg_string_set(mod_cfg_string_t *dst, str_t src);
