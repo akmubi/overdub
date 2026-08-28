@@ -1414,6 +1414,17 @@ unreal_fprop_class_is(fprop_t *prop, fname_t name)
   return false;
 }
 
+bool
+unreal_fprop_class_is_a(fprop_t *prop, fname_t name)
+{
+  for (ffield_class_t *cls = prop ? prop->cls : NULL; cls; cls = cls->super_class) {
+    if (unreal_fname_equal(cls->name, name, false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 str_t
 unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena)
 {
@@ -1554,43 +1565,360 @@ unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena)
 
 }
 
-void
-unreal_fprop_initialize_in_container(fprop_t *prop, void *container)
+static bool
+unreal_fprop_has_valid_layout(fprop_t *prop)
 {
-  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0) {
-    return;
+  return prop && prop->elem_size > 0 && prop->array_dim > 0;
+}
+
+uint64_t
+unreal_fprop_complete_size(fprop_t *prop)
+{
+  if (!unreal_fprop_has_valid_layout(prop)) {
+    return 0;
+  }
+  return (uint64_t)prop->elem_size * (uint64_t)prop->array_dim;
+}
+
+int32_t
+unreal_fprop_min_alignment(fprop_t *prop)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !prop->vtable || !prop->vtable->get_min_alignment) {
+    return 0;
   }
 
-  uint8_t *value = (uint8_t *)container + prop->offset_internal;
+  int32_t alignment = prop->vtable->get_min_alignment(prop);
+  return alignment > 0 ? alignment : 0;
+}
+
+void *
+unreal_fprop_value_at(fprop_t *prop, void *value, int32_t array_idx)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !value || array_idx < 0 || array_idx >= prop->array_dim) {
+    return NULL;
+  }
+  return (uint8_t *)value + (uint64_t)array_idx * (uint64_t)prop->elem_size;
+}
+
+void *
+unreal_fprop_value_in_container(fprop_t *prop, void *container, int32_t array_idx)
+{
+  if (!prop || !container || prop->offset_internal < 0) {
+    return NULL;
+  }
+  return unreal_fprop_value_at(prop, (uint8_t *)container + prop->offset_internal, array_idx);
+}
+
+bool
+unreal_fprop_initialize_value(fprop_t *prop, void *value)
+{
+  uint64_t size = unreal_fprop_complete_size(prop);
+  if (size == 0 || !value) {
+    return false;
+  }
+
   if (prop->prop_flags & CPF_ZERO_CONSTRUCTOR) {
-    mem_zero(value, (uint64_t)prop->elem_size * (uint64_t)prop->array_dim);
-    return;
+    mem_zero(value, size);
+    return true;
   }
 
   if (!prop->vtable || !prop->vtable->initialize_value_internal) {
-    return;
+    return false;
+  }
+
+  prop->vtable->initialize_value_internal(prop, value);
+  return true;
+}
+
+bool
+unreal_fprop_destroy_value(fprop_t *prop, void *value)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !value) {
+    return false;
+  }
+
+  if (prop->prop_flags & CPF_NO_DESTRUCTOR) {
+    return true;
+  }
+
+  if (!prop->vtable || !prop->vtable->destroy_value_internal) {
+    return false;
+  }
+
+  /* UE 4.27's virtual destroys the complete fixed ArrayDim itself. */
+  prop->vtable->destroy_value_internal(prop, value);
+  return true;
+}
+
+bool
+unreal_fprop_clear_single_value(fprop_t *prop, void *value)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !value) {
+    return false;
+  }
+
+  if ((prop->prop_flags & (CPF_NO_DESTRUCTOR | CPF_ZERO_CONSTRUCTOR)) ==
+      (CPF_NO_DESTRUCTOR | CPF_ZERO_CONSTRUCTOR)) {
+    mem_zero(value, (uint64_t)prop->elem_size);
+    return true;
+  }
+
+  if (!prop->vtable || !prop->vtable->clear_value_internal) {
+    return false;
+  }
+
+  prop->vtable->clear_value_internal(prop, value);
+  return true;
+}
+
+bool
+unreal_fprop_clear_complete_value(fprop_t *prop, void *value)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !value) {
+    return false;
   }
 
   for (int32_t i = 0; i < prop->array_dim; ++i) {
-    prop->vtable->initialize_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
+    void *elem = unreal_fprop_value_at(prop, value, i);
+    if (!unreal_fprop_clear_single_value(prop, elem)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool
+unreal_fprop_copy_single_value(fprop_t *prop, void *dst, const void *src)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !dst || !src) {
+    return false;
+  }
+
+  if (dst == src) {
+    return true;
+  }
+
+  if (prop->prop_flags & CPF_IS_PLAIN_OLD_DATA) {
+    mem_copy(dst, (void *)src, (uint64_t)prop->elem_size);
+    return true;
+  }
+
+  if (!prop->vtable || !prop->vtable->copy_values_internal) {
+    return false;
+  }
+
+  prop->vtable->copy_values_internal(prop, dst, src, 1);
+  return true;
+}
+
+bool
+unreal_fprop_copy_complete_value(fprop_t *prop, void *dst, const void *src)
+{
+  uint64_t size = unreal_fprop_complete_size(prop);
+  if (size == 0 || !dst || !src) {
+    return false;
+  }
+
+  if (dst == src) {
+    return true;
+  }
+
+  if (prop->prop_flags & CPF_IS_PLAIN_OLD_DATA) {
+    mem_copy(dst, (void *)src, size);
+    return true;
+  }
+
+  if (!prop->vtable || !prop->vtable->copy_values_internal) {
+    return false;
+  }
+
+  prop->vtable->copy_values_internal(prop, dst, src, prop->array_dim);
+  return true;
+}
+
+bool
+unreal_fprop_copy_single_value_to_script_vm(fprop_t *prop, void *dst, const void *src)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !dst || !src ||
+      !prop->vtable || !prop->vtable->copy_single_value_to_script_vm) {
+    return false;
+  }
+
+  prop->vtable->copy_single_value_to_script_vm(prop, dst, src);
+  return true;
+}
+
+bool
+unreal_fprop_copy_complete_value_to_script_vm(fprop_t *prop, void *dst, const void *src)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !dst || !src ||
+      !prop->vtable || !prop->vtable->copy_complete_value_to_script_vm) {
+    return false;
+  }
+
+  prop->vtable->copy_complete_value_to_script_vm(prop, dst, src);
+  return true;
+}
+
+bool
+unreal_fprop_copy_single_value_from_script_vm(fprop_t *prop, void *dst, const void *src)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !dst || !src ||
+      !prop->vtable || !prop->vtable->copy_single_value_from_script_vm) {
+    return false;
+  }
+
+  prop->vtable->copy_single_value_from_script_vm(prop, dst, src);
+  return true;
+}
+
+bool
+unreal_fprop_copy_complete_value_from_script_vm(fprop_t *prop, void *dst, const void *src)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !dst || !src ||
+      !prop->vtable || !prop->vtable->copy_complete_value_from_script_vm) {
+    return false;
+  }
+
+  prop->vtable->copy_complete_value_from_script_vm(prop, dst, src);
+  return true;
+}
+
+bool
+unreal_fprop_single_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !a || !prop->vtable || !prop->vtable->identical) {
+    return false;
+  }
+  return prop->vtable->identical(prop, a, b, port_flags);
+}
+
+bool
+unreal_fprop_complete_values_identical(fprop_t *prop, const void *a, const void *b, uint32_t port_flags)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !a || !prop->vtable || !prop->vtable->identical) {
+    return false;
+  }
+
+  for (int32_t i = 0; i < prop->array_dim; ++i) {
+    const void *a_elem = unreal_fprop_value_at(prop, (void *)a, i);
+    const void *b_elem = b ? unreal_fprop_value_at(prop, (void *)b, i) : NULL;
+    if (!prop->vtable->identical(prop, a_elem, b_elem, port_flags)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool
+unreal_fprop_value_hash(fprop_t *prop, const void *value, uint32_t *out_hash)
+{
+  if (!unreal_fprop_has_valid_layout(prop) || !value || !out_hash ||
+      !(prop->prop_flags & CPF_HAS_GET_VALUE_TYPE_HASH) ||
+      !prop->vtable || !prop->vtable->get_value_type_hash_internal) {
+    return false;
+  }
+
+  *out_hash = prop->vtable->get_value_type_hash_internal(prop, value);
+  return true;
+}
+
+bool
+unreal_fprop_same_type(fprop_t *prop, fprop_t *other)
+{
+  return prop && other && prop->vtable && prop->vtable->same_type &&
+         prop->vtable->same_type(prop, other);
+}
+
+uobject_t *
+unreal_fprop_get_object(fprop_obj_base_t *prop, const void *value)
+{
+  if (!prop || !value || !prop->vtable) {
+    return NULL;
+  }
+
+  return prop->vtable->get_object_prop_value ? prop->vtable->get_object_prop_value(prop, value) : NULL;
+}
+
+bool
+unreal_fprop_object_is_compatible(fprop_obj_base_t *prop, uobject_t *object)
+{
+  if (!prop || (object && (!prop->prop_class || !unreal_uobject_is_a(object, prop->prop_class)))) {
+    return false;
+  }
+
+  if (!object) {
+    return true;
+  }
+
+  uclass_t *meta_class = NULL;
+  if (unreal_fprop_class_is((fprop_t *)prop, globals.unreal.class_prop)) {
+    meta_class = ((fprop_class_t *)prop)->meta_class;
+  } else if (unreal_fprop_class_is((fprop_t *)prop, globals.unreal.soft_class_prop)) {
+    meta_class = ((fprop_class_soft_t *)prop)->meta_class;
+  }
+
+  if (meta_class && !unreal_uclass_is_child_of((uclass_t *)object, meta_class)) {
+    return false;
+  }
+  return true;
+}
+
+bool
+unreal_fprop_set_object(fprop_obj_base_t *prop, void *value, uobject_t *object)
+{
+  if (!prop || !value || !prop->vtable || !unreal_fprop_object_is_compatible(prop, object)) {
+    return false;
+  }
+
+  if (!prop->vtable->set_object_prop_value) {
+    return false;
+  }
+
+  prop->vtable->set_object_prop_value(prop, value, object);
+  return true;
+}
+
+void
+unreal_fprop_initialize_in_container(fprop_t *prop, void *container)
+{
+  void *value = unreal_fprop_value_in_container(prop, container, 0);
+  if (value) {
+    unreal_fprop_initialize_value(prop, value);
   }
 }
 
 void
 unreal_fprop_destroy_in_container(fprop_t *prop, void *container)
 {
-  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0 || (prop->prop_flags & CPF_NO_DESTRUCTOR)) {
-    return;
+  void *value = unreal_fprop_value_in_container(prop, container, 0);
+  if (value) {
+    unreal_fprop_destroy_value(prop, value);
+  }
+}
+
+bool
+unreal_ustruct_initialize_struct(ustruct_t *struct_type, void *memory, int32_t array_dim)
+{
+  if (!struct_type || !memory || array_dim <= 0 || struct_type->props_size < 0 ||
+      !struct_type->vtable || !struct_type->vtable->init_struct) {
+    return false;
   }
 
-  if (!prop->vtable || !prop->vtable->destroy_value_internal) {
-    return;
+  struct_type->vtable->init_struct(struct_type, memory, array_dim);
+  return true;
+}
+
+bool
+unreal_ustruct_destroy_struct(ustruct_t *struct_type, void *memory, int32_t array_dim)
+{
+  if (!struct_type || !memory || array_dim <= 0 || struct_type->props_size < 0 ||
+      !struct_type->vtable || !struct_type->vtable->destroy_struct) {
+    return false;
   }
 
-  uint8_t *value = (uint8_t *)container + prop->offset_internal;
-  for (int32_t i = 0; i < prop->array_dim; ++i) {
-    prop->vtable->destroy_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
-  }
+  struct_type->vtable->destroy_struct(struct_type, memory, array_dim);
+  return true;
 }
 
 const wchar_t *
@@ -2047,6 +2375,334 @@ unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_ha
   return data[key_hash & (uint32_t)(hash_size - 1)];
 }
 
+static bool
+unreal_array_prop_is_valid(fprop_array_t *prop)
+{
+  return prop && unreal_fprop_has_valid_layout(&prop->base) && prop->inner && unreal_fprop_has_valid_layout(prop->inner);
+}
+
+static bool
+unreal_array_view_is_valid(const void *array, fprop_array_t *prop)
+{
+  if (!array || !unreal_array_prop_is_valid(prop) || (prop->array_flags & EAPF_USES_MEM_IMAGE_ALLOCATOR)) {
+    return false;
+  }
+
+  const fscript_array_t *script_array = (const fscript_array_t *)array;
+  return script_array->num >= 0 && script_array->max >= script_array->num && (script_array->num == 0 || script_array->data != NULL);
+}
+
+int32_t
+unreal_array_num(const void *array, fprop_array_t *prop)
+{
+  if (!unreal_array_view_is_valid(array, prop)) {
+    return -1;
+  }
+  return ((const fscript_array_t *)array)->num;
+}
+
+void *
+unreal_array_get(void *array, fprop_array_t *prop, int32_t idx)
+{
+  if (!unreal_array_view_is_valid(array, prop)) {
+    return NULL;
+  }
+
+  fscript_array_t *script_array = (fscript_array_t *)array;
+  if (idx < 0 || idx >= script_array->num) {
+    return NULL;
+  }
+
+  return (uint8_t *)script_array->data + (uint64_t)idx * (uint64_t)prop->inner->elem_size;
+}
+
+int32_t
+unreal_array_add(void *array, fprop_array_t *prop, const void *value)
+{
+  if (!array || !unreal_array_prop_is_valid(prop) || !value || !generic_array_add) {
+    return -1;
+  }
+  return generic_array_add(array, prop, value);
+}
+
+void
+unreal_array_insert(void *array, fprop_array_t *prop, int32_t idx, const void *value)
+{
+  if (array && unreal_array_prop_is_valid(prop) && idx >= 0 && value && generic_array_insert) {
+    generic_array_insert(array, prop, value, idx);
+  }
+}
+
+void
+unreal_array_remove(void *array, fprop_array_t *prop, int32_t idx)
+{
+  if (array && unreal_array_prop_is_valid(prop) && idx >= 0 && generic_array_remove) {
+    generic_array_remove(array, prop, idx);
+  }
+}
+
+void
+unreal_array_resize(void *array, fprop_array_t *prop, int32_t size)
+{
+  if (array && unreal_array_prop_is_valid(prop) && size >= 0 && generic_array_resize) {
+    generic_array_resize(array, prop, size);
+  }
+}
+
+void
+unreal_array_set(void *array, fprop_array_t *prop, int32_t idx, const void *value, bool size_to_fit)
+{
+  if (array && unreal_array_prop_is_valid(prop) && idx >= 0 && value && generic_array_set) {
+    generic_array_set(array, prop, idx, value, size_to_fit);
+  }
+}
+
+bool
+unreal_array_clear(void *array, fprop_array_t *prop)
+{
+  return array && unreal_array_prop_is_valid(prop) && unreal_fprop_clear_single_value(&prop->base, array);
+}
+
+static bool
+unreal_script_set_view_is_valid(const fscript_set_t *set, const fscript_set_layout_t *layout)
+{
+  if (!set || !layout || layout->size <= 0 || layout->sparse_array_layout.size < layout->size ||
+      layout->sparse_array_layout.alignment <= 0) {
+    return false;
+  }
+
+  const fscript_sparse_array_t *sparse = &set->elems;
+  return sparse->data.num             >= 0 &&
+         sparse->data.max             >= sparse->data.num &&
+         sparse->num_free_idx         >= 0 &&
+         sparse->num_free_idx         <= sparse->data.num &&
+         sparse->alloc_flags.num_bits >= sparse->data.num &&
+         sparse->alloc_flags.max_bits >= sparse->alloc_flags.num_bits &&
+         (sparse->data.num == 0 || sparse->data.data != NULL);
+}
+
+static int32_t
+unreal_script_set_num(const fscript_set_t *set, const fscript_set_layout_t *layout)
+{
+  if (!unreal_script_set_view_is_valid(set, layout)) {
+    return -1;
+  }
+  return set->elems.data.num - set->elems.num_free_idx;
+}
+
+static int32_t
+unreal_script_set_max_index(const fscript_set_t *set, const fscript_set_layout_t *layout)
+{
+  if (!unreal_script_set_view_is_valid(set, layout)) {
+    return -1;
+  }
+  return set->elems.data.num;
+}
+
+static bool
+unreal_script_set_is_valid_index(const fscript_set_t *set, const fscript_set_layout_t *layout, int32_t idx)
+{
+  return unreal_script_set_view_is_valid(set, layout) && idx >= 0 && idx < set->elems.data.num &&
+         unreal_tbit_array_is_set((tbit_array_t *)&set->elems.alloc_flags, idx);
+}
+
+static void *
+unreal_script_set_get(void *set, const fscript_set_layout_t *layout, int32_t index)
+{
+  fscript_set_t *script_set = (fscript_set_t *)set;
+  if (!unreal_script_set_is_valid_index(script_set, layout, index)) {
+    return NULL;
+  }
+
+  return (uint8_t *)script_set->elems.data.data + (uint64_t)index * (uint64_t)layout->sparse_array_layout.size;
+}
+
+static bool
+unreal_set_prop_is_valid(fprop_set_t *prop)
+{
+  return prop && unreal_fprop_has_valid_layout(&prop->base) && prop->elem_prop &&
+         unreal_fprop_has_valid_layout(prop->elem_prop) && prop->set_layout.size > 0 &&
+         prop->set_layout.sparse_array_layout.size >= prop->set_layout.size;
+}
+
+int32_t
+unreal_set_num(const void *set, fprop_set_t *prop)
+{
+  if (!unreal_set_prop_is_valid(prop)) {
+    return -1;
+  }
+  return unreal_script_set_num((const fscript_set_t *)set, &prop->set_layout);
+}
+
+int32_t
+unreal_set_max_index(const void *set, fprop_set_t *prop)
+{
+  if (!unreal_set_prop_is_valid(prop)) {
+    return -1;
+  }
+  return unreal_script_set_max_index((const fscript_set_t *)set, &prop->set_layout);
+}
+
+bool
+unreal_set_is_valid_index(const void *set, fprop_set_t *prop, int32_t idx)
+{
+  return unreal_set_prop_is_valid(prop) && unreal_script_set_is_valid_index((const fscript_set_t *)set, &prop->set_layout, idx);
+}
+
+const void *
+unreal_set_get(const void *set, fprop_set_t *prop, int32_t idx)
+{
+  if (!unreal_set_prop_is_valid(prop)) {
+    return NULL;
+  }
+  return unreal_script_set_get((void *)set, &prop->set_layout, idx);
+}
+
+int32_t
+unreal_set_find_index(const void *set, fprop_set_t *prop, const void *value)
+{
+  int32_t max_index = unreal_set_max_index(set, prop);
+  if (max_index < 0 || !value) {
+    return TSET_INVALID_ID;
+  }
+
+  for (int32_t index = 0; index < max_index; ++index) {
+    const void *elem = unreal_set_get(set, prop, index);
+    if (elem && unreal_fprop_single_values_identical(prop->elem_prop, elem, value, 0)) {
+      return index;
+    }
+  }
+  return TSET_INVALID_ID;
+}
+
+bool
+unreal_set_contains(const void *set, fprop_set_t *prop, const void *value)
+{
+  return unreal_set_find_index(set, prop, value) != TSET_INVALID_ID;
+}
+
+void
+unreal_set_add(void *set, fprop_set_t *prop, const void *value)
+{
+  if (!set || !unreal_set_prop_is_valid(prop) || !value || !fscript_set_add_elem) {
+    return;
+  }
+
+  fscript_set_helper_t helper = {
+    .elem_prop = prop->elem_prop,
+    .set       = set,
+    .layout    = prop->set_layout,
+  };
+  fscript_set_add_elem(&helper, value);
+}
+
+bool
+unreal_set_remove(void *set, fprop_set_t *prop, const void *value)
+{
+  if (!set || !unreal_set_prop_is_valid(prop) || !value || !generic_set_remove) {
+    return false;
+  }
+  return generic_set_remove(set, prop, value);
+}
+
+bool
+unreal_set_clear(void *set, fprop_set_t *prop)
+{
+  return set && unreal_set_prop_is_valid(prop) && unreal_fprop_clear_single_value(&prop->base, set);
+}
+
+static bool
+unreal_map_prop_is_valid(fprop_map_t *prop)
+{
+  if (!prop || !unreal_fprop_has_valid_layout(&prop->base) || !prop->key_prop || !prop->val_prop ||
+      !unreal_fprop_has_valid_layout(prop->key_prop) || !unreal_fprop_has_valid_layout(prop->val_prop)) {
+    return false;
+  }
+
+  const fscript_map_layout_t *layout = &prop->map_layout;
+  return layout->set_layout.size > 0 &&
+         layout->set_layout.sparse_array_layout.size >= layout->set_layout.size &&
+         layout->value_offset >= prop->key_prop->elem_size &&
+         (uint64_t)layout->value_offset + (uint64_t)prop->val_prop->elem_size <= (uint64_t)layout->set_layout.size;
+}
+
+static bool
+unreal_map_view_prop_is_valid(fprop_map_t *prop)
+{
+  return unreal_map_prop_is_valid(prop) && !(prop->map_flags & EMPF_USES_MEM_IMAGE_ALLOCATOR);
+}
+
+int32_t
+unreal_map_num(const void *map, fprop_map_t *prop)
+{
+  if (!map || !unreal_map_view_prop_is_valid(prop)) {
+    return -1;
+  }
+  return unreal_script_set_num(&((const fscript_map_t *)map)->pairs, &prop->map_layout.set_layout);
+}
+
+int32_t
+unreal_map_max_index(const void *map, fprop_map_t *prop)
+{
+  if (!map || !unreal_map_view_prop_is_valid(prop)) {
+    return -1;
+  }
+  return unreal_script_set_max_index(&((const fscript_map_t *)map)->pairs, &prop->map_layout.set_layout);
+}
+
+bool
+unreal_map_is_valid_index(const void *map, fprop_map_t *prop, int32_t idx)
+{
+  return unreal_map_view_prop_is_valid(prop) && map &&
+         unreal_script_set_is_valid_index(&((const fscript_map_t *)map)->pairs, &prop->map_layout.set_layout, idx);
+}
+
+const void *
+unreal_map_get_key(const void *map, fprop_map_t *prop, int32_t idx)
+{
+  if (!unreal_map_view_prop_is_valid(prop) || !map) {
+    return NULL;
+  }
+  return unreal_script_set_get(&((fscript_map_t *)map)->pairs, &prop->map_layout.set_layout, idx);
+}
+
+void *
+unreal_map_get_value(void *map, fprop_map_t *prop, int32_t idx)
+{
+  uint8_t *key = (uint8_t *)unreal_map_get_key(map, prop, idx);
+  return key ? key + prop->map_layout.value_offset : NULL;
+}
+
+int32_t
+unreal_map_find_index(const void *map, fprop_map_t *prop, const void *key)
+{
+  int32_t max_idx = unreal_map_max_index(map, prop);
+  if (max_idx < 0 || !key) {
+    return TSET_INVALID_ID;
+  }
+
+  for (int32_t idx = 0; idx < max_idx; ++idx) {
+    const void *candidate = unreal_map_get_key(map, prop, idx);
+    if (candidate && unreal_fprop_single_values_identical(prop->key_prop, candidate, key, 0)) {
+      return idx;
+    }
+  }
+  return TSET_INVALID_ID;
+}
+
+void *
+unreal_map_find_value_ptr(void *map, fprop_map_t *prop, const void *key)
+{
+  int32_t idx = unreal_map_find_index(map, prop, key);
+  return idx != TSET_INVALID_ID ? unreal_map_get_value(map, prop, idx) : NULL;
+}
+
+bool
+unreal_map_clear(void *map, fprop_map_t *prop)
+{
+  return map && unreal_map_prop_is_valid(prop) && unreal_fprop_clear_single_value(&prop->base, map);
+}
+
 void
 unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val)
 {
@@ -2100,7 +2756,7 @@ unreal_map_remove(void *map, fprop_map_t *prop, const void *key)
 bool
 unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val)
 {
-  if (!map || !prop || !key || !out_val || !generic_map_find) {
+  if (!map || !prop || !key || !generic_map_find) {
     return false;
   }
   return generic_map_find(map, prop, key, out_val);

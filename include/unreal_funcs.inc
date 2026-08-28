@@ -20,6 +20,13 @@ UE_FUNC_NORMAL(generic_map_find, bool, void *map, fprop_map_t *map_prop, const v
 UE_FUNC_NORMAL(add_tag_table_row, void, ugameplay_tags_manager_t *self, fgameplay_tag_table_row_t *tag_row, fname_t source_name, bool is_restricted_tag)
 UE_FUNC_NORMAL(tmulticast_delegate_broadcast, void, tmulticast_delegate_t *self)
 UE_FUNC_NORMAL(request_gameplay_tag, fgameplay_tag_t *, ugameplay_tags_manager_t *self, fgameplay_tag_t *, fname_t tag_name, bool error_if_not_found);
+UE_FUNC_NORMAL(generic_array_resize, void,    void *target, fprop_array_t *prop, int32_t size);
+UE_FUNC_NORMAL(generic_array_add,    int32_t, void *target, fprop_array_t *prop, const void *new_item);
+UE_FUNC_NORMAL(generic_array_insert, void,    void *target, fprop_array_t *prop, const void *new_item, int32_t idx);
+UE_FUNC_NORMAL(generic_array_remove, void,    void *target, fprop_array_t *prop, int32_t idx);
+UE_FUNC_NORMAL(generic_array_set,    void,    void *target, fprop_array_t *prop, int32_t idx, const void *new_item, bool size_to_fit);
+UE_FUNC_NORMAL(fscript_set_add_elem, void, fscript_set_helper_t *helper, const void *item_ptr);
+UE_FUNC_NORMAL(generic_set_remove,   bool, void *target, fprop_set_t *prop, const void *item_ptr);
 
 #undef UE_FUNC_NORMAL
 
