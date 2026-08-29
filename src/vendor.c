@@ -19,7 +19,7 @@
 
 #define NK_PROFILE_SCOPE_BEGIN(NAME, SCOPE) PROF_SCOPE_BEGIN(NAME, SCOPE)
 #define NK_PROFILE_SCOPE_END(SCOPE)         PROF_SCOPE_END(SCOPE)
-#define NK_API                              MOD_API
+#define NK_API                              extern MOD_API
 #include "nuklear/src/nuklear.c"
 
 #include "nk_font_runtime.h"

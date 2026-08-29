@@ -11,7 +11,7 @@
 #endif
 
 #ifndef NK_API
-#  define NK_API MOD_API
+#  define NK_API extern MOD_API
 #endif
 
 #include "nuklear/include/nuklear.h"
