@@ -13,13 +13,15 @@ MOD_NAME ?= mod
 MOD_SRC  ?= main.c
 CONFIG   ?= debug
 
-# Set this on the command line or in the environment for an out-of-tree mod.
-OVERDUB_DIR         ?= ..
+# A packaged template keeps the SDK in this directory. The in-repository
+# template falls back to the parent Overdub source tree.
+OVERDUB_DIR         ?= $(if $(wildcard include/mod.h),.,..)
 OVERDUB_INCLUDE_DIR ?= $(OVERDUB_DIR)/include
 OVERDUB_VENDOR_DIR  ?= $(OVERDUB_DIR)/vendor
 OVERDUB_HEADER      ?= $(OVERDUB_INCLUDE_DIR)/mod.h
 OVERDUB_LIB         ?= $(OVERDUB_DIR)/build/overdub.lib
 OVERDUB_MAKEFILE    ?= $(OVERDUB_DIR)/Makefile
+OVERDUB_PROJECT     ?= $(OVERDUB_DIR)/overdub.vcxproj
 
 ifeq ($(origin CC), default)
   ifeq ($(OS),Windows_NT)
@@ -79,8 +81,8 @@ check-overdub:
 		exit 1; \
 	fi
 	@if [ ! -f "$(OVERDUB_LIB)" ]; then \
-		if [ ! -f "$(OVERDUB_MAKEFILE)" ]; then \
-			printf "ERROR\t%s\n" "$(OVERDUB_LIB) is missing and $(OVERDUB_MAKEFILE) was not found. Cannot build Overdub automatically."; \
+		if [ ! -f "$(OVERDUB_MAKEFILE)" ] || [ ! -f "$(OVERDUB_PROJECT)" ]; then \
+			printf "ERROR\t%s\n" "$(OVERDUB_LIB) is missing and $(OVERDUB_DIR) is not an Overdub source tree. Cannot build Overdub automatically."; \
 			exit 1; \
 		fi; \
 		printf "BUILD\t%s\n" "$(OVERDUB_LIB) is missing; building Overdub ($(CONFIG))."; \
@@ -106,6 +108,6 @@ $(BUILD_DIR)/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -rf build
+	rm -rf build/debug build/release
 
 -include $(DEPS)

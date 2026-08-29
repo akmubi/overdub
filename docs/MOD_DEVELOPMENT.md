@@ -186,6 +186,8 @@ For multiple mod projects, set the `OVERDUB_DIR` environment variable once inste
 
 If `build/overdub.lib` is missing, the mod build automatically builds Overdub first with the same Debug or Release configuration. An invalid `OVERDUB_DIR` or a failed Overdub build stops the mod build with an explicit error.
 
+The mod-template archive attached to each Overdub release is self-contained. Its project root already contains `include/`, `vendor/`, and `build/overdub.lib`, so it builds without `OVERDUB_DIR` or an Overdub source checkout. The same `overdub.lib` is also available as a separate release asset for custom project layouts.
+
 ## 4. Minimal Native Mod
 
 ```c

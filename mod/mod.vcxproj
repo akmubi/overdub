@@ -58,6 +58,7 @@
   <PropertyGroup>
     <ModName Condition="'$(ModName)'==''">mod</ModName>
     <OverdubDir Condition="'$(OverdubDir)'=='' and '$(OVERDUB_DIR)'!=''">$(OVERDUB_DIR)</OverdubDir>
+    <OverdubDir Condition="'$(OverdubDir)'=='' and Exists('$(ProjectDir)include\mod.h')">$(ProjectDir)</OverdubDir>
     <OverdubDir Condition="'$(OverdubDir)'==''">$(ProjectDir)..</OverdubDir>
     <OverdubIncludeDirectory Condition="'$(OverdubIncludeDirectory)'==''">$(OverdubDir)\include</OverdubIncludeDirectory>
     <OverdubVendorDirectory Condition="'$(OverdubVendorDirectory)'==''">$(OverdubDir)\vendor</OverdubVendorDirectory>
