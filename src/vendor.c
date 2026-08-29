@@ -99,10 +99,6 @@ nk_runtime_font_rasterize(const void           *ttf,
   return result;
 }
 
-#if defined BUILD_TEST_UI
-#  include "nuklear/d3d11/nuklear_d3d11.c"
-#endif
-
 #if COMPILER_MSVC
 #  pragma warning(pop)
 #elif COMPILER_GCC

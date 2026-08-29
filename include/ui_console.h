@@ -3,6 +3,7 @@
 
 #include "input.h"
 #include "lua_runtime.h"
+#include "lua_unreal_prop.h"
 #include "log.h"
 #include "mod_manager.h"
 #include "str.h"
@@ -10,6 +11,8 @@
 #include "ui_nuklear.h"
 
 #include "vendor_nuklear.h"
+
+#define UI_CONSOLE_TIMESTAMP_CAP (48)
 
 typedef int ui_console_log_level_t;
 enum {
@@ -53,7 +56,9 @@ ui_console_position_str_array(void);
 typedef struct ui_console_line_s ui_console_line_t;
 struct ui_console_line_s {
   str_t                  text;
+  str_t                  display_text;
   ui_console_log_level_t level;
+  char                   timestamp[UI_CONSOLE_TIMESTAMP_CAP];
   float                  row_w;
 };
 
@@ -70,19 +75,23 @@ struct ui_console_cfg_s {
   keybind_t              toggle_bind;
   bool                   auto_scroll;
   bool                   wrap_lines;
+  bool                   show_timestamp;
+  bool                   show_log_level;
   ui_console_position_t  position;
   ui_console_log_level_t min_level;
 };
 
 typedef struct ui_console_s ui_console_t;
 struct ui_console_s {
-  lua_runtime_t lua;
+  lua_runtime_t        lua;
+  lua_unreal_context_t lua_unreal;
 
   ui_console_line_t *lines;
   uint8_t           *line_text_storage;
   int                line_count;
   int                max_lines;
   int                max_line_len;
+  uint8_t            prefix_flags;
 
   uint8_t *input_buf;
   int      input_max;
@@ -109,13 +118,15 @@ struct ui_console_s {
 void
 ui_console_init(ui_console_t *console, arena_t *arena);
 void
-ui_console_logv(ui_console_t *console, ui_console_log_level_t level, const char *fmt, va_list ap);
+ui_console_on_frame_begin(ui_console_t *console, uint64_t frame_counter);
 void
-ui_console_draw(ui_console_t      *console,
-                struct nk_context *ctx,
-                mod_manager_t     *mod_manager,
-                unsigned int       viewport_width,
-                unsigned int       viewport_height);
+ui_console_flush_logs(ui_console_t *console);
+
+void
+ui_console_append_log(ui_console_t *console, const log_message_t *message);
+
+void
+ui_console_draw(ui_console_t *console, struct nk_context *ctx, mod_manager_t *mod_manager, unsigned int vw, unsigned int vh);
 
 void
 ui_console_toggle(ui_console_t *console);

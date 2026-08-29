@@ -27,6 +27,11 @@ UE_FUNC_NORMAL(generic_array_remove, void,    void *target, fprop_array_t *prop,
 UE_FUNC_NORMAL(generic_array_set,    void,    void *target, fprop_array_t *prop, int32_t idx, const void *new_item, bool size_to_fit);
 UE_FUNC_NORMAL(fscript_set_add_elem, void, fscript_set_helper_t *helper, const void *item_ptr);
 UE_FUNC_NORMAL(generic_set_remove,   bool, void *target, fprop_set_t *prop, const void *item_ptr);
+UE_FUNC_NORMAL(ustruct_static_link, void, ustruct_t *self, bool relink_existing_props);
+UE_FUNC_NORMAL(uclass_create_link_and_add_child_funcs_to_map, void, uclass_t *self, fclass_func_link_info_t *funcs, uint32_t num_funcs);
+UE_FUNC_NORMAL(uclass_assemble_ref_tok_stream, void, uclass_t *self, bool force);
+UE_FUNC_NORMAL(uclass_add_native_func, void, uclass_t *self, const wchar_t *name, fnative_func_ptr_fn_t ptr);
+UE_FUNC_NORMAL(ffield_construct, ffield_t *, fname_t *type_name, ffield_variant_t *owner, fname_t *name, eobj_flags_t flags);
 
 #undef UE_FUNC_NORMAL
 
@@ -40,6 +45,7 @@ UE_FUNC_HOOKED(io_dispatcher_mount, fio_status_t *, void *self, fio_status_t *st
 UE_FUNC_HOOKED(game_engine_tick, void, void *self, float delta, bool idle_mode);
 UE_FUNC_HOOKED(process_event, void, uobject_t *self, ufunc_t *func, void *params)
 UE_FUNC_HOOKED(ufunction_invoke, void, ufunc_t *func, uobject_t *obj, fframe_t *stack, void *result);
+UE_FUNC_HOOKED(conditional_post_load, void, uobject_t *self);
 UE_FUNC_HOOKED(process_mouse_move_event, bool, void *self, fpointer_event_t mouse_event, bool is_synthetic);
 UE_FUNC_HOOKED(process_mouse_button_down_event, bool, void *self, void *platform_win, fpointer_event_t mouse_event);
 UE_FUNC_HOOKED(process_mouse_button_up_event, bool, void *self, fpointer_event_t mouse_event);

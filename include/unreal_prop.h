@@ -40,10 +40,45 @@ typedef enum unreal_prop_kind_e {
   UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE,
 } unreal_prop_kind_t;
 
+typedef uint8_t unreal_func_param_role_t;
+enum {
+  UNREAL_FUNC_PARAM_INPUT = 0,
+  UNREAL_FUNC_PARAM_OUTPUT,
+  UNREAL_FUNC_PARAM_RETURN,
+};
+
 typedef struct unreal_prop_integer_s unreal_prop_integer_t;
 struct unreal_prop_integer_s {
-  uint64_t value; // cast value to int64_t when is_signed is true
+  uint64_t value;
   bool     is_signed;
+};
+
+typedef struct unreal_prop_snapshot_s unreal_prop_snapshot_t;
+struct unreal_prop_snapshot_s {
+  unreal_prop_snapshot_t *next;
+  unreal_prop_snapshot_t *first_child;
+  unreal_prop_snapshot_t *last_child;
+
+  str_t         name;
+  str_t         type;
+  str_t         value;
+  str_t         tooltip;
+  eprop_flags_t prop_flags;
+  bool          expanded;
+  bool          truncated;
+};
+
+typedef struct unreal_prop_snapshot_builder_s unreal_prop_snapshot_builder_t;
+struct unreal_prop_snapshot_builder_s {
+  arena_t *arena;
+
+  uint32_t max_depth;
+  uint32_t max_container_elements;
+  uint32_t max_nodes;
+  uint32_t max_text_length;
+
+  uint32_t node_count;
+  bool     truncated;
 };
 
 MOD_API fprop_t *
@@ -51,6 +86,8 @@ unreal_ustruct_find_prop(ustruct_t *s, str_t name);
 
 MOD_API unreal_prop_kind_t
 unreal_fprop_get_kind(fprop_t *prop);
+MOD_API unreal_func_param_role_t
+unreal_fprop_get_param_role(fprop_t *prop);
 MOD_API bool
 unreal_fprop_struct_is(fprop_t *prop, fname_t struct_name);
 MOD_API bool
@@ -68,6 +105,10 @@ MOD_API bool
 unreal_fprop_read_real(fprop_t *prop, const void *value, double *out);
 MOD_API bool
 unreal_fprop_read_name(fprop_t *prop, const void *value, fname_t *out);
+MOD_API bool
+unreal_fprop_read_string(fprop_t *prop, const void *value, arena_t *arena, str_t *out);
+MOD_API bool
+unreal_fprop_read_soft_path(fprop_t *prop, const void *value, arena_t *arena, str_t *out);
 
 MOD_API bool
 unreal_fprop_write_bool(fprop_t *prop, void *value, bool input);
@@ -82,18 +123,43 @@ MOD_API uobject_t *
 unreal_fprop_get_object(fprop_obj_base_t *prop, const void *value);
 MOD_API uobject_t *
 unreal_fprop_get_referenced_object(fprop_t *prop, const void *value);
+MOD_API uclass_t *
+unreal_fprop_get_reference_class(fprop_t *prop);
 MOD_API bool
 unreal_fprop_object_is_compatible(fprop_obj_base_t *prop, uobject_t *object);
 MOD_API bool
 unreal_fprop_set_object(fprop_obj_base_t *prop, void *value, uobject_t *object);
+MOD_API bool
+unreal_fprop_interface_is_compatible(fprop_iface_t *prop, uobject_t *object);
+MOD_API bool
+unreal_fprop_set_interface(fprop_iface_t *prop, void *value, uobject_t *object);
 
 MOD_API uobject_t *
 unreal_fweak_object_resolve(fweak_object_ptr_t weak);
+MOD_API bool
+unreal_fweak_object_from_object(uobject_t *object, fweak_object_ptr_t *out);
+MOD_API bool
+unreal_ufunction_signature_compatible(ufunc_t *signature, ufunc_t *function);
+MOD_API ufunc_t *
+unreal_fprop_delegate_signature(fprop_t *prop);
+MOD_API bool
+unreal_fscript_delegate_make(fscript_delegate_t *out, uobject_t *target, ufunc_t *function);
+MOD_API bool
+unreal_fprop_delegate_contains(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding);
+MOD_API bool
+unreal_fprop_delegate_bind(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding);
+MOD_API bool
+unreal_fprop_delegate_unbind(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding);
 MOD_API str_t
 unreal_fscript_delegate_push_summary(const fscript_delegate_t *delegate, arena_t *arena);
 /* NOTE: value_size is the readable size of one property element, not its complete fixed-array size */
 MOD_API str_t
 unreal_fprop_push_value_summary(fprop_t *prop, const void *value, int32_t value_size, arena_t *arena);
+
+MOD_API void
+unreal_prop_snapshot_builder_init(unreal_prop_snapshot_builder_t *builder, arena_t *arena);
+MOD_API unreal_prop_snapshot_t *
+unreal_fprop_snapshot_build(unreal_prop_snapshot_builder_t *builder, fprop_t *prop, str_t name, const void *value);
 
 static inline void *
 unreal_uprop_ptr(fprop_t *prop, void *container)

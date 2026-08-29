@@ -12,15 +12,13 @@
 
 #include "vendor_stb.h"
 
-#define DETAIL_MAX_CONTAINER_ELEMS (128)
-
 #define DETAIL_C_ROW_COLLAPSIBLE_BG     nk_rgba(34, 43, 48, 210)
 #define DETAIL_C_ROW_COLLAPSIBLE_HOVER  nk_rgba(95, 178, 145, 255)
 #define DETAIL_C_ROW_COLLAPSIBLE_ACTIVE nk_rgba(50, 65, 72, 245)
 
-#define DETAIL_C_PROP_TYPE_TEXT       nk_rgba(218, 156, 62, 255)
-#define DETAIL_C_PROP_VALUE_TEXT      nk_rgba(139, 191, 166, 255)
-#define DETAIL_C_PROP_LINK_VALUE_TEXT nk_rgba(122, 184, 232, 255)
+#define DETAIL_C_PROP_TYPE_TEXT       UI_C_PROP_TYPE_TEXT
+#define DETAIL_C_PROP_VALUE_TEXT      UI_C_PROP_VALUE_TEXT
+#define DETAIL_C_PROP_LINK_VALUE_TEXT UI_C_PROP_LINK_TEXT
 #define DETAIL_C_PROP_NAME_TEXT       UI_C_TEXT
 #define DETAIL_C_PROP_OFFSET_TEXT     UI_C_TEXT
 #define DETAIL_C_PROP_SIZE_TEXT       UI_C_TEXT
@@ -694,6 +692,9 @@ detail_tab_build(search_tool_t *tool, detail_tab_t *tab)
   }
 
   if (tab->record->kind == UOBJECT_KIND_PACKAGE) {
+    uint64_t state_size   = ((uint64_t)tool->cache.record_cap + 7) / 8;
+    tab->package_expanded = ARENA_PUSH_ARRAY_ZERO(tab->info_arena, uint8_t, state_size);
+    ASSERT(tab->package_expanded != NULL);
     return;
   }
 
@@ -1095,11 +1096,7 @@ tarray_children_match(detail_prop_t *node, int32_t num)
     return false;
   }
 
-  int32_t count = MIN_VAL(num, DETAIL_MAX_CONTAINER_ELEMS);
-
-  return node->children_kind == DETAIL_PROP_CHILDREN_ARRAY_ELEMS &&
-         node->live_child_count == num &&
-         node->live_slot_count == count;
+  return node->children_kind == DETAIL_PROP_CHILDREN_ARRAY_ELEMS && node->live_child_count == num && node->live_slot_count == num;
 }
 
 static bool
@@ -1110,9 +1107,8 @@ tset_children_match(detail_prop_t *node, const void *set, fprop_set_t *prop, int
     return false;
   }
 
-  detail_prop_t *child   = node->first_child;
-  int32_t        emitted = 0;
-  for (int32_t idx = 0; idx < slot_count && emitted < DETAIL_MAX_CONTAINER_ELEMS; ++idx) {
+  detail_prop_t *child = node->first_child;
+  for (int32_t idx = 0; idx < slot_count; ++idx) {
     if (!unreal_set_is_valid_index(set, prop, idx)) {
       continue;
     }
@@ -1121,9 +1117,9 @@ tset_children_match(detail_prop_t *node, const void *set, fprop_set_t *prop, int
       return false;
     }
 
-    child    = child->next;
-    emitted += 1;
+    child = child->next;
   }
+
   return child == NULL;
 }
 
@@ -1135,9 +1131,8 @@ tmap_children_match(detail_prop_t *node, const void *map, fprop_map_t *prop, int
     return false;
   }
 
-  detail_prop_t *child   = node->first_child;
-  int32_t        emitted = 0;
-  for (int32_t idx = 0; idx < slot_count && emitted < DETAIL_MAX_CONTAINER_ELEMS; ++idx) {
+  detail_prop_t *child = node->first_child;
+  for (int32_t idx = 0; idx < slot_count; ++idx) {
     if (!unreal_map_is_valid_index(map, prop, idx)) {
       continue;
     }
@@ -1146,9 +1141,9 @@ tmap_children_match(detail_prop_t *node, const void *map, fprop_map_t *prop, int
       return false;
     }
 
-    child    = child->next;
-    emitted += 1;
+    child = child->next;
   }
+
   return child == NULL;
 }
 
@@ -1159,11 +1154,7 @@ mcast_delegate_children_match(detail_prop_t *node, int32_t num)
     return false;
   }
 
-  int32_t count = MIN_VAL(num, DETAIL_MAX_CONTAINER_ELEMS);
-
-  return node->children_kind    == DETAIL_PROP_CHILDREN_MCAST_DELEGATE &&
-         node->live_child_count == num &&
-         node->live_slot_count  == count;
+  return node->children_kind == DETAIL_PROP_CHILDREN_MCAST_DELEGATE && node->live_child_count == num && node->live_slot_count == num;
 }
 
 static void
@@ -1177,13 +1168,11 @@ tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *n
 
   detail_prop_clear_runtime_children(tab, node);
 
-  int count = MIN_VAL(num, DETAIL_MAX_CONTAINER_ELEMS);
-
   node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
   node->live_child_count = num;
-  node->live_slot_count  = count;
+  node->live_slot_count  = num;
 
-  if (count <= 0) {
+  if (num <= 0) {
     return;
   }
 
@@ -1192,7 +1181,7 @@ tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *n
   int32_t elem_size = inner->elem_size;
   ASSERT(elem_size > 0);
 
-  for (int i = 0; i < count; ++i) {
+  for (int32_t i = 0; i < num; ++i) {
     int32_t  elem_offset = i * elem_size;
     uint8_t *elem_addr   = (uint8_t *)unreal_array_get(array, array_prop, i);
 
@@ -1221,14 +1210,9 @@ tset_rebuild_children(
   int32_t slot_size = set_prop->set_layout.sparse_array_layout.size;
   ASSERT(slot_size > 0);
 
-  int32_t emitted = 0;
   for (int32_t i = 0; i < slot_count; ++i) {
     if (!unreal_set_is_valid_index(set, set_prop, i)) {
       continue;
-    }
-
-    if (emitted >= DETAIL_MAX_CONTAINER_ELEMS) {
-      break;
     }
 
     int32_t  elem_offset = i * slot_size;
@@ -1238,7 +1222,6 @@ tset_rebuild_children(
     if (elem) {
       elem->live_slot_idx = i;
       QUEUE_PUSH(node->first_child, node->last_child, elem);
-      emitted += 1;
     }
   }
 }
@@ -1259,14 +1242,9 @@ tmap_rebuild_children(
   int32_t slot_size = map_prop->map_layout.set_layout.sparse_array_layout.size;
   ASSERT(slot_size > 0);
 
-  int32_t emitted = 0;
   for (int32_t i = 0; i < slot_count; ++i) {
     if (!unreal_map_is_valid_index(map, map_prop, i)) {
       continue;
-    }
-
-    if (emitted >= DETAIL_MAX_CONTAINER_ELEMS) {
-      break;
     }
 
     int32_t  pair_offset = i * slot_size;
@@ -1277,7 +1255,6 @@ tmap_rebuild_children(
     if (pair) {
       pair->live_slot_idx = i;
       QUEUE_PUSH(node->first_child, node->last_child, pair);
-      emitted += 1;
     }
   }
 }
@@ -1292,13 +1269,11 @@ mcast_delegate_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_p
 
   detail_prop_clear_runtime_children(tab, node);
 
-  int32_t count = MIN_VAL(list->num, DETAIL_MAX_CONTAINER_ELEMS);
-
   node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
   node->live_child_count = list->num;
-  node->live_slot_count  = count;
+  node->live_slot_count  = list->num;
 
-  for (int32_t i = 0; i < count; ++i) {
+  for (int32_t i = 0; i < list->num; ++i) {
     detail_prop_t *elem = detail_prop_alloc_runtime(tab);
     if (!elem) {
       break;
@@ -1449,12 +1424,14 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
     return;
   }
 
-  if (!tarray_children_match(node, num)) {
-    tarray_rebuild_children(tool, tab, node, array_prop, array, num, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
+    node->live_child_count = num;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!tarray_children_match(node, num)) {
+    tarray_rebuild_children(tool, tab, node, array_prop, array, num, depth);
   }
 
   int elem_size = array_prop->inner->elem_size;
@@ -1466,7 +1443,7 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
       continue;
     }
 
-    if (elem_idx >= num || elem_idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (elem_idx >= num) {
       break;
     }
 
@@ -1531,12 +1508,14 @@ detail_prop_fill_value_tset_children(search_tool_t *tool, detail_tab_t *tab, det
     return;
   }
 
-  if (!tset_children_match(node, set, set_prop, live_count, slot_count)) {
-    tset_rebuild_children(tool, tab, node, set_prop, set, live_count, slot_count, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_SET_ELEMS;
+    node->live_child_count = live_count;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!tset_children_match(node, set, set_prop, live_count, slot_count)) {
+    tset_rebuild_children(tool, tab, node, set_prop, set, live_count, slot_count, depth);
   }
 
   int elem_size = set_prop->elem_prop->elem_size;
@@ -1610,12 +1589,14 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
     return;
   }
 
-  if (!tmap_children_match(node, map, map_prop, live_count, slot_count)) {
-    tmap_rebuild_children(tool, tab, node, map_prop, map, live_count, slot_count, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MAP_PAIRS;
+    node->live_child_count = live_count;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!tmap_children_match(node, map, map_prop, live_count, slot_count)) {
+    tmap_rebuild_children(tool, tab, node, map_prop, map, live_count, slot_count, depth);
   }
 
   int pair_size = map_prop->map_layout.set_layout.size;
@@ -1718,18 +1699,20 @@ detail_prop_fill_value_mcast_delegate_children(search_tool_t *tool, detail_tab_t
     return;
   }
 
-  if (!mcast_delegate_children_match(node, num)) {
-    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
+    node->live_child_count = num;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!mcast_delegate_children_match(node, num)) {
+    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
   }
 
   for (detail_prop_t *elem = node->first_child; elem; elem = elem->next) {
     int32_t idx = elem->live_slot_idx;
 
-    if (idx < 0 || idx >= num || idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (idx < 0 || idx >= num) {
       continue;
     }
 
@@ -1795,18 +1778,20 @@ detail_prop_fill_value_sparse_mcast_delegate_children(search_tool_t *tool, detai
 
   node->summary = ui_text_span_make(tool->ctx, str_push_fmt(arena, "Num=%d Max=%d Data=%p", num, max, list->data));
 
-  if (!mcast_delegate_children_match(node, num)) {
-    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
+    node->live_child_count = num;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!mcast_delegate_children_match(node, num)) {
+    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
   }
 
   for (detail_prop_t *elem = node->first_child; elem; elem = elem->next) {
     int32_t idx = elem->live_slot_idx;
 
-    if (idx < 0 || idx >= num || idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (idx < 0 || idx >= num) {
       continue;
     }
 
@@ -1941,6 +1926,15 @@ details_refresh_values(search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
+details_refresh_all_values(search_tool_t *tool, detail_tab_t *tab)
+{
+  bool old_force_expand    = tab->force_expand_values;
+  tab->force_expand_values = true;
+  details_refresh_values(tool, tab);
+  tab->force_expand_values = old_force_expand;
+}
+
+static void
 detail_dump_push_line(arena_t *arena, str_list_t *lines, int depth, str_t text)
 {
   ASSERT(arena != NULL);
@@ -2035,10 +2029,7 @@ detail_props_push_dump(search_tool_t *tool, detail_tab_t *tab, arena_t *arena)
   ASSERT(tab != NULL);
   ASSERT(arena != NULL);
 
-  bool old_force_expand    = tab->force_expand_values;
-  tab->force_expand_values = true;
-  details_refresh_values(tool, tab);
-  tab->force_expand_values = old_force_expand;
+  details_refresh_all_values(tool, tab);
 
   str_list_t lines = {0};
 
@@ -2648,6 +2639,147 @@ ui_detail_row(search_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_r
   return expanded;
 }
 
+typedef struct detail_tree_state_s {
+  bool has_children;
+  bool has_collapsed;
+} detail_tree_state_t;
+
+static inline bool
+detail_prop_has_children(detail_prop_t *prop)
+{
+  switch (prop->children_kind) {
+    case DETAIL_PROP_CHILDREN_ARRAY_ELEMS:
+    case DETAIL_PROP_CHILDREN_SET_ELEMS:
+    case DETAIL_PROP_CHILDREN_MAP_PAIRS:
+    case DETAIL_PROP_CHILDREN_MCAST_DELEGATE: {
+      return prop->live_child_count > 0;
+    }
+
+    default: {
+      return prop->first_child != NULL;
+    }
+  }
+}
+
+static void
+detail_props_collect_tree_state(detail_prop_t *first, detail_tree_state_t *state)
+{
+  for (detail_prop_t *prop = first; prop; prop = prop->next) {
+    if (detail_prop_has_children(prop)) {
+      state->has_children = true;
+
+      if (!prop->maximized) {
+        state->has_collapsed = true;
+      }
+
+      detail_props_collect_tree_state(prop->first_child, state);
+    }
+  }
+}
+
+static void
+detail_props_set_expanded(detail_prop_t *first, bool expanded)
+{
+  for (detail_prop_t *prop = first; prop; prop = prop->next) {
+    prop->maximized = expanded && detail_prop_has_children(prop);
+    detail_props_set_expanded(prop->first_child, expanded);
+  }
+}
+
+static detail_tree_state_t
+detail_funcs_tree_state(detail_tab_t *tab)
+{
+  detail_tree_state_t state = {0};
+  for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+    for (detail_func_t *func = owner->first_func; func; func = func->next) {
+      state.has_children = true;
+
+      if (!func->maximized) {
+        state.has_collapsed = true;
+      }
+      detail_props_collect_tree_state(func->first_param, &state);
+    }
+  }
+  return state;
+}
+
+static void
+detail_funcs_set_expanded(detail_tab_t *tab, bool expanded)
+{
+  for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+    for (detail_func_t *func = owner->first_func; func; func = func->next) {
+      func->maximized = expanded;
+      detail_props_set_expanded(func->first_param, expanded);
+    }
+  }
+}
+
+static bool
+detail_tree_toggle_button(struct nk_context *ctx, detail_tree_state_t state)
+{
+  str_t label = STR_LIT("Expand");
+  if (state.has_children && !state.has_collapsed) {
+    label = STR_LIT("Collapse");
+  }
+
+  if (!state.has_children) {
+    nk_widget_disable_begin(ctx);
+  }
+
+  bool clicked = ui_button_str(ctx, label);
+
+  if (!state.has_children) {
+    nk_widget_disable_end(ctx);
+  }
+
+  return clicked;
+}
+
+static inline bool
+detail_package_is_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record)
+{
+  uint32_t slot = record_to_slot(tool, record);
+  return (tab->package_expanded[slot / 8] & (1u << (slot % 8))) != 0;
+}
+
+static inline void
+detail_package_set_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record, bool expanded)
+{
+  uint32_t slot = record_to_slot(tool, record);
+  uint8_t  mask = (uint8_t)(1u << (slot % 8));
+
+  if (expanded) {
+    tab->package_expanded[slot / 8] |= mask;
+  } else {
+    tab->package_expanded[slot / 8] &= (uint8_t)~mask;
+  }
+}
+
+static void
+detail_package_collect_tree_state(search_tool_t *tool, detail_tab_t *tab, record_t *record, detail_tree_state_t *state)
+{
+  for (record_t *child = record_from_slot(tool, record->first_child_slot); child; child = record_from_slot(tool, child->next_sibling_slot)) {
+    if (record_slot_valid(child->first_child_slot)) {
+      state->has_children = true;
+
+      if (!detail_package_is_expanded(tool, tab, child)) {
+        state->has_collapsed = true;
+      }
+
+      detail_package_collect_tree_state(tool, tab, child, state);
+    }
+  }
+}
+
+static void
+detail_package_set_children_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record, bool expanded)
+{
+  for (record_t *child = record_from_slot(tool, record->first_child_slot); child; child = record_from_slot(tool, child->next_sibling_slot)) {
+    detail_package_set_expanded(tool, tab, child, expanded);
+    detail_package_set_children_expanded(tool, tab, child, expanded);
+  }
+}
+
 static void
 package_draw_children(search_tool_t *tool, detail_tab_t *tab, record_t *record, int depth)
 {
@@ -2682,13 +2814,13 @@ package_draw_children(search_tool_t *tool, detail_tab_t *tab, record_t *record, 
       .record_to_open = child_record,
     };
 
-    bool maximized = record_has_flag(child_record, RECORD_FLAG_MAXIMIZED);
+    bool maximized = detail_package_is_expanded(tool, tab, child_record);
     if (ui_detail_row(tool, &tab->package_grid, row, &maximized)) {
       if (child_record->first_child_slot != RECORD_SLOT_INVALID) {
         package_draw_children(tool, tab, child_record, depth + 1);
       }
     }
-    record_set_flag(child_record, RECORD_FLAG_MAXIMIZED, maximized);
+    detail_package_set_expanded(tool, tab, child_record, maximized);
   }
 }
 
@@ -2701,10 +2833,17 @@ draw_package_section(search_tool_t *tool, detail_tab_t *tab)
   tmp_arena_t tmp = scratch_begin(NULL);
   {
     if (ui_tree_push(tool->ctx, NK_TREE_TAB, STR_LIT("Package Content"), true)) {
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_push_package_dump(tmp.arena, tool, tab);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = {0};
+      detail_package_collect_tree_state(tool, tab, tab->record, &state);
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_package_set_children_expanded(tool, tab, tab->record, state.has_collapsed);
       }
 
       if (tab->record->first_child_slot != RECORD_SLOT_INVALID) {
@@ -2805,7 +2944,7 @@ draw_detail_enum_section(search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
-draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_prop_t *prop, int depth)
+draw_detail_prop(search_tool_t *tool, detail_tab_t *tab, struct nk_grid_state *grid_state, detail_prop_t *prop, int depth)
 {
   ASSERT(tool != NULL);
   ASSERT(prop != NULL);
@@ -2826,22 +2965,7 @@ draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_p
     UI_TEXT_CELL(prop->summary, summary_color),
   };
 
-  bool has_children = false;
-  switch (prop->children_kind) {
-  case DETAIL_PROP_CHILDREN_ARRAY_ELEMS:
-  case DETAIL_PROP_CHILDREN_SET_ELEMS:
-  case DETAIL_PROP_CHILDREN_MAP_PAIRS: {
-    has_children = (prop->live_child_count > 0);
-    break;
-  }
-
-  case DETAIL_PROP_CHILDREN_SCHEMA:
-  case DETAIL_PROP_CHILDREN_NONE:
-  default: {
-    has_children = (prop->first_child != NULL);
-    break;
-  }
-  }
+  bool has_children = detail_prop_has_children(prop);
 
   ui_detail_row_t row = {
     .parts          = parts,
@@ -2852,9 +2976,14 @@ draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_p
     .record_to_open = prop->record_to_open,
   };
 
-  if (ui_detail_row(tool, grid_state, row, has_children ? &prop->maximized : NULL)) {
+  bool was_maximized = prop->maximized;
+  if (ui_detail_row(tool, grid_state, row, &prop->maximized)) {
+    if (!was_maximized && tab->value_base && prop->prop) {
+      detail_prop_fill_value_direct(tool, tab, prop, depth);
+    }
+
     for (detail_prop_t *child = prop->first_child; child; child = child->next) {
-      draw_detail_prop(tool, grid_state, child, depth + 1);
+      draw_detail_prop(tool, tab, grid_state, child, depth + 1);
     }
   }
 }
@@ -2920,10 +3049,13 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
   ASSERT(tool != NULL);
   ASSERT(tab != NULL);
 
-  ASSERT(tab != NULL);
-
   if (!tab->function) {
     return;
+  }
+
+  nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+  if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
+    ufunc_call_open(tool, tab->function->record, NULL);
   }
 
   tmp_arena_t tmp = scratch_begin(NULL);
@@ -2946,8 +3078,11 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         detail_copy_text(tool->ctx, dump);
       }
 
-      if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
-        ufunc_call_open(tool, f->record, NULL);
+      detail_tree_state_t state = {0};
+      detail_props_collect_tree_state(f->first_param, &state);
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_props_set_expanded(f->first_param, state.has_collapsed);
       }
 
       ui_text_cell_t header_parts[] = {
@@ -2982,7 +3117,7 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         ui_detail_row(tool, &tab->single_grid, header_row, NULL);
       } else {
         for (detail_prop_t *param = f->first_param; param; param = param->next) {
-          draw_detail_prop(tool, &tab->param_grid, param, 0);
+          draw_detail_prop(tool, tab, &tab->param_grid, param, 0);
         }
       }
 
@@ -3137,10 +3272,25 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
 
       details_refresh_values(tool, tab);
 
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_props_push_dump(tool, tab, tmp.arena);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = {0};
+      for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+        detail_props_collect_tree_state(owner->first_prop, &state);
+      }
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        if (state.has_collapsed) {
+          details_refresh_all_values(tool, tab);
+        }
+
+        for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+          detail_props_set_expanded(owner->first_prop, state.has_collapsed);
+        }
       }
 
       float group_pad_y = tool->ctx->style.window.group_padding.y;
@@ -3205,7 +3355,7 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
             ui_detail_row(tool, &tab->single_grid, row, NULL);
           } else {
             for (detail_prop_t *prop = owner->first_prop; prop; prop = prop->next) {
-              draw_detail_prop(tool, &tab->prop_grid, prop, 1);
+              draw_detail_prop(tool, tab, &tab->prop_grid, prop, 1);
             }
           }
         }
@@ -3238,10 +3388,15 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
       nk_style_push_vec2(tool->ctx, &tool->ctx->style.tab.padding, nk_vec2(2.0f, 2.0f));
       nk_style_push_style_item(tool->ctx, &tool->ctx->style.window.fixed_background, UI_ITEM(UI_C_TRANSPARENT));
 
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_push_funcs_dump(tmp.arena, tab);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = detail_funcs_tree_state(tab);
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_funcs_set_expanded(tab, state.has_collapsed);
       }
 
       for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
@@ -3325,7 +3480,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
                 ui_detail_row(tool, &tab->single_grid, row, NULL);
               } else {
                 for (detail_prop_t *prop = func->first_param; prop; prop = prop->next) {
-                  draw_detail_prop(tool, &tab->param_grid, prop, 2);
+                  draw_detail_prop(tool, tab, &tab->param_grid, prop, 2);
                 }
               }
             }

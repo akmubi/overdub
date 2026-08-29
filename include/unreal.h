@@ -28,6 +28,8 @@ MOD_EXTERN_C_BEGIN
 
 #define UOBJECT_ARRAY_NUM_ELEMS_PER_CHUNK (64 * 1024)
 
+typedef uint32_t efunc_flags_t;
+
 #define FUNC_FLAG_NONE                     0x00000000
 #define FUNC_FLAG_FINAL                    0x00000001
 #define FUNC_FLAG_REQUIRED_API             0x00000002
@@ -170,6 +172,58 @@ enum {
   RF_DYNAMIC                        = 0X04000000,
   RF_WILL_BE_LOADED                 = 0X08000000,
   RF_HAS_EXTERNAL_PACKAGE           = 0X10000000,
+};
+
+typedef uint32_t eclass_flags_t;
+enum {
+  CLASS_NONE                         = 0x00000000u,
+  CLASS_ABSTRACT                     = 0x00000001u,
+  CLASS_DEFAULT_CONFIG               = 0x00000002u,
+  CLASS_CONFIG                       = 0x00000004u,
+  CLASS_TRANSIENT                    = 0x00000008u,
+  CLASS_PARSED                       = 0x00000010u,
+  CLASS_MATCHED_SERIALIZERS          = 0x00000020u,
+  CLASS_PROJECT_USER_CONFIG          = 0x00000040u,
+  CLASS_NATIVE                       = 0x00000080u,
+  CLASS_NO_EXPORT                    = 0x00000100u,
+  CLASS_NOT_PLACEABLE                = 0x00000200u,
+  CLASS_PER_OBJECT_CONFIG            = 0x00000400u,
+  CLASS_REPLICATION_DATA_IS_SET_UP   = 0x00000800u,
+  CLASS_EDIT_INLINE_NEW              = 0x00001000u,
+  CLASS_COLLAPSE_CATEGORIES          = 0x00002000u,
+  CLASS_INTERFACE                    = 0x00004000u,
+  CLASS_CUSTOM_CONSTRUCTOR           = 0x00008000u,
+  CLASS_CONST                        = 0x00010000u,
+  CLASS_LAYOUT_CHANGING              = 0x00020000u,
+  CLASS_COMPILED_FROM_BLUEPRINT      = 0x00040000u,
+  CLASS_MINIMAL_API                  = 0x00080000u,
+  CLASS_REQUIRED_API                 = 0x00100000u,
+  CLASS_DEFAULT_TO_INSTANCED         = 0x00200000u,
+  CLASS_TOKEN_STREAM_ASSEMBLED       = 0x00400000u,
+  CLASS_HAS_INSTANCED_REFERENCE      = 0x00800000u,
+  CLASS_HIDDEN                       = 0x01000000u,
+  CLASS_DEPRECATED                   = 0x02000000u,
+  CLASS_HIDE_DROP_DOWN               = 0x04000000u,
+  CLASS_GLOBAL_USER_CONFIG           = 0x08000000u,
+  CLASS_INTRINSIC                    = 0x10000000u,
+  CLASS_CONSTRUCTED                  = 0x20000000u,
+  CLASS_CONFIG_DO_NOT_CHECK_DEFAULTS = 0x40000000u,
+  CLASS_NEWER_VERSION_EXISTS         = 0x80000000u,
+  CLASS_INHERIT                      = CLASS_TRANSIENT                    |
+                                       CLASS_DEFAULT_CONFIG               |
+                                       CLASS_CONFIG                       |
+                                       CLASS_PER_OBJECT_CONFIG            |
+                                       CLASS_CONFIG_DO_NOT_CHECK_DEFAULTS |
+                                       CLASS_NOT_PLACEABLE                |
+                                       CLASS_CONST                        |
+                                       CLASS_HAS_INSTANCED_REFERENCE      |
+                                       CLASS_DEPRECATED                   |
+                                       CLASS_DEFAULT_TO_INSTANCED         |
+                                       CLASS_GLOBAL_USER_CONFIG           |
+                                       CLASS_PROJECT_USER_CONFIG,
+  CLASS_SCRIPT_INHERIT               = CLASS_INHERIT                      |
+                                       CLASS_EDIT_INLINE_NEW              |
+                                       CLASS_COLLAPSE_CATEGORIES,
 };
 
 typedef enum {
@@ -2040,7 +2094,7 @@ struct ufunc_s {
   void                *unresolved_script_props;
   void                *unversioned_schema;
   /* ufunc_t */
-  uint32_t             func_flags;
+  efunc_flags_t        func_flags;
   uint8_t              num_params;
   uint16_t             params_size;
   uint16_t             return_val_offset;
@@ -2097,6 +2151,15 @@ STATIC_ASSERT(offsetof(fobject_initializer_t, component_overrides)              
 STATIC_ASSERT(offsetof(fobject_initializer_t, component_inits)                     == 0x0B0, "invalid offset");
 STATIC_ASSERT(offsetof(fobject_initializer_t, last_constructed_object)             == 0x140, "invalid offset");
 STATIC_ASSERT(sizeof(fobject_initializer_t)                                        == 0x148, "size mismatch");
+
+ 
+
+typedef struct fclass_func_link_info_s fclass_func_link_info_t;
+struct fclass_func_link_info_s {
+  ufunc_t    *(*create_func_ptr)();
+  const char *func_name;
+};
+
 
 typedef struct uclass_s  *(__fastcall *uclass_get_authoritative_class_fn_t)             (struct uclass_s *);
 typedef void              (__fastcall *uclass_post_init_instance_fn_t)                  (struct uclass_s *, struct uobject_s *);
@@ -2262,6 +2325,17 @@ typedef TARRAY(struct ufield_s *)       tarray_ufieldptr_t;
 typedef TARRAY(fnative_func_lookup_t)   tarray_fnative_func_lookup_t;
 typedef TMAP(fname_t, struct ufunc_s *) tmap_fname_ufuncptr_t;
 
+typedef struct fimplemented_interface_s fimplemented_interface_t;
+struct fimplemented_interface_s {
+  struct uclass_s *cls;
+  int32_t          pointer_offset;
+  bool             implemented_by_k2;
+  uint8_t          _pad0[3];
+};
+STATIC_ASSERT(sizeof(fimplemented_interface_t) == 0x10, "size mismatch");
+
+typedef TARRAY(fimplemented_interface_t) tarray_fimplemented_interface_t;
+
 typedef struct uclass_s uclass_t;
 struct uclass_s {
   /* uobject_t */
@@ -2293,7 +2367,7 @@ struct uclass_s {
   uclass_class_vtable_helper_ctor_caller_fn_t class_vtable_helper_ctor_caller;
   uclass_class_add_referenced_objects_fn_t    class_add_referenced_objects;
   uint32_t                                    class_unique_and_cooked;
-  uint32_t                                    class_flags;
+  eclass_flags_t                              class_flags;
   uint64_t                                    class_cast_flags;
   struct uclass_s                            *class_within;
   uobject_t                                  *class_generated_by;
@@ -2307,7 +2381,7 @@ struct uclass_s {
   tmap_fname_ufuncptr_t                       func_map;
   tmap_fname_ufuncptr_t                       super_func_map;
   frwlock_t                                   super_func_map_lock;
-  tarray_void_t                               interfaces;
+  tarray_fimplemented_interface_t             interfaces;
   fgc_ref_token_stream_t                      ref_token_stream;
   fcritical_section_t                         ref_token_stream_critical;
   tarray_fnative_func_lookup_t                native_func_lookup_table;
@@ -2532,6 +2606,8 @@ typedef uint8_t elog_verbosity_type_t;
 #define ELVT_SET_COLOR      0x40
 #define ELVT_BREAK_ON_LOG   0x80
 
+typedef void (*unreal_console_output_fn_t)(void *user, str_t text, elog_verbosity_type_t verbosity);
+
 struct foutput_device_s;
 
 typedef void (__fastcall *foutput_device_destructor_fn_t)                     (struct foutput_device_s *);
@@ -2563,6 +2639,23 @@ struct foutput_device_s {
   foutput_device_vtable_t *vftable;
   uint8_t                  suppress_event_tag;
   uint8_t                  auto_emit_line_terminator;
+};
+
+struct uworld_s;
+struct fexec_s;
+
+typedef void (__fastcall *fexec_destructor_fn_t)(struct fexec_s *self);
+typedef bool (__fastcall *fexec_exec_fn_t)      (struct fexec_s *self, struct uworld_s *world, const wchar_t *command, foutput_device_t *output);
+
+typedef struct fexec_vtable_s fexec_vtable_t;
+struct fexec_vtable_s {
+  fexec_destructor_fn_t destructor;
+  fexec_exec_fn_t       exec;
+};
+
+typedef struct fexec_s fexec_t;
+struct fexec_s {
+  fexec_vtable_t *vtable;
 };
 
 typedef struct fout_parm_rec_s fout_parm_rec_t;
@@ -2882,6 +2975,9 @@ struct execute_console_cmd_params_s {
   fstring_t  cmd;
   void      *specific_player; // APlayerController *
 };
+STATIC_ASSERT(offsetof(execute_console_cmd_params_t, cmd)             == 8,  "invalid offset");
+STATIC_ASSERT(offsetof(execute_console_cmd_params_t, specific_player) == 24, "invalid offset");
+STATIC_ASSERT(sizeof(execute_console_cmd_params_t)                    == 32, "size mismatch");
 
 typedef tmulticast_delegate_t fon_gameplay_tag_loaded_t;
 typedef uint16_t              fgameplay_tag_net_idx_t;
@@ -3030,6 +3126,9 @@ STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, network_idx_invalidated)       
 STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, gameplay_tag_tables)                  == 0x230, "invalid offset");
 STATIC_ASSERT(sizeof(ugameplay_tags_manager_t)                                         == 0x240, "size mismatch");
 
+MOD_API bool
+unreal_is_in_game_thread(void);
+
 /* ===================================================== FNAME ====================================================== */
 
 MOD_API fname_pool_t *
@@ -3114,7 +3213,9 @@ struct unreal_common_s {
   ufunc_t   *finish_spawn;         // Function /Script/Engine.GameplayStatics.FinishSpawningActor
   ufunc_t   *destroy_actor;        // Function /Script/Engine.Actor.K2_DestroyActor
   uclass_t  *kismet_sys_lib_cls;
+  uobject_t *kismet_sys_lib_cdo;
   ufunc_t   *exec_console_cmd;
+  uobject_t *transient_package;    // Package /Engine/Transient
 
   // fnames
   fname_t bool_prop;
@@ -3221,6 +3322,10 @@ unreal_uobject_is_a(uobject_t *obj, uclass_t *cls);
 MOD_API bool
 unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent);
 MOD_API bool
+unreal_uclass_implements_interface(uclass_t *cls, uclass_t *interface_cls);
+MOD_API void *
+unreal_uobject_get_interface_address(uobject_t *obj, uclass_t *interface_cls);
+MOD_API bool
 unreal_uobject_is_default(uobject_t *obj);
 MOD_API bool
 unreal_uobject_is_valid(uobject_t *obj);
@@ -3243,6 +3348,8 @@ MOD_API uint64_t
 unreal_uobject_write_full_name(uobject_t *obj, uint8_t *dst, uint64_t cap);
 MOD_API str_t
 unreal_uobject_push_full_name(uobject_t *obj, arena_t *perm);
+MOD_API str_t
+unreal_uobject_push_ue_path_name(uobject_t *obj, arena_t *perm);
 
 MOD_API int
 unreal_uobject_array_count(void);
@@ -3272,12 +3379,26 @@ MOD_API uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name);
 MOD_API uobject_t *
 unreal_uobject_find_by_full_name(uclass_t *cls, str_t full_name);
+/* finds an already-loaded object by the same path syntax produced by unreal_uobject_push_ue_path_name, including ':' for subobjects */
+MOD_API uobject_t *
+unreal_uobject_find_by_path_name(uclass_t *cls, str_t path_name);
+
+MOD_API uint32_t
+unreal_uobject_get_internal_flags(uobject_t *obj);
+MOD_API bool
+unreal_uobject_is_rooted(uobject_t *obj);
+MOD_API bool
+unreal_uobject_add_to_root(uobject_t *obj);
+MOD_API bool
+unreal_uobject_remove_from_root(uobject_t *obj);
 
 MOD_API void
 unreal_process_event(uobject_t *self, ufunc_t *func, void *params);
 /* Calls the virtual ProcessEvent entry so normal Overdub hooks/listeners observe the call. */
 MOD_API void
 unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params);
+MOD_API bool
+unreal_execute_console_command(str_t command, unreal_console_output_fn_t output, void *user);
 
 MOD_API uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
@@ -3286,6 +3407,10 @@ unreal_despawn_actor(uobject_t *actor);
 
 MOD_API uobject_t *
 unreal_static_construct_object(fstatic_construct_obj_params_t *params);
+MOD_API uobject_t *
+unreal_get_transient_package(void);
+MOD_API uobject_t *
+unreal_construct_object(uclass_t *cls, uobject_t *outer);
 
 MOD_API uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);

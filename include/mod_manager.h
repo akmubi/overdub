@@ -97,6 +97,31 @@ struct mod_dll_info_s {
   str_t path;
 };
 
+typedef struct mod_lua_info_s mod_lua_info_t;
+
+typedef uint8_t mod_lua_runtime_kind_t;
+enum {
+  MOD_LUA_RUNTIME_OVERDUB = 0,
+  MOD_LUA_RUNTIME_UE4SS   = 1,
+  MOD_LUA_RUNTIME_MAX,
+  MOD_LUA_RUNTIME_INVALID = UINT8_MAX,
+};
+
+static inline str_t
+mod_lua_runtime_kind_to_str(mod_lua_runtime_kind_t kind)
+{
+  switch (kind) {
+  case MOD_LUA_RUNTIME_UE4SS:   return STR_LIT("ue4ss");
+  case MOD_LUA_RUNTIME_OVERDUB: return STR_LIT("overdub");
+  }
+  return STR_LIT("invalid");
+}
+
+struct mod_lua_info_s {
+  str_t                  path;
+  mod_lua_runtime_kind_t runtime_kind;
+};
+
 typedef struct mod_asset_info_s mod_asset_info_t;
 struct mod_asset_info_s {
   str_t pak_path;
@@ -168,6 +193,7 @@ struct mod_manifest_s {
 
   mod_info_t            info;
   mod_dll_info_t        dll;
+  mod_lua_info_t        lua;
   mod_asset_info_t      asset;
   mod_blueprint_info_t *blueprints;
   int                   blueprint_count;
@@ -292,6 +318,17 @@ struct mod_dll_runtime_s {
   uobject_listener_t     *listeners;
 };
 
+typedef struct mod_lua_runtime_s mod_lua_runtime_t;
+struct mod_lua_runtime_s {
+  bool      active;
+  bool      start_attempted;
+  err_msg_t err_msg;
+  str_t     game_dir;
+  str_t     root_mod_dir;
+  arena_t   perm;
+  void     *instance;
+};
+
 typedef struct mod_asset_runtime_s mod_asset_runtime_t;
 struct mod_asset_runtime_s {
   mod_asset_state_t state;
@@ -354,11 +391,13 @@ struct mod_s {
   bool           enabled;
 
   bool has_code;
+  bool has_lua;
   bool has_assets;
   bool has_blueprints;
   bool has_options;
 
   mod_dll_runtime_t        dll;
+  mod_lua_runtime_t        lua;
   mod_asset_runtime_t      asset;
   mod_blueprint_runtime_t *blueprints;
   int                      blueprint_count;
@@ -404,6 +443,8 @@ void
 mod_manager_mount_assets(mod_manager_t *manager);
 void
 mod_manager_start_dlls(mod_manager_t *manager);
+void
+mod_manager_start_lua(mod_manager_t *manager);
 void
 mod_manager_start_blueprints(mod_manager_t *manager);
 
@@ -458,6 +499,11 @@ bool
 mod_dll_reload(mod_manager_t *manager, mod_handle_t h);
 
 bool
+mod_lua_start(mod_manager_t *manager, mod_handle_t h);
+void
+mod_lua_stop(mod_manager_t *manager, mod_handle_t h);
+
+bool
 mod_blueprint_spawn(mod_manager_t *manager, mod_handle_t h, int idx);
 bool
 mod_blueprint_despawn(mod_manager_t *manager, mod_handle_t h, int idx);
@@ -491,12 +537,20 @@ mod_dll_arena_free(mod_manager_t *manager, mod_handle_t h, arena_t *arena);
 
 void
 mod_manager_dispatch_tick(mod_manager_t *manager, float delta);
+void
+mod_manager_dispatch_uobject_constructed(mod_manager_t *manager, uobject_t *object);
+void
+mod_manager_dispatch_uobject_deleted(mod_manager_t *manager, uobject_t *object, int32_t idx);
 bool
 mod_manager_dispatch_input(mod_manager_t *manager, input_event_t *ev);
 bool
 mod_manager_dispatch_process_event_pre(mod_manager_t *manager, uobject_t *obj, ufunc_t *func, void *params);
 void
 mod_manager_dispatch_process_event_post(mod_manager_t *manager, uobject_t *obj, ufunc_t *func, void *params, bool consumed);
+void
+mod_manager_dispatch_post_load(mod_manager_t *manager, uobject_t *obj, bool after);
+bool
+mod_manager_has_post_load_hooks(mod_manager_t *manager);
 bool
 mod_manager_dispatch_ufunction_invoke_pre(mod_manager_t *manager, ufunc_t *func, uobject_t *obj, fframe_t *stack, void *result);
 void

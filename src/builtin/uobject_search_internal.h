@@ -231,6 +231,8 @@ struct detail_tab_s {
   struct nk_grid_state param_grid;
   struct nk_grid_state single_grid;
 
+  uint8_t *package_expanded; // per-tab bitset indexed by cache record slot
+
   bool layout_prop_maximized;
   bool layout_func_maximized;
   bool layout_instances_maximized;

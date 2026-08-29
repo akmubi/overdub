@@ -250,6 +250,8 @@ MOD_API bool
 input_key_is_pressed(input_key_kind_t key);
 MOD_API bool
 input_key_is_released(input_key_kind_t key);
+MOD_API float
+input_key_get_analog_value(input_key_kind_t key);
 MOD_API bool
 input_key_is_bindable(input_key_kind_t key);
 

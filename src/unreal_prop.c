@@ -46,6 +46,28 @@ typedef struct unreal_prop_script_interface_s {
   uobject_t *object;
   void      *interface_ptr;
 } unreal_prop_script_interface_t;
+STATIC_ASSERT(sizeof(unreal_prop_script_interface_t) == 0x10, "invalid script-interface size");
+
+typedef const fmulticast_script_delegate_t *(__fastcall *unreal_mcast_get_fn_t)     (fprop_mcast_delegate_t *prop, const void *value);
+typedef void                                (__fastcall *unreal_mcast_set_fn_t)     (fprop_mcast_delegate_t *prop, void *value, fmulticast_script_delegate_t delegate);
+typedef void                                (__fastcall *unreal_mcast_add_fn_t)     (fprop_mcast_delegate_t *prop, fscript_delegate_t delegate, uobject_t *owner, void *value);
+typedef void                                (__fastcall *unreal_mcast_remove_fn_t)  (fprop_mcast_delegate_t *prop, const fscript_delegate_t *delegate, uobject_t *owner, void *value);
+typedef void                                (__fastcall *unreal_mcast_clear_fn_t)   (fprop_mcast_delegate_t *prop, uobject_t *owner, void *value);
+typedef fmulticast_script_delegate_t       *(__fastcall *unreal_mcast_get_list_fn_t)(fprop_mcast_delegate_t *prop, const void *value);
+
+typedef struct unreal_mcast_vtable_s unreal_mcast_vtable_t;
+struct unreal_mcast_vtable_s {
+  fprop_vtable_t             base;
+  unreal_mcast_get_fn_t      get;
+  unreal_mcast_set_fn_t      set;
+  unreal_mcast_add_fn_t      add;
+  unreal_mcast_remove_fn_t   remove;
+  unreal_mcast_clear_fn_t    clear;
+  unreal_mcast_get_list_fn_t get_list;
+};
+STATIC_ASSERT(offsetof(unreal_mcast_vtable_t, get)    == 0x130, "invalid multicast-delegate GetMulticastDelegate vtable offset");
+STATIC_ASSERT(offsetof(unreal_mcast_vtable_t, add)    == 0x140, "invalid multicast-delegate AddDelegate vtable offset");
+STATIC_ASSERT(offsetof(unreal_mcast_vtable_t, remove) == 0x148, "invalid multicast-delegate RemoveDelegate vtable offset");
 
 fprop_t *
 unreal_ustruct_find_prop(ustruct_t *s, str_t name)
@@ -116,6 +138,20 @@ unreal_fprop_get_kind(fprop_t *prop)
     }
   }
   return UNREAL_PROP_KIND_UNKNOWN;
+}
+
+unreal_func_param_role_t
+unreal_fprop_get_param_role(fprop_t *prop)
+{
+  if (prop && (prop->prop_flags & CPF_RETURN_PARM)) {
+    return UNREAL_FUNC_PARAM_RETURN;
+  }
+
+  if (prop && (prop->prop_flags & CPF_OUT_PARM) && !(prop->prop_flags & CPF_CONST_PARM)) {
+    return UNREAL_FUNC_PARAM_OUTPUT;
+  }
+
+  return UNREAL_FUNC_PARAM_INPUT;
 }
 
 bool
@@ -473,6 +509,83 @@ unreal_fprop_read_name(fprop_t *prop, const void *value, fname_t *out)
 }
 
 bool
+unreal_fprop_read_string(fprop_t *prop, const void *value, arena_t *arena, str_t *out)
+{
+  if (!prop || !value || !arena || !out) {
+    return false;
+  }
+
+  const fstring_t *string = NULL;
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_STRING: {
+      if (prop->elem_size < (int32_t)sizeof(fstring_t)) {
+        return false;
+      }
+      string = (const fstring_t *)value;
+      break;
+    }
+
+    case UNREAL_PROP_KIND_TEXT: {
+      if (prop->elem_size < (int32_t)sizeof(ftext_t)) {
+        return false;
+      }
+
+      const ftext_t *text = (const ftext_t *)value;
+      if (!text->text_data.obj) {
+        *out = STR_NULL;
+        return true;
+      }
+
+      itext_data_t *data = text->text_data.obj;
+      if (!data->vtable || !data->vtable->get_display_string) {
+        return false;
+      }
+      string = data->vtable->get_display_string(data);
+      break;
+    }
+
+    default: {
+      return false;
+    }
+  }
+
+  if (!string || string->len < 0 || string->len > 1024 * 1024 + 1 || (string->len > 0 && !string->data)) {
+    return false;
+  }
+
+  *out = unreal_fstring_to_str(*string, arena);
+  return string->len <= 1 || out->data != NULL;
+}
+
+bool
+unreal_fprop_read_soft_path(fprop_t *prop, const void *value, arena_t *arena, str_t *out)
+{
+  if (!prop || !value || !arena || !out) {
+    return false;
+  }
+
+  unreal_prop_kind_t kind = unreal_fprop_get_kind(prop);
+  if ((kind != UNREAL_PROP_KIND_SOFT_OBJECT && kind != UNREAL_PROP_KIND_SOFT_CLASS) ||
+      prop->elem_size < (int32_t)sizeof(unreal_prop_soft_object_ptr_t)) {
+    return false;
+  }
+
+  const unreal_prop_soft_object_ptr_t *soft = (const unreal_prop_soft_object_ptr_t *)value;
+
+  str_t asset = unreal_fname_to_str(soft->path.asset_path_name, arena);
+  str_t sub   = unreal_fstring_to_str(soft->path.sub_path_string, arena);
+  if (str_is_empty(asset)) {
+    *out = STR_NULL;
+  } else if (str_is_empty(sub)) {
+    *out = asset;
+  } else {
+    *out = str_push_fmt(arena, "%.*s:%.*s", STR_ARG(asset), STR_ARG(sub));
+  }
+
+  return str_is_empty(asset) || out->data != NULL;
+}
+
+bool
 unreal_fprop_write_bool(fprop_t *prop, void *value, bool input)
 {
   if (unreal_fprop_get_kind(prop) != UNREAL_PROP_KIND_BOOL || !value) {
@@ -709,6 +822,270 @@ unreal_fweak_object_resolve(fweak_object_ptr_t weak)
   }
 
   return item->obj;
+}
+
+bool
+unreal_fweak_object_from_object(uobject_t *object, fweak_object_ptr_t *out)
+{
+  if (!object || !out || object->internal_idx < 0) {
+    return false;
+  }
+
+  fuobject_item_t *item = unreal_uobject_array_get_item(object->internal_idx);
+  if (!item || item->obj != object || !unreal_uobject_array_item_is_valid(item)) {
+    return false;
+  }
+
+  int32_t serial = item->serial_num;
+  if (serial <= 0) {
+    if (!globals.uobjects) {
+      return false;
+    }
+
+    int32_t candidate = atomic_i32_increment(&globals.uobjects->master_serial_num.counter);
+    if (candidate <= 0) {
+      return false;
+    }
+
+    int32_t existing = atomic_i32_compare_exchange(&item->serial_num, candidate, 0);
+    serial = existing > 0 ? existing : candidate;
+  }
+
+  if (item->obj != object || item->serial_num != serial || !unreal_uobject_array_item_is_valid(item)) {
+    return false;
+  }
+
+  *out = (fweak_object_ptr_t){
+    .object_idx    = object->internal_idx,
+    .object_serial = serial,
+  };
+  return true;
+}
+
+bool
+unreal_ufunction_signature_compatible(ufunc_t *signature, ufunc_t *function)
+{
+  if (!signature || !function) {
+    return false;
+  }
+
+  if (signature == function) {
+    return true;
+  }
+
+  const eprop_flags_t ignored = CPF_PERSISTENT_INSTANCE               |
+                                CPF_EXPORT_OBJECT                     |
+                                CPF_INSTANCED_REFERENCE               |
+                                CPF_CONTAINS_INSTANCED_REFERENCE      |
+                                CPF_IS_PLAIN_OLD_DATA                 |
+                                CPF_NO_DESTRUCTOR                     |
+                                CPF_ZERO_CONSTRUCTOR                  |
+                                CPF_HAS_GET_VALUE_TYPE_HASH           |
+                                CPF_CONST_PARM                        |
+                                CPF_UOBJECT_WRAPPER                   |
+                                CPF_NATIVE_ACCESS_SPECIFIER_PUBLIC    |
+                                CPF_NATIVE_ACCESS_SPECIFIER_PROTECTED |
+                                CPF_NATIVE_ACCESS_SPECIFIER_PRIVATE   |
+                                CPF_ADVANCED_DISPLAY                  |
+                                CPF_BLUEPRINT_VISIBLE                 |
+                                CPF_BLUEPRINT_READ_ONLY;
+
+  fprop_t *signature_param = (fprop_t *)signature->child_props;
+  fprop_t *function_param  = (fprop_t *)function->child_props;
+
+  bool compatible = true;
+  while (compatible && signature_param && (signature_param->prop_flags & CPF_PARM)) {
+    compatible = function_param && (function_param->prop_flags & CPF_PARM);
+    if (!compatible) {
+      break;
+    }
+
+    uint64_t      signature_size = unreal_fprop_complete_size(signature_param);
+    uint64_t      function_size  = unreal_fprop_complete_size(function_param);
+    eprop_flags_t flag_diff      = (signature_param->prop_flags ^ function_param->prop_flags) & ~ignored;
+    bool          same_type      = unreal_fprop_same_type(signature_param, function_param);
+    bool          same_offset    = signature_param->offset_internal == function_param->offset_internal;
+
+    compatible      = same_type && signature_size == function_size && same_offset && flag_diff == 0;
+    signature_param = (fprop_t *)signature_param->next;
+    function_param  = (fprop_t *)function_param->next;
+  }
+
+  if (function_param && (function_param->prop_flags & CPF_PARM)) {
+    compatible = false;
+  }
+  return compatible;
+}
+
+ufunc_t *
+unreal_fprop_delegate_signature(fprop_t *prop)
+{
+  unreal_prop_kind_t kind = unreal_fprop_get_kind(prop);
+
+  ufunc_t *signature = NULL;
+  if (kind == UNREAL_PROP_KIND_DELEGATE) {
+    signature = ((fprop_delegate_t *)prop)->signature_func;
+  } else if (kind == UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE || kind == UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE) {
+    signature = ((fprop_mcast_delegate_t *)prop)->signature_func;
+  }
+  return signature;
+}
+
+bool
+unreal_fscript_delegate_make(fscript_delegate_t *out, uobject_t *target, ufunc_t *function)
+{
+  if (!out || !target || !target->cls || !function || (function->func_flags & FUNC_FLAG_STATIC)) {
+    return false;
+  }
+
+  if (!globals.unreal.core_func || !unreal_uobject_is_a((uobject_t *)function, globals.unreal.core_func)) {
+    return false;
+  }
+
+  ufunc_t            *target_func = unreal_ustruct_find_func_fname((ustruct_t *)target->cls, function->name, false);
+  fweak_object_ptr_t  weak        = {0};
+  if (target_func != function || !unreal_fweak_object_from_object(target, &weak)) {
+    return false;
+  }
+
+  *out = (fscript_delegate_t){
+    .object        = weak,
+    .function_name = function->name,
+  };
+  return true;
+}
+
+static bool
+unreal_fscript_delegate_equal(const fscript_delegate_t *left, const fscript_delegate_t *right)
+{
+  return left && right && left->object.object_idx == right->object.object_idx && left->object.object_serial == right->object.object_serial &&
+         unreal_fname_equal(left->function_name, right->function_name, false);
+}
+
+static bool
+unreal_fprop_delegate_fits(uobject_t *owner, fprop_t *prop)
+{
+  if (!owner || !owner->cls || !prop || prop->array_dim != 1 || prop->offset_internal < 0) {
+    return false;
+  }
+
+  bool linked = false;
+  for (fprop_t *current = ((ustruct_t *)owner->cls)->prop_link; current && !linked; current = current->prop_link_next) {
+    linked = current == prop;
+  }
+
+  uint64_t complete       = unreal_fprop_complete_size(prop);
+  uint64_t container_size = (uint64_t)((ustruct_t *)owner->cls)->props_size;
+  bool     offset_valid   = (uint64_t)prop->offset_internal <= container_size;
+  if (offset_valid) {
+    offset_valid = complete <= container_size - (uint64_t)prop->offset_internal;
+  }
+  return linked && complete > 0 && offset_valid;
+}
+
+static fmulticast_script_delegate_t *
+unreal_fprop_delegate_list(uobject_t *owner, fprop_t *prop)
+{
+  unreal_prop_kind_t kind      = unreal_fprop_get_kind(prop);
+  bool               multicast = kind == UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE || kind == UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE;
+  if (!multicast || !unreal_fprop_delegate_fits(owner, prop)) {
+    return NULL;
+  }
+
+  unreal_mcast_vtable_t        *vtable = (unreal_mcast_vtable_t *)prop->vtable;
+  void                         *value  = unreal_fprop_value_in_container(prop, owner, 0);
+  fmulticast_script_delegate_t *list   = NULL;
+  if (vtable && vtable->get && value) {
+    list = (fmulticast_script_delegate_t *)vtable->get((fprop_mcast_delegate_t *)prop, value);
+  }
+  return list;
+}
+
+bool
+unreal_fprop_delegate_contains(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding)
+{
+  if (!binding || !unreal_fprop_delegate_fits(owner, prop)) {
+    return false;
+  }
+
+  unreal_prop_kind_t kind  = unreal_fprop_get_kind(prop);
+  void              *value = unreal_fprop_value_in_container(prop, owner, 0);
+  if (kind == UNREAL_PROP_KIND_DELEGATE) {
+    return unreal_fscript_delegate_equal((fscript_delegate_t *)value, binding);
+  }
+
+  fmulticast_script_delegate_t *list  = unreal_fprop_delegate_list(owner, prop);
+  bool                          found = false;
+  if (list && list->num >= 0 && list->num <= list->max && (list->num == 0 || list->data)) {
+    for (int32_t i = 0; i < list->num && !found; ++i) {
+      found = unreal_fscript_delegate_equal(&list->data[i], binding);
+    }
+  }
+  return found;
+}
+
+bool
+unreal_fprop_delegate_bind(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding)
+{
+  if (!binding || !unreal_fprop_delegate_fits(owner, prop)) {
+    return false;
+  }
+
+  uobject_t *target    = unreal_fweak_object_resolve(binding->object);
+  ufunc_t   *function  = NULL;
+  ufunc_t   *signature = unreal_fprop_delegate_signature(prop);
+  if (target && target->cls) {
+    function = unreal_ustruct_find_func_fname((ustruct_t *)target->cls, binding->function_name, false);
+  }
+
+  if (!function || (function->func_flags & FUNC_FLAG_STATIC) || !unreal_ufunction_signature_compatible(signature, function)) {
+    return false;
+  }
+
+  unreal_prop_kind_t kind  = unreal_fprop_get_kind(prop);
+  void              *value = unreal_fprop_value_in_container(prop, owner, 0);
+  if (kind == UNREAL_PROP_KIND_DELEGATE) {
+    fscript_delegate_t *current = value;
+    bool has_function = current && (current->function_name.cmp_idx != 0 || current->function_name.num != 0);
+    bool occupied     = has_function && unreal_fweak_object_resolve(current->object) != NULL;
+    if (occupied) {
+      return false;
+    }
+
+    if (current) {
+      *current = *binding;
+    }
+  } else {
+    unreal_mcast_vtable_t *vtable = (unreal_mcast_vtable_t *)prop->vtable;
+    if (!vtable || !vtable->add || unreal_fprop_delegate_contains(owner, prop, binding)) {
+      return false;
+    }
+
+    vtable->add((fprop_mcast_delegate_t *)prop, *binding, owner, NULL);
+  }
+  return unreal_fprop_delegate_contains(owner, prop, binding);
+}
+
+bool
+unreal_fprop_delegate_unbind(uobject_t *owner, fprop_t *prop, const fscript_delegate_t *binding)
+{
+  if (!unreal_fprop_delegate_contains(owner, prop, binding)) {
+    return false;
+  }
+
+  unreal_prop_kind_t kind  = unreal_fprop_get_kind(prop);
+  void              *value = unreal_fprop_value_in_container(prop, owner, 0);
+  if (kind == UNREAL_PROP_KIND_DELEGATE) {
+    *(fscript_delegate_t *)value = (fscript_delegate_t){0};
+  } else {
+    unreal_mcast_vtable_t *vtable = (unreal_mcast_vtable_t *)prop->vtable;
+    if (!vtable || !vtable->remove) {
+      return false;
+    }
+
+    vtable->remove((fprop_mcast_delegate_t *)prop, binding, owner, NULL);
+  }
+  return !unreal_fprop_delegate_contains(owner, prop, binding);
 }
 
 static str_t
@@ -1472,6 +1849,39 @@ unreal_fprop_get_referenced_object(fprop_t *prop, const void *value)
   }
 }
 
+uclass_t *
+unreal_fprop_get_reference_class(fprop_t *prop)
+{
+  if (!prop) {
+    return NULL;
+  }
+
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_CLASS: {
+      return ((fprop_class_t *)prop)->meta_class;
+    }
+
+    case UNREAL_PROP_KIND_SOFT_CLASS: {
+      return ((fprop_class_soft_t *)prop)->meta_class;
+    }
+
+    case UNREAL_PROP_KIND_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_OBJECT:
+    case UNREAL_PROP_KIND_WEAK_OBJECT:
+    case UNREAL_PROP_KIND_LAZY_OBJECT: {
+      return ((fprop_obj_base_t *)prop)->prop_class;
+    }
+
+    case UNREAL_PROP_KIND_INTERFACE: {
+      return ((fprop_iface_t *)prop)->iface_class;
+    }
+
+    default: {
+      return NULL;
+    }
+  }
+}
+
 bool
 unreal_fprop_object_is_compatible(fprop_obj_base_t *prop, uobject_t *object)
 {
@@ -1510,6 +1920,32 @@ unreal_fprop_set_object(fprop_obj_base_t *prop, void *value, uobject_t *object)
 
   prop->vtable->set_object_prop_value(prop, value, object);
   return true;
+}
+
+bool
+unreal_fprop_interface_is_compatible(fprop_iface_t *prop, uobject_t *object)
+{
+  bool compatible = prop && unreal_fprop_get_kind(&prop->base) == UNREAL_PROP_KIND_INTERFACE && prop->iface_class;
+  if (compatible && object) {
+    compatible = unreal_uobject_get_interface_address(object, prop->iface_class) != NULL;
+  }
+  return compatible;
+}
+
+bool
+unreal_fprop_set_interface(fprop_iface_t *prop, void *value, uobject_t *object)
+{
+  unreal_prop_script_interface_t result = {0};
+  bool valid = prop && value && prop->base.elem_size >= (int32_t)sizeof(result) && unreal_fprop_interface_is_compatible(prop, object);
+  if (valid && object) {
+    result.object        = object;
+    result.interface_ptr = unreal_uobject_get_interface_address(object, prop->iface_class);
+  }
+
+  if (valid) {
+    mem_copy(value, &result, sizeof(result));
+  }
+  return valid;
 }
 
 void
@@ -1581,11 +2017,21 @@ unreal_fprop_import_text(fprop_t *prop, void *value, uobject_t *owner, str_t tex
       if (unreal_fprop_copy_single_value(prop, copy, value)) {
         const wchar_t *end = unreal_fprop_import_text_direct(prop, (const wchar_t *)wide.data, copy, owner);
         if (end) {
-          while (*end == L' ' || *end == L'\t' || *end == L'\r' || *end == L'\n') {
-            end += 1;
+          unreal_prop_kind_t kind     = unreal_fprop_get_kind(prop);
+          bool               consumed = kind == UNREAL_PROP_KIND_SOFT_OBJECT || kind == UNREAL_PROP_KIND_SOFT_CLASS;
+          if (kind == UNREAL_PROP_KIND_STRUCT) {
+            uscript_struct_t *type = ((fprop_struct_t *)prop)->script_struct;
+            consumed = type && (type->struct_flags & ESF_IMPORT_TEXT_ITEM_NATIVE) != 0;
           }
 
-          if (*end == L'\0') {
+          if (!consumed) {
+            while (*end == L' ' || *end == L'\t' || *end == L'\r' || *end == L'\n') {
+              end += 1;
+            }
+            consumed = *end == L'\0';
+          }
+
+          if (consumed) {
             result = unreal_fprop_copy_single_value(prop, value, copy);
           }
         }
@@ -1986,4 +2432,537 @@ unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val)
     return false;
   }
   return generic_map_find(map, prop, key, out_val);
+}
+
+static str_t
+unreal_prop_snapshot_copy_text(unreal_prop_snapshot_builder_t *builder, unreal_prop_snapshot_t *snapshot, str_t text)
+{
+  if (str_is_empty(text)) {
+    return STR_NULL;
+  }
+
+  uint64_t length = text.len;
+  if (length > builder->max_text_length) {
+    length              = builder->max_text_length;
+    while (length > 0 && (text.data[length] & 0xC0) == 0x80) {
+      length -= 1;
+    }
+
+    snapshot->truncated = true;
+    builder->truncated  = true;
+  }
+
+  return str_push_copy(builder->arena, str_slice(text, 0, length));
+}
+
+static unreal_prop_snapshot_t *
+unreal_prop_snapshot_alloc(unreal_prop_snapshot_builder_t *builder)
+{
+  if (!builder || !builder->arena || builder->node_count >= builder->max_nodes) {
+    if (builder) {
+      builder->truncated = true;
+    }
+
+    return NULL;
+  }
+
+  unreal_prop_snapshot_t *snapshot = ARENA_PUSH_ZERO(builder->arena, unreal_prop_snapshot_t);
+  if (snapshot) {
+    snapshot->expanded   = true;
+    builder->node_count += 1;
+  } else {
+    builder->truncated = true;
+  }
+
+  return snapshot;
+}
+
+static void
+unreal_prop_snapshot_push_child(unreal_prop_snapshot_t *parent, unreal_prop_snapshot_t *child)
+{
+  if (!parent || !child) {
+    return;
+  }
+
+  QUEUE_PUSH(parent->first_child, parent->last_child, child);
+}
+
+static bool
+unreal_prop_snapshot_is_object_reference(unreal_prop_kind_t kind)
+{
+  return kind == UNREAL_PROP_KIND_OBJECT      ||
+         kind == UNREAL_PROP_KIND_CLASS       ||
+         kind == UNREAL_PROP_KIND_WEAK_OBJECT ||
+         kind == UNREAL_PROP_KIND_LAZY_OBJECT ||
+         kind == UNREAL_PROP_KIND_INTERFACE;
+}
+
+static void
+unreal_prop_snapshot_set_metadata(unreal_prop_snapshot_builder_t *builder, unreal_prop_snapshot_t *snapshot, fprop_t *prop, str_t name)
+{
+  tmp_arena_t tmp = scratch_begin(builder->arena);
+  {
+    str_t type = unreal_fprop_push_type_name(prop, tmp.arena);
+
+    snapshot->name       = unreal_prop_snapshot_copy_text(builder, snapshot, name);
+    snapshot->type       = unreal_prop_snapshot_copy_text(builder, snapshot, type);
+    snapshot->prop_flags = prop->prop_flags;
+  }
+  scratch_end(tmp);
+}
+
+static void
+unreal_prop_snapshot_format_leaf(unreal_prop_snapshot_builder_t *builder, unreal_prop_snapshot_t *snapshot, fprop_t *prop, const void *value)
+{
+  tmp_arena_t tmp = scratch_begin(builder->arena);
+  {
+    unreal_prop_kind_t kind    = unreal_fprop_get_kind(prop);
+    str_t              summary = STR_NULL;
+    str_t              tooltip = STR_NULL;
+
+    if (kind == UNREAL_PROP_KIND_BOOL) {
+      bool boolean = false;
+      if (unreal_fprop_read_bool(prop, value, &boolean)) {
+        summary = STR_BOOL(boolean);
+      }
+    } else if (kind == UNREAL_PROP_KIND_FLOAT || kind == UNREAL_PROP_KIND_DOUBLE) {
+      double real = 0.0;
+      if (unreal_fprop_read_real(prop, value, &real)) {
+        if (kind == UNREAL_PROP_KIND_FLOAT) {
+          summary = str_push_fmt(tmp.arena, "%.9g", real);
+        } else {
+          summary = str_push_fmt(tmp.arena, "%.17g", real);
+        }
+      }
+    } else if (kind == UNREAL_PROP_KIND_BYTE   ||
+               kind == UNREAL_PROP_KIND_INT8   ||
+               kind == UNREAL_PROP_KIND_INT16  ||
+               kind == UNREAL_PROP_KIND_INT32  ||
+               kind == UNREAL_PROP_KIND_INT64  ||
+               kind == UNREAL_PROP_KIND_UINT16 ||
+               kind == UNREAL_PROP_KIND_UINT32 ||
+               kind == UNREAL_PROP_KIND_UINT64) {
+      unreal_prop_integer_t integer = {0};
+      if (unreal_fprop_read_integer(prop, value, &integer)) {
+        if (integer.is_signed) {
+          summary = str_push_fmt(tmp.arena, "%lld", (long long)(int64_t)integer.value);
+        } else {
+          summary = str_push_fmt(tmp.arena, "%llu", (unsigned long long)integer.value);
+        }
+      }
+    } else if (kind == UNREAL_PROP_KIND_ENUM) {
+      fprop_enum_t          *enum_prop     = (fprop_enum_t *)prop;
+      unreal_prop_integer_t  integer_value = {0};
+      if (unreal_fprop_read_integer(prop, value, &integer_value)) {
+        int64_t integer = (int64_t)integer_value.value;
+        if (enum_prop->uenum) {
+          for (int32_t i = 0; i < enum_prop->uenum->names.num && str_is_empty(summary); ++i) {
+            if (enum_prop->uenum->names.data[i].value == integer) {
+              summary = unreal_fname_to_str(enum_prop->uenum->names.data[i].key, tmp.arena);
+            }
+          }
+        }
+
+        if (str_is_empty(summary)) {
+          summary = str_push_fmt(tmp.arena, "%lld", (long long)integer);
+        }
+      }
+    } else if (kind == UNREAL_PROP_KIND_NAME) {
+      fname_t name_value = {0};
+      if (unreal_fprop_read_name(prop, value, &name_value)) {
+        summary = unreal_fname_to_str(name_value, tmp.arena);
+      }
+    } else if (kind == UNREAL_PROP_KIND_STRING || kind == UNREAL_PROP_KIND_TEXT) {
+      bool read = unreal_fprop_read_string(prop, value, tmp.arena, &summary);
+      if (read && str_is_empty(summary)) {
+        summary = STR_LIT("\"\"");
+      }
+    } else if (unreal_prop_snapshot_is_object_reference(kind)) {
+      uobject_t *object = unreal_fprop_get_referenced_object(prop, value);
+      if (!object) {
+        summary = unreal_fprop_push_value_summary(prop, value, prop->elem_size, tmp.arena);
+        if (str_is_empty(summary)) {
+          summary = STR_LIT("None");
+        }
+      } else if (!unreal_uobject_is_valid(object)) {
+        summary = STR_LIT("<invalid>");
+      } else {
+        summary = unreal_uobject_push_name(object, tmp.arena);
+        tooltip = unreal_uobject_push_full_name(object, tmp.arena);
+      }
+    } else if (kind == UNREAL_PROP_KIND_SOFT_OBJECT || kind == UNREAL_PROP_KIND_SOFT_CLASS) {
+      unreal_fprop_read_soft_path(prop, value, tmp.arena, &summary);
+    } else {
+      summary = unreal_fprop_push_value_summary(prop, value, prop->elem_size, tmp.arena);
+    }
+
+    if (str_is_empty(summary)) {
+      summary = STR_LIT("<unavailable>");
+    }
+
+    snapshot->value   = unreal_prop_snapshot_copy_text(builder, snapshot, summary);
+    snapshot->tooltip = unreal_prop_snapshot_copy_text(builder, snapshot, tooltip);
+  }
+  scratch_end(tmp);
+}
+
+static bool
+unreal_prop_snapshot_child_layout_valid(fprop_t *parent, fprop_t *child)
+{
+  if (!parent || !child || child->offset_internal < 0 || child->elem_size <= 0 || child->array_dim <= 0) {
+    return false;
+  }
+
+  uint64_t child_end = (uint64_t)child->offset_internal + unreal_fprop_complete_size(child);
+  return child_end <= (uint64_t)parent->elem_size;
+}
+
+static unreal_prop_snapshot_t *
+unreal_fprop_snapshot_build_internal(unreal_prop_snapshot_builder_t *builder, fprop_t *prop, str_t name, const uint8_t *value,
+                                     uint32_t depth, bool allow_fixed_array);
+
+static void
+unreal_prop_snapshot_build_fixed_array(unreal_prop_snapshot_builder_t *builder,
+                                       unreal_prop_snapshot_t         *snapshot,
+                                       fprop_t                        *prop,
+                                       const uint8_t                  *value,
+                                       uint32_t                        depth)
+{
+  snapshot->value = str_push_fmt(builder->arena, "Num=%d", prop->array_dim);
+
+  uint32_t shown = (uint32_t)prop->array_dim;
+  if (shown > builder->max_container_elements) {
+    shown               = builder->max_container_elements;
+    snapshot->truncated = true;
+    builder->truncated  = true;
+  }
+
+  for (uint32_t i = 0; i < shown; ++i) {
+    unreal_prop_snapshot_t *child = NULL;
+    tmp_arena_t             tmp   = scratch_begin(builder->arena);
+    {
+      str_t          child_name  = str_push_fmt(tmp.arena, "[%u]", i);
+      const uint8_t *child_value = NULL;
+      if (value) {
+        child_value = value + (uint64_t)i * (uint64_t)prop->elem_size;
+      }
+
+      child = unreal_fprop_snapshot_build_internal(builder, prop, child_name, child_value, depth + 1, false);
+    }
+    scratch_end(tmp);
+
+    if (!child) {
+      snapshot->truncated = true;
+      break;
+    }
+
+    unreal_prop_snapshot_push_child(snapshot, child);
+  }
+}
+
+static void
+unreal_prop_snapshot_build_struct(unreal_prop_snapshot_builder_t *builder,
+                                  unreal_prop_snapshot_t         *snapshot,
+                                  fprop_t                        *prop,
+                                  const uint8_t                  *value,
+                                  uint32_t                        depth)
+{
+  fprop_struct_t *struct_prop = (fprop_struct_t *)prop;
+  if (!struct_prop->script_struct || !struct_prop->script_struct->child_props) {
+    if (value) {
+      unreal_prop_snapshot_format_leaf(builder, snapshot, prop, value);
+    }
+
+    return;
+  }
+
+  snapshot->value = str_push_copy(builder->arena, STR_LIT("{...}"));
+  for (ffield_t *field = struct_prop->script_struct->child_props; field; field = field->next) {
+    fprop_t *child_prop = (fprop_t *)field;
+    if (!unreal_prop_snapshot_child_layout_valid(prop, child_prop)) {
+      snapshot->truncated = true;
+      builder->truncated  = true;
+      continue;
+    }
+
+    unreal_prop_snapshot_t *child = NULL;
+    tmp_arena_t             tmp   = scratch_begin(builder->arena);
+    {
+      str_t          child_name  = unreal_fname_to_str(child_prop->name, tmp.arena);
+      const uint8_t *child_value = NULL;
+      if (value) {
+        child_value = value + child_prop->offset_internal;
+      }
+
+      child = unreal_fprop_snapshot_build_internal(builder, child_prop, child_name, child_value, depth + 1, true);
+    }
+    scratch_end(tmp);
+
+    if (!child) {
+      snapshot->truncated = true;
+      break;
+    }
+
+    unreal_prop_snapshot_push_child(snapshot, child);
+  }
+}
+
+static void
+unreal_prop_snapshot_build_array(unreal_prop_snapshot_builder_t *builder, unreal_prop_snapshot_t *snapshot, fprop_array_t *prop,
+                                 const uint8_t *value, uint32_t depth)
+{
+  if (!value) {
+    return;
+  }
+
+  int32_t count = unreal_array_num(value, prop);
+  if (count < 0 || !prop->inner) {
+    snapshot->value = str_push_copy(builder->arena, STR_LIT("<invalid array>"));
+    return;
+  }
+
+  snapshot->value = str_push_fmt(builder->arena, "Num=%d", count);
+  int32_t shown   = count;
+  if ((uint32_t)shown > builder->max_container_elements) {
+    shown               = (int32_t)builder->max_container_elements;
+    snapshot->truncated = true;
+    builder->truncated  = true;
+  }
+
+  for (int32_t i = 0; i < shown; ++i) {
+    void *item = unreal_array_get((void *)value, prop, i);
+    if (!item) {
+      snapshot->truncated = true;
+      builder->truncated  = true;
+      continue;
+    }
+
+    unreal_prop_snapshot_t *child = NULL;
+    tmp_arena_t             tmp   = scratch_begin(builder->arena);
+    {
+      str_t child_name  = str_push_fmt(tmp.arena, "[%d]", i);
+      child = unreal_fprop_snapshot_build_internal(builder, prop->inner, child_name, item, depth + 1, true);
+    }
+    scratch_end(tmp);
+
+    if (!child) {
+      snapshot->truncated = true;
+      break;
+    }
+
+    unreal_prop_snapshot_push_child(snapshot, child);
+  }
+}
+
+static void
+unreal_prop_snapshot_build_set(unreal_prop_snapshot_builder_t *builder,
+                               unreal_prop_snapshot_t         *snapshot,
+                               fprop_set_t                    *prop,
+                               const uint8_t                  *value,
+                               uint32_t                        depth)
+{
+  if (!value) {
+    return;
+  }
+
+  int32_t count     = unreal_set_num(value, prop);
+  int32_t max_index = unreal_set_max_index(value, prop);
+  if (count < 0 || max_index < 0 || !prop->elem_prop) {
+    snapshot->value = str_push_copy(builder->arena, STR_LIT("<invalid set>"));
+    return;
+  }
+
+  snapshot->value = str_push_fmt(builder->arena, "Num=%d", count);
+  int32_t shown   = 0;
+  for (int32_t i = 0; i < max_index && shown < count; ++i) {
+    const void *item = unreal_set_get(value, prop, i);
+    if (!item) {
+      continue;
+    }
+
+    if ((uint32_t)shown >= builder->max_container_elements) {
+      snapshot->truncated = true;
+      builder->truncated  = true;
+      break;
+    }
+
+    unreal_prop_snapshot_t *child = NULL;
+    tmp_arena_t             tmp   = scratch_begin(builder->arena);
+    {
+      str_t child_name  = str_push_fmt(tmp.arena, "[%d]", shown);
+      child = unreal_fprop_snapshot_build_internal(builder, prop->elem_prop, child_name, item, depth + 1, true);
+    }
+    scratch_end(tmp);
+
+    if (!child) {
+      snapshot->truncated = true;
+      break;
+    }
+
+    unreal_prop_snapshot_push_child(snapshot, child);
+    shown += 1;
+  }
+}
+
+static unreal_prop_snapshot_t *
+unreal_prop_snapshot_build_map_pair(unreal_prop_snapshot_builder_t *builder,
+                                    fprop_map_t                    *prop,
+                                    int32_t                         shown,
+                                    const void                     *key_value,
+                                    const void                     *map_value,
+                                    uint32_t                        depth)
+{
+  unreal_prop_snapshot_t *pair = unreal_prop_snapshot_alloc(builder);
+  if (!pair) {
+    return NULL;
+  }
+
+  tmp_arena_t tmp = scratch_begin(builder->arena);
+  {
+    str_t key_type = unreal_fprop_push_type_name(prop->key_prop, tmp.arena);
+    str_t val_type = unreal_fprop_push_type_name(prop->val_prop, tmp.arena);
+    str_t name     = str_push_fmt(tmp.arena, "[%d]", shown);
+    str_t type     = str_push_fmt(tmp.arena, "TPair<%.*s, %.*s>", STR_ARG(key_type), STR_ARG(val_type));
+
+    pair->name  = unreal_prop_snapshot_copy_text(builder, pair, name);
+    pair->type  = unreal_prop_snapshot_copy_text(builder, pair, type);
+    pair->value = str_push_copy(builder->arena, STR_LIT("{...}"));
+  }
+  scratch_end(tmp);
+
+  unreal_prop_snapshot_t *key = unreal_fprop_snapshot_build_internal(builder, prop->key_prop, STR_LIT("Key"), key_value, depth + 1, true);
+  unreal_prop_snapshot_t *val = unreal_fprop_snapshot_build_internal(builder, prop->val_prop, STR_LIT("Value"), map_value, depth + 1, true);
+  if (key) {
+    unreal_prop_snapshot_push_child(pair, key);
+  } else {
+    pair->truncated = true;
+  }
+
+  if (val) {
+    unreal_prop_snapshot_push_child(pair, val);
+  } else {
+    pair->truncated = true;
+  }
+
+  return pair;
+}
+
+static void
+unreal_prop_snapshot_build_map(unreal_prop_snapshot_builder_t *builder,
+                               unreal_prop_snapshot_t         *snapshot,
+                               fprop_map_t                    *prop,
+                               const uint8_t                  *value,
+                               uint32_t                        depth)
+{
+  if (!value) {
+    return;
+  }
+
+  int32_t count     = unreal_map_num(value, prop);
+  int32_t max_index = unreal_map_max_index(value, prop);
+  if (count < 0 || max_index < 0 || !prop->key_prop || !prop->val_prop) {
+    snapshot->value = str_push_copy(builder->arena, STR_LIT("<invalid map>"));
+    return;
+  }
+
+  snapshot->value = str_push_fmt(builder->arena, "Num=%d", count);
+  int32_t shown   = 0;
+  for (int32_t i = 0; i < max_index && shown < count; ++i) {
+    const void *key_value = unreal_map_get_key(value, prop, i);
+    void       *map_value = unreal_map_get_value((void *)value, prop, i);
+    if (!key_value || !map_value) {
+      continue;
+    }
+
+    if ((uint32_t)shown >= builder->max_container_elements) {
+      snapshot->truncated = true;
+      builder->truncated  = true;
+      break;
+    }
+
+    unreal_prop_snapshot_t *pair = unreal_prop_snapshot_build_map_pair(builder, prop, shown, key_value, map_value, depth + 1);
+    if (!pair) {
+      snapshot->truncated = true;
+      break;
+    }
+
+    unreal_prop_snapshot_push_child(snapshot, pair);
+    shown += 1;
+  }
+}
+
+static unreal_prop_snapshot_t *
+unreal_fprop_snapshot_build_internal(unreal_prop_snapshot_builder_t *builder,
+                                     fprop_t                        *prop,
+                                     str_t                           name,
+                                     const uint8_t                  *value,
+                                     uint32_t                        depth,
+                                     bool                            allow_fixed_array)
+{
+  if (!builder || !prop || prop->elem_size <= 0 || prop->array_dim <= 0) {
+    if (builder) {
+      builder->truncated = true;
+    }
+
+    return NULL;
+  }
+
+  unreal_prop_snapshot_t *snapshot = unreal_prop_snapshot_alloc(builder);
+  if (!snapshot) {
+    return NULL;
+  }
+
+  unreal_prop_snapshot_set_metadata(builder, snapshot, prop, name);
+  unreal_prop_kind_t kind         = unreal_fprop_get_kind(prop);
+  bool               has_children = (allow_fixed_array && prop->array_dim > 1) ||
+                                    kind == UNREAL_PROP_KIND_STRUCT ||
+                                    kind == UNREAL_PROP_KIND_ARRAY  ||
+                                    kind == UNREAL_PROP_KIND_SET    ||
+                                    kind == UNREAL_PROP_KIND_MAP;
+
+  if (depth >= builder->max_depth && has_children) {
+    snapshot->value     = str_push_copy(builder->arena, STR_LIT("<maximum depth>"));
+    snapshot->truncated = true;
+    builder->truncated  = true;
+  } else if (allow_fixed_array && prop->array_dim > 1) {
+    unreal_prop_snapshot_build_fixed_array(builder, snapshot, prop, value, depth);
+  } else if (kind == UNREAL_PROP_KIND_STRUCT) {
+    unreal_prop_snapshot_build_struct(builder, snapshot, prop, value, depth);
+  } else if (kind == UNREAL_PROP_KIND_ARRAY) {
+    unreal_prop_snapshot_build_array(builder, snapshot, (fprop_array_t *)prop, value, depth);
+  } else if (kind == UNREAL_PROP_KIND_SET) {
+    unreal_prop_snapshot_build_set(builder, snapshot, (fprop_set_t *)prop, value, depth);
+  } else if (kind == UNREAL_PROP_KIND_MAP) {
+    unreal_prop_snapshot_build_map(builder, snapshot, (fprop_map_t *)prop, value, depth);
+  } else if (value) {
+    unreal_prop_snapshot_format_leaf(builder, snapshot, prop, value);
+  }
+
+  if (builder->truncated && builder->node_count >= builder->max_nodes) {
+    snapshot->truncated = true;
+  }
+
+  return snapshot;
+}
+
+void
+unreal_prop_snapshot_builder_init(unreal_prop_snapshot_builder_t *builder, arena_t *arena)
+{
+  if (!builder) {
+    return;
+  }
+
+  *builder = (unreal_prop_snapshot_builder_t){
+    .arena                  = arena,
+    .max_depth              = 8,
+    .max_container_elements = 128,
+    .max_nodes              = 4096,
+    .max_text_length        = 512,
+  };
+}
+
+unreal_prop_snapshot_t *
+unreal_fprop_snapshot_build(unreal_prop_snapshot_builder_t *builder, fprop_t *prop, str_t name, const void *value)
+{
+  return unreal_fprop_snapshot_build_internal(builder, prop, name, value, 0, true);
 }

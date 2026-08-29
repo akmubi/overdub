@@ -213,7 +213,7 @@ my_assert_msg(const char *expr, const char *file, int line, const char *fmt, ...
 MOD_API void
 my_assert(const char *expr, const char *file, int line);
 
-#if defined BUILD_DEBUG || defined BUILD_TEST_UI
+#if defined BUILD_DEBUG
 #  define ASSERT(COND)                        \
     do {                                      \
       if (!(COND)) {                          \
@@ -373,6 +373,12 @@ mem_move(void *dst, void *src, uint64_t size)
 
 MOD_API uint64_t
 time_now_us(void);
+MOD_API uint32_t
+thread_current_id(void);
+MOD_API int32_t
+atomic_i32_increment(volatile int32_t *value);
+MOD_API int32_t
+atomic_i32_compare_exchange(volatile int32_t *value, int32_t exchange, int32_t comparand);
 
 static inline uint64_t
 time_snap_up(uint64_t t, uint32_t q)

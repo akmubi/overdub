@@ -17,6 +17,24 @@ time_now_us(void)
   return (uint64_t)((now.QuadPart * 1000000ull) / freq.QuadPart);
 }
 
+uint32_t
+thread_current_id(void)
+{
+  return (uint32_t)GetCurrentThreadId();
+}
+
+int32_t
+atomic_i32_increment(volatile int32_t *value)
+{
+  return (int32_t)InterlockedIncrement((volatile LONG *)value);
+}
+
+int32_t
+atomic_i32_compare_exchange(volatile int32_t *value, int32_t exchange, int32_t comparand)
+{
+  return (int32_t)InterlockedCompareExchange((volatile LONG *)value, (LONG)exchange, (LONG)comparand);
+}
+
 bool
 float_equal(float a, float b, float min_v, float step)
 {

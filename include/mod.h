@@ -7,6 +7,7 @@
 #include "str.h"
 #include "types.h"
 #include "unreal.h"
+#include "unreal_reflect.h"
 #include "version.h"
 
 MOD_EXTERN_C_BEGIN
@@ -80,6 +81,7 @@ MOD_API void             mod_log(mod_handle_t mod, log_level_t level, const char
 MOD_API void             mod_logv(mod_handle_t mod, log_level_t level, const char *fmt, va_list args);
 MOD_API mod_cfg_handle_t mod_get_cfg_by_id(mod_handle_t mod, str_t id);
 MOD_API bool             mod_register_cmd(mod_handle_t mod, str_t name, str_t description, mod_cmd_fn_t fn, void *user);
+MOD_API uclass_t        *mod_define_class(mod_handle_t mod, str_t name, const unreal_class_def_t *def);
 
 /* UI and timing */
 MOD_API struct nk_context *mod_get_nk_ctx(void);

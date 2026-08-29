@@ -1,8 +1,6 @@
-# Overdub Mod Template
+# Overdub Native Mod Template
 
-This directory contains a minimal native Overdub mod and its matching SDK.
-`include/`, `vendor/`, and `build/overdub.lib` are contained in this project,
-so no Overdub source checkout or `OverdubDir` setting is required.
+This directory is a small native mod project. A release template already contains the matching SDK headers, Nuklear headers, and `build/overdub.lib`. Keep those files from the same Overdub release.
 
 Build with Visual Studio 2022:
 
@@ -10,14 +8,24 @@ Build with Visual Studio 2022:
 msbuild mod.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:ModName=example
 ```
 
-Or build from an MSYS2 MinGW64 shell:
+Or use the Makefile from an MSYS2 MinGW64 shell or Linux with MinGW-w64:
 
 ```sh
 make CONFIG=release MOD_NAME=example
 ```
 
-The DLL is written below `build/`. Copy the DLL into the native mod package
-described by `docs/MOD_DEVELOPMENT.md`.
+The DLL is written below `build`. Copy it into a mod directory with this manifest:
 
-Keep the headers and `overdub.lib` from the same Overdub release. The mod DLL
-imports its SDK functions from `overdub.dll`; it does not contain a static SDK.
+```ini
+[info]
+id      = author.example
+name    = Example Mod
+author  = Author Name
+version = 1.0.0
+kind    = mod
+
+[code]
+path = example.dll
+```
+
+The source template is in `main.c`. In a released template, the full guide starts at `docs/MOD_DEVELOPMENT.md`. In the source checkout, it is at `../docs/MOD_DEVELOPMENT.md`.

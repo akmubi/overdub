@@ -13,10 +13,10 @@
 #include "str.h"
 #include "types.h"
 #include "unreal.h"
-
 #include "ui_console.h"
-
 #include "version.h"
+
+#include "lua_mod_runtime.h"
 
 #include <windows.h>
 
@@ -509,6 +509,31 @@ mod_manifest_parse_dll_section(arena_t *arena, ini_section_t *section, str_t mod
 }
 
 static void
+mod_manifest_parse_lua_section(arena_t *arena, ini_section_t *section, str_t mod_dir, mod_manifest_t *out)
+{
+  for (str_node_t *node = section->lines.first; node; node = node->next) {
+    str_t key   = {0};
+    str_t value = {0};
+    if (!ini_parse_kv(node->str, &key, &value)) {
+      continue;
+    }
+
+    if (str_equal_icase(key, STR_LIT("path"))) {
+      out->lua.path = path_is_abs(value) ? str_push_copy(arena, value) : path_join(arena, mod_dir, value);
+    } else if (str_equal_icase(key, STR_LIT("runtime"))) {
+      if (str_equal_icase(value, STR_LIT("ue4ss"))) {
+        out->lua.runtime_kind = MOD_LUA_RUNTIME_UE4SS;
+      } else if (str_equal_icase(value, STR_LIT("overdub"))) {
+        out->lua.runtime_kind = MOD_LUA_RUNTIME_OVERDUB;
+      } else {
+        out->lua.runtime_kind = MOD_LUA_RUNTIME_INVALID;
+        LOG_WARN("%.*s: invalid Lua runtime '%.*s'; expected 'ue4ss' or 'overdub'", STR_ARG(out->manifest_path), STR_ARG(value));
+      }
+    }
+  }
+}
+
+static void
 mod_manifest_parse_assets_section(arena_t *arena, ini_section_t *section, str_t mod_dir, mod_manifest_t *out)
 {
   tmp_arena_t tmp = scratch_begin(arena);
@@ -787,6 +812,8 @@ mod_manifest_copy(mod_manifest_t *dst, mod_manifest_t *src, arena_t *arena)
 
   mod_info_copy(&dst->info, &src->info, arena);
   mod_dll_info_copy(&dst->dll, &src->dll, arena);
+  dst->lua.path         = str_push_copy(arena, src->lua.path);
+  dst->lua.runtime_kind = src->lua.runtime_kind;
   mod_asset_info_copy(&dst->asset, &src->asset, arena);
 
   dst->blueprint_count = src->blueprint_count;
@@ -820,6 +847,7 @@ mod_manifest_parse(arena_t *arena, str_t mod_dir, mod_manifest_t *out)
   str_t config_path   = path_join(tmp.arena, mod_dir, CONFIG_MOD_CONFIG_FILE_NAME);
 
   mem_zero(out, sizeof(*out));
+  out->lua.runtime_kind = MOD_LUA_RUNTIME_OVERDUB;
   if (file_exists(manifest_path)) {
     str_t text = file_read_all(manifest_path, tmp.arena);
     if (!str_is_empty(text)) {
@@ -853,12 +881,29 @@ mod_manifest_parse(arena_t *arena, str_t mod_dir, mod_manifest_t *out)
           mod_manifest_parse_description_section(arena, section, out);
         } else if (str_equal_icase(section->name, STR_LIT("code"))) {
           mod_manifest_parse_dll_section(arena, section, out->mod_dir, out);
+        } else if (str_equal_icase(section->name, STR_LIT("lua"))) {
+          mod_manifest_parse_lua_section(arena, section, out->mod_dir, out);
         } else if (str_equal_icase(section->name, STR_LIT("assets"))) {
           mod_manifest_parse_assets_section(arena, section, out->mod_dir, out);
         } else if (str_equal_icase(section->name, STR_LIT("blueprint"))) {
           mod_manifest_parse_blueprint_section(arena, section, out);
         } else if (str_equal_icase(section->name, STR_LIT("option"))) {
           mod_manifest_parse_option_section(arena, section, out);
+        }
+      }
+
+      if (str_is_empty(out->lua.path)) {
+        static const str_t candidates[] = {
+          STR_CLIT("scripts/main.lua"),
+          STR_CLIT("main.lua"),
+        };
+
+        for (int i = 0; i < COUNTOF(candidates); ++i) {
+          str_t candidate = path_join(tmp.arena, out->mod_dir, candidates[i]);
+          if (file_exists(candidate)) {
+            out->lua.path = str_push_copy(arena, candidate);
+            break;
+          }
         }
       }
 
@@ -1733,6 +1778,25 @@ mod_init_dll_runtime(mod_t *m, bool is_builtin)
 }
 
 static void
+mod_init_lua_runtime(mod_manager_t *manager, mod_t *m)
+{
+  m->has_lua = !str_is_empty(m->manifest.lua.path);
+  if (!m->has_lua) {
+    return;
+  }
+
+  str_t root_mod_dir = mod_cfg_string_as_str(&manager->cfg.root_mod_dir);
+  if (!path_is_abs(root_mod_dir)) {
+    root_mod_dir = path_join(&manager->perm, manager->game_dir, root_mod_dir);
+  } else {
+    root_mod_dir = str_push_copy(&manager->perm, root_mod_dir);
+  }
+
+  m->lua.game_dir     = manager->game_dir;
+  m->lua.root_mod_dir = root_mod_dir;
+}
+
+static void
 mod_init_asset_runtime(mod_t *m)
 {
   m->asset = (mod_asset_runtime_t){
@@ -1843,6 +1907,7 @@ mod_register(mod_manager_t *manager, mod_manifest_t *manifest)
   mod_init_asset_runtime(m);
   mod_init_blueprint_runtime(&manager->perm, m);
   mod_init_dll_runtime(m, false);
+  mod_init_lua_runtime(manager, m);
   mod_init_option_runtime(&manager->perm, m);
 
   if (m->has_options || m->has_blueprints) {
@@ -2874,6 +2939,7 @@ mod_dll_start(mod_manager_t *manager, mod_handle_t h)
   mod_dll_arenas_init_free_list(&m->dll);
 
   if (!m->dll.funcs.init(mod_handle_make(m))) {
+    unreal_reflect_disable_owner((unreal_reflect_owner_t)h);
     mod_cleanup_dll_runtime(m);
 
     m->dll.err_stage = MOD_DLL_ERROR_INIT;
@@ -2908,6 +2974,7 @@ mod_dll_stop(mod_manager_t *manager, mod_handle_t h)
     m->dll.funcs.deinit(mod_handle_make(m));
   }
 
+  unreal_reflect_disable_owner((unreal_reflect_owner_t)h);
   mod_cleanup_dll_runtime(m);
 
   m->dll.active = false;
@@ -2947,6 +3014,20 @@ mod_dll_reload(mod_manager_t *manager, mod_handle_t h)
   }
 
   return mod_dll_start(manager, h);
+}
+
+bool
+mod_lua_start(mod_manager_t *manager, mod_handle_t h)
+{
+  mod_t *mod = mod_handle_resolve(manager, h);
+  return lua_mod_runtime_start(mod);
+}
+
+void
+mod_lua_stop(mod_manager_t *manager, mod_handle_t h)
+{
+  mod_t *mod = mod_handle_resolve(manager, h);
+  lua_mod_runtime_stop(mod);
 }
 
 static uobject_t *
@@ -3192,6 +3273,18 @@ mod_blueprint_tick(mod_manager_t *manager, mod_handle_t h, float delta)
 }
 
 void
+mod_manager_dispatch_uobject_constructed(mod_manager_t *manager, uobject_t *object)
+{
+  lua_mod_runtime_notify_uobject_constructed(manager, object);
+}
+
+void
+mod_manager_dispatch_uobject_deleted(mod_manager_t *manager, uobject_t *object, int32_t idx)
+{
+  lua_mod_runtime_notify_uobject_deleted(manager, object, idx);
+}
+
+void
 mod_manager_dispatch_tick(mod_manager_t *manager, float delta)
 {
   if (!manager) {
@@ -3201,6 +3294,19 @@ mod_manager_dispatch_tick(mod_manager_t *manager, float delta)
   for (int i = 0; i < manager->mod_order.count; ++i) {
     mod_handle_t       h  = manager->mod_order.runtime[i];
     mod_t             *m  = mod_handle_resolve(manager, h);
+    if (!m) {
+      continue;
+    }
+
+    if (m->has_lua) {
+      if (m->enabled && !m->lua.active && !m->lua.start_attempted) {
+        mod_lua_start(manager, h);
+      } else if (!m->enabled && (lua_mod_runtime_is_initialized(m) || m->lua.start_attempted)) {
+        mod_lua_stop(manager, h);
+      }
+      lua_mod_runtime_tick(m, delta);
+    }
+
     mod_dll_runtime_t *rt = &m->dll;
 
     if (m->has_code && rt->active && rt->funcs.tick) {
@@ -3221,8 +3327,18 @@ mod_manager_dispatch_input(mod_manager_t *manager, input_event_t *ev)
   }
 
   for (int i = 0; i < manager->mod_order.count; ++i) {
-    mod_handle_t       h  = manager->mod_order.runtime[i];
-    mod_t             *m  = mod_handle_resolve(manager, h);
+    mod_handle_t h  = manager->mod_order.runtime[i];
+    mod_t       *m  = mod_handle_resolve(manager, h);
+    if (!m) {
+      continue;
+    }
+
+    if (m->has_lua && m->lua.active) {
+      if (lua_mod_runtime_input(m, ev)) {
+        return true;
+      }
+    }
+
     mod_dll_runtime_t *rt = &m->dll;
 
     if (!m->has_code || !rt->active || !rt->funcs.input) {
@@ -3248,7 +3364,15 @@ mod_manager_dispatch_process_event_pre(mod_manager_t *manager, uobject_t *obj, u
   for (int i = 0; i < manager->mod_order.count; ++i) {
     mod_handle_t       h  = manager->mod_order.runtime[i];
     mod_t             *m  = mod_handle_resolve(manager, h);
+    if (!m) {
+      continue;
+    }
+
     mod_dll_runtime_t *rt = &m->dll;
+
+    if (m->has_lua && m->lua.active && lua_mod_runtime_process_event_pre(m, obj, func, params)) {
+      handled = true;
+    }
 
     if (!m->has_code || !rt->active || !rt->funcs.pe_pre) {
       continue;
@@ -3272,6 +3396,14 @@ mod_manager_dispatch_process_event_post(mod_manager_t *manager, uobject_t *obj, 
   for (int i = 0; i < manager->mod_order.count; ++i) {
     mod_handle_t       h  = manager->mod_order.runtime[i];
     mod_t             *m  = mod_handle_resolve(manager, h);
+    if (!m) {
+      continue;
+    }
+
+    if (m->has_lua && m->lua.active) {
+      lua_mod_runtime_process_event_post(m, obj, func, params, consumed);
+    }
+
     mod_dll_runtime_t *rt = &m->dll;
 
     if (!m->has_code || !rt->active || !rt->funcs.pe_post) {
@@ -3280,6 +3412,27 @@ mod_manager_dispatch_process_event_post(mod_manager_t *manager, uobject_t *obj, 
 
     rt->funcs.pe_post(h, obj, func, params, consumed);
   }
+}
+
+void
+mod_manager_dispatch_post_load(mod_manager_t *manager, uobject_t *obj, bool after)
+{
+  if (!manager || !obj) {
+    return;
+  }
+
+  for (int i = 0; i < manager->mod_order.count; ++i) {
+    mod_t *mod = mod_handle_resolve(manager, manager->mod_order.runtime[i]);
+    if (mod && mod->has_lua && mod->lua.active) {
+      lua_mod_runtime_post_load(mod, obj, after);
+    }
+  }
+}
+
+bool
+mod_manager_has_post_load_hooks(mod_manager_t *manager)
+{
+  return manager && lua_mod_runtime_has_post_load_hooks();
 }
 
 bool
@@ -3334,9 +3487,20 @@ mod_manager_dispatch_command(mod_manager_t *manager, str_t name, str_t args)
     return false;
   }
 
+  bool matched = false;
   for (int i = 0; i < manager->mod_order.count; ++i) {
     mod_handle_t       h  = manager->mod_order.runtime[i];
     mod_t             *m  = mod_handle_resolve(manager, h);
+    if (!m) {
+      continue;
+    }
+
+    if (m->has_lua && m->lua.active) {
+      if (lua_mod_runtime_command(m, name, args)) {
+        return true;
+      }
+    }
+
     mod_dll_runtime_t *rt = &m->dll;
 
     if (!m->has_code || !rt->active) {
@@ -3354,7 +3518,7 @@ mod_manager_dispatch_command(mod_manager_t *manager, str_t name, str_t args)
     }
   }
 
-  return false;
+  return matched;
 }
 
 bool
@@ -3479,6 +3643,8 @@ mod_manager_init(mod_manager_t *manager, str_t game_dir)
 
   ASSERT(!str_is_empty(manager->config_path));
   ASSERT(manager->mods != NULL);
+
+  lua_mod_runtime_system_init();
 }
 
 void
@@ -3492,6 +3658,20 @@ mod_manager_start_dlls(mod_manager_t *manager)
     }
 
     mod_dll_start(manager, mod_handle_make(m));
+  }
+}
+
+void
+mod_manager_start_lua(mod_manager_t *manager)
+{
+  for (int i = 0; i < manager->mod_order.count; ++i) {
+    mod_handle_t h = manager->mod_order.runtime[i];
+    mod_t       *m = mod_handle_resolve(manager, h);
+    if (!m || !m->enabled || !m->has_lua) {
+      continue;
+    }
+
+    mod_lua_start(manager, h);
   }
 }
 
@@ -3574,6 +3754,10 @@ mod_has_any_errors(mod_t *m)
     return true;
   }
 
+  if (m->has_lua && m->lua.err_msg.len > 0) {
+    return true;
+  }
+
   if (m->has_blueprints) {
     for (int i = 0; i < m->blueprint_count; ++i) {
       if (m->blueprints[i].err_stage != MOD_BP_ERROR_NONE) {
@@ -3589,6 +3773,10 @@ bool
 mod_is_active(mod_t *m)
 {
   if (m->has_code && m->dll.active) {
+    return true;
+  }
+
+  if (m->has_lua && m->lua.active) {
     return true;
   }
 
@@ -3622,6 +3810,11 @@ mod_manager_mod_set_enabled(mod_manager_t *manager, mod_handle_t h, bool enabled
   /* NOTE: assets cannot be mounted/unmounted freely at the runtime */
 
   if (enabled) {
+    if (m->has_lua && !m->enabled) {
+      m->lua.start_attempted = false;
+      err_msg_set(&m->lua.err_msg, STR_NULL);
+    }
+
     if (m->has_code) {
       mod_dll_start(manager, h);
     }

@@ -83,6 +83,8 @@ jobs:
           Copy-Item LICENSE "$templateRoot\"
           Copy-Item build\overdub.lib "$templateRoot\build\"
           Copy-Item docs\MOD_DEVELOPMENT.md "$templateRoot\docs\"
+          Copy-Item docs\mod-development "$templateRoot\docs\" -Recurse
+          Copy-Item docs\lua "$templateRoot\docs\" -Recurse
           Copy-Item include\* "$templateRoot\include\" -Recurse
           Copy-Item mod\main.c "$templateRoot\"
           Copy-Item mod\Makefile "$templateRoot\"

@@ -8,6 +8,7 @@
 #include "sigscan.h"
 #include "str.h"
 #include "unreal.h"
+#include "unreal_reflect.h"
 
 #include <stdarg.h>
 
@@ -55,6 +56,17 @@ bool MOD_CALL
 mod_register_cmd(mod_handle_t mod, str_t name, str_t description, mod_cmd_fn_t fn, void *user)
 {
   return mod_manager_register_cmd(&globals.mod_manager, mod, name, description, fn, user);
+}
+
+uclass_t *MOD_CALL
+mod_define_class(mod_handle_t mod, str_t name, const unreal_class_def_t *def)
+{
+  mod_t *owner = mod_handle_resolve(&globals.mod_manager, mod);
+  if (!owner) {
+    LOG_ERROR("Cannot define Unreal class '%.*s': invalid mod handle", STR_ARG(name));
+    return NULL;
+  }
+  return unreal_reflect_define_class_owned((unreal_reflect_owner_t)mod, owner->manifest.info.id, name, def);
 }
 
 struct nk_context *MOD_CALL
