@@ -13,6 +13,7 @@
 #include "types.h"
 #include "ui_nuklear.h"
 #include "unreal.h"
+#include "unreal_prop.h"
 #include "vendor_nuklear.h"
 #include "vendor_stb.h"
 
@@ -30,6 +31,12 @@
 #define TRACE_SAVE_PATH_MAX   (260)
 #define TRACE_FILTER_TEXT_CAP (4 * KB)
 #define TRACE_FILTER_RULE_MAX (128)
+
+#define TRACE_PARAMETER_MAX_DEPTH       (8)
+#define TRACE_PARAMETER_MAX_ELEMENTS    (64)
+#define TRACE_PARAMETER_MAX_NODES       (256)
+#define TRACE_PARAMETER_MAX_TEXT_LENGTH (512)
+#define TRACE_PARAMETER_MEMORY_LIMIT    (64 * MB)
 
 #define TRACE_CALL_COL_COUNT    (8)
 #define TRACE_CALL_COL_SEQ      "SEQ"
@@ -49,6 +56,15 @@ typedef uint8_t trace_hook_kind_t;
 enum {
   TRACE_HOOK_PROCESS_EVENT = 0,
   TRACE_HOOK_INVOKE        = 1,
+};
+
+typedef uint8_t trace_parameter_state_t;
+enum {
+  TRACE_PARAMETERS_NONE = 0,
+  TRACE_PARAMETERS_AVAILABLE,
+  TRACE_PARAMETERS_INVOKE_UNAVAILABLE,
+  TRACE_PARAMETERS_INVALID,
+  TRACE_PARAMETERS_MEMORY_LIMIT,
 };
 
 typedef uint8_t trace_filter_sign_t;
@@ -126,10 +142,20 @@ struct trace_call_s {
   ui_text_span_t self_name;
   ui_text_span_t func_name;
 
-  uint8_t        source_flags;
-  uint8_t        consumed_flags;
-  uobject_kind_t self_kind;
-  bool           maximized;
+  unreal_prop_snapshot_t *first_input;
+  unreal_prop_snapshot_t *last_input;
+  unreal_prop_snapshot_t *first_output;
+  unreal_prop_snapshot_t *last_output;
+  unreal_prop_snapshot_t *first_return;
+  unreal_prop_snapshot_t *last_return;
+
+  uint32_t                parameter_node_count;
+  trace_parameter_state_t parameter_state;
+  uint8_t                 source_flags;
+  uint8_t                 consumed_flags;
+  uobject_kind_t          self_kind;
+  bool                    parameters_truncated;
+  bool                    maximized;
 };
 
 typedef struct trace_frame_s trace_frame_t;
@@ -162,18 +188,21 @@ struct trace_ui_s {
   uint32_t       page_idx;
   arena_t        page_arena;
 
-  ui_text_span_t       seq;
-  ui_text_span_t       time;
-  ui_text_span_t       duration;
-  ui_text_span_t       depth;
-  ui_text_span_t       kind;
-  ui_text_span_t       class_name;
-  ui_text_span_t       self_name;
-  ui_text_span_t       func_name;
-  ui_text_span_t       kind_pe;
-  ui_text_span_t       kind_invoke;
-  ui_text_span_t       kind_pe_and_invoke;
-  struct nk_grid_state call_grid;
+  ui_text_span_t         seq;
+  ui_text_span_t         time;
+  ui_text_span_t         duration;
+  ui_text_span_t         depth;
+  ui_text_span_t         kind;
+  ui_text_span_t         class_name;
+  ui_text_span_t         self_name;
+  ui_text_span_t         func_name;
+  ui_text_span_t         kind_pe;
+  ui_text_span_t         kind_invoke;
+  ui_text_span_t         kind_pe_and_invoke;
+  struct nk_grid_state   call_grid;
+  struct nk_grid_state   parameter_grid;
+  ui_nk_splitter_state_t parameter_splitter;
+  trace_call_t          *selected_call;
 };
 
 typedef struct trace_cfg_s trace_cfg_t;
@@ -205,6 +234,7 @@ struct trace_tool_s {
   uint32_t call_count;
   uint32_t max_call_count;
   uint32_t seq_counter;
+  uint64_t parameter_bytes;
 
   bool capture_full;
   bool clear_pending;
@@ -305,6 +335,10 @@ trace_call_alloc(trace_tool_t *tool)
 
   tool->last_call   = call;
   tool->call_count += 1;
+
+  if (!tool->ui.selected_call) {
+    tool->ui.selected_call = call;
+  }
 
   return call;
 }
@@ -556,6 +590,112 @@ trace_call_cache_names(trace_tool_t *tool, trace_call_t *call)
   }
 }
 
+static bool
+trace_parameter_layout_is_valid(ufunc_t *func, fprop_t *prop)
+{
+  if (!func || !prop || prop->offset_internal < 0 || prop->elem_size <= 0 || prop->array_dim <= 0) {
+    return false;
+  }
+
+  uint64_t end = (uint64_t)prop->offset_internal + unreal_fprop_complete_size(prop);
+  return end <= func->params_size;
+}
+
+static void
+trace_parameter_push(trace_call_t *call, unreal_func_param_role_t role, unreal_prop_snapshot_t *snapshot)
+{
+  if (role == UNREAL_FUNC_PARAM_INPUT) {
+    QUEUE_PUSH(call->first_input, call->last_input, snapshot);
+  } else if (role == UNREAL_FUNC_PARAM_OUTPUT) {
+    QUEUE_PUSH(call->first_output, call->last_output, snapshot);
+  } else {
+    QUEUE_PUSH(call->first_return, call->last_return, snapshot);
+  }
+}
+
+static bool
+trace_parameter_should_capture(unreal_func_param_role_t role, bool capture_inputs)
+{
+  if (capture_inputs) {
+    return role == UNREAL_FUNC_PARAM_INPUT;
+  }
+
+  return role == UNREAL_FUNC_PARAM_OUTPUT || role == UNREAL_FUNC_PARAM_RETURN;
+}
+
+static void
+trace_parameters_capture(trace_tool_t *tool, trace_call_t *call, const void *params, bool capture_inputs)
+{
+  if (!tool || !call || !call->func || call->parameter_state != TRACE_PARAMETERS_AVAILABLE) {
+    return;
+  }
+
+  if (call->func->params_size > 0 && !params) {
+    call->parameter_state = TRACE_PARAMETERS_INVALID;
+    return;
+  }
+
+  if (tool->parameter_bytes >= TRACE_PARAMETER_MEMORY_LIMIT) {
+    if (call->parameter_node_count > 0) {
+      call->parameters_truncated = true;
+    } else {
+      call->parameter_state = TRACE_PARAMETERS_MEMORY_LIMIT;
+    }
+
+    return;
+  }
+
+  unreal_prop_snapshot_builder_t builder = {0};
+  unreal_prop_snapshot_builder_init(&builder, tool->perm);
+  builder.max_depth              = TRACE_PARAMETER_MAX_DEPTH;
+  builder.max_container_elements = TRACE_PARAMETER_MAX_ELEMENTS;
+  builder.max_text_length        = TRACE_PARAMETER_MAX_TEXT_LENGTH;
+
+  if (call->parameter_node_count < TRACE_PARAMETER_MAX_NODES) {
+    builder.max_nodes = TRACE_PARAMETER_MAX_NODES - call->parameter_node_count;
+  } else {
+    builder.max_nodes = 0;
+  }
+
+  uint64_t memory_before = arena_get_used(tool->perm);
+  for (ffield_t *field = call->func->child_props; field; field = field->next) {
+    fprop_t *prop = (fprop_t *)field;
+    if (!(prop->prop_flags & CPF_PARM)) {
+      continue;
+    }
+
+    unreal_func_param_role_t role = unreal_fprop_get_param_role(prop);
+    if (!trace_parameter_should_capture(role, capture_inputs)) {
+      continue;
+    }
+
+    if (!trace_parameter_layout_is_valid(call->func, prop)) {
+      call->parameter_state = TRACE_PARAMETERS_INVALID;
+      break;
+    }
+
+    unreal_prop_snapshot_t *snapshot = NULL;
+    tmp_arena_t             tmp      = scratch_begin(tool->perm);
+    {
+      str_t       name  = unreal_fname_to_str(prop->name, tmp.arena);
+      const void *value = (const uint8_t *)params + prop->offset_internal;
+      snapshot = unreal_fprop_snapshot_build(&builder, prop, name, value);
+    }
+    scratch_end(tmp);
+
+    if (!snapshot) {
+      call->parameters_truncated = true;
+      break;
+    }
+
+    trace_parameter_push(call, role, snapshot);
+  }
+
+  call->parameter_node_count += builder.node_count;
+  call->parameters_truncated  = call->parameters_truncated || builder.truncated;
+  tool->parameter_bytes      += arena_get_used(tool->perm) - memory_before;
+}
+
 static trace_call_t *
 trace_logical_call_begin(trace_tool_t *tool, uobject_t *self, ufunc_t *func, uint8_t source)
 {
@@ -577,16 +717,15 @@ trace_logical_call_begin(trace_tool_t *tool, uobject_t *self, ufunc_t *func, uin
     return NULL;
   }
 
-  call->start_us     = time_now_us();
-  call->end_us       = call->start_us;
-  call->depth        = depth;
-  call->self         = self;
-  call->func         = func;
-  call->self_fname   = self->name;
-  call->class_fname  = self->cls ? self->cls->name : (fname_t){0};
-  call->func_fname   = func->name;
-  call->self_kind    = uobject_kind(self);
-  call->source_flags = source;
+  call->depth           = depth;
+  call->self            = self;
+  call->func            = func;
+  call->self_fname      = self->name;
+  call->class_fname     = self->cls ? self->cls->name : (fname_t){0};
+  call->func_fname      = func->name;
+  call->self_kind       = uobject_kind(self);
+  call->source_flags    = source;
+  call->parameter_state = TRACE_PARAMETERS_NONE;
 
   trace_call_link(tool, call, tool->active_captured_call);
 
@@ -601,8 +740,6 @@ trace_logical_call_end(trace_tool_t *tool, trace_call_t *call)
 
   if (call) {
     ASSERT(tool->active_captured_call == call);
-
-    call->end_us = time_now_us();
 
     tool->active_captured_call = call->parent;
   }
@@ -622,13 +759,17 @@ trace_clear_now(trace_tool_t *tool)
   tool->last_root            = NULL;
   tool->active_captured_call = NULL;
 
-  tool->frame_free    = NULL;
-  tool->logical_depth = 0;
-  tool->call_count    = 0;
-  tool->seq_counter   = 0;
-  tool->capture_full  = false;
-  tool->clear_pending = false;
-  tool->ui.page_idx   = 0;
+  tool->frame_free       = NULL;
+  tool->logical_depth    = 0;
+  tool->call_count       = 0;
+  tool->seq_counter      = 0;
+  tool->parameter_bytes  = 0;
+  tool->capture_full     = false;
+  tool->clear_pending    = false;
+  tool->ui.page_idx      = 0;
+  tool->ui.selected_call = NULL;
+
+  nk_grid_state_reset(&tool->ui.parameter_grid);
   arena_reset(&tool->ui.page_arena);
 
   arena_set_used(tool->perm, tool->perm_size);
@@ -656,8 +797,10 @@ struct ui_detail_row_s {
   ui_text_cell_t *parts;
   int             count;
   bool            has_children;
+  bool            selected;
   int             depth;
   str_t           copy_text;
+  str_t           tooltip;
 };
 
 static str_t
@@ -684,7 +827,7 @@ detail_copy_text(struct nk_context *ctx, str_t text)
 }
 
 static bool
-ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_row_t row, bool *maximized)
+ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_row_t row, bool *maximized, bool *pressed)
 {
   struct nk_grid_column  columns[NK_GRID_MAX_COLUMNS] = {0};
   struct nk_grid_options grid_options = {0};
@@ -707,6 +850,10 @@ ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_ro
   ASSERT(row.count > 0 && row.count + 1 <= NK_GRID_MAX_COLUMNS);
   if (row.has_children) {
     ASSERT(maximized != NULL);
+  }
+
+  if (pressed) {
+    *pressed = false;
   }
 
   ctx = tool->ctx;
@@ -756,6 +903,10 @@ ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_ro
       struct nk_color           bg        = row.has_children ? DETAIL_C_ROW_COLLAPSIBLE_BG : UI_C_TRANSPARENT;
       struct nk_rect            sym;
 
+      if (row.selected) {
+        bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
+      }
+
       row_bounds   = bounds;
       row_bounds.w = grid.offsets[row.count] + grid.widths[row.count];
 
@@ -765,20 +916,26 @@ ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_ro
         in = &ctx->input;
       }
 
-      if (in && row.has_children) {
+      if (in && (row.has_children || pressed)) {
         if (nk_button_behavior(&row_state, row_bounds, in, NK_BUTTON_DEFAULT)) {
-          *maximized = !*maximized;
-          expanded   = *maximized;
-          view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
+          if (pressed) {
+            *pressed = true;
+          }
+
+          if (row.has_children) {
+            *maximized = !*maximized;
+            expanded   = *maximized;
+            view       = *maximized ? DETAIL_TREE_ROW_OPEN : DETAIL_TREE_ROW_CLOSED;
+          }
         }
         ctx->last_widget_state = row_state;
       }
 
-      if (row.has_children && row_state & NK_WIDGET_STATE_HOVER) {
+      if ((row.has_children || pressed) && row_state & NK_WIDGET_STATE_HOVER) {
         bg = DETAIL_C_ROW_COLLAPSIBLE_HOVER;
       }
 
-      if (row.has_children && row_state & NK_WIDGET_STATE_ACTIVE) {
+      if ((row.has_children || pressed) && row_state & NK_WIDGET_STATE_ACTIVE) {
         bg = DETAIL_C_ROW_COLLAPSIBLE_ACTIVE;
       }
 
@@ -813,6 +970,11 @@ ui_detail_row(trace_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_ro
     };
     ui_grid_str(&grid, i + 1, row.parts[i].text.str, &options);
   }
+
+  if (!str_is_empty(row.tooltip) && nk_widget_is_hovered(ctx)) {
+    nk_tooltip_text(ctx, (const char *)row.tooltip.data, (int)row.tooltip.len);
+  }
+
   nk_grid_row_end(&grid);
   nk_grid_end(&grid);
   nk_layout_reset_min_row_height(ctx);
@@ -916,10 +1078,15 @@ draw_detail_call(trace_tool_t *tool, trace_call_t *call, int depth)
       .count        = COUNTOF(parts),
       .depth        = depth,
       .has_children = (call->first_child != NULL),
+      .selected     = tool->ui.selected_call == call,
       .copy_text    = STR_NULL,
     };
 
-    maximized = ui_detail_row(tool, &tool->ui.call_grid, row, row.has_children ? &call->maximized : NULL);
+    bool pressed = false;
+    maximized = ui_detail_row(tool, &tool->ui.call_grid, row, row.has_children ? &call->maximized : NULL, &pressed);
+    if (pressed) {
+      tool->ui.selected_call = call;
+    }
   }
   scratch_end(tmp);
 
@@ -927,6 +1094,134 @@ draw_detail_call(trace_tool_t *tool, trace_call_t *call, int depth)
     for (trace_call_t *child = call->first_child; child; child = child->next_sibling) {
       draw_detail_call(tool, child, depth + 1);
     }
+  }
+}
+
+static void
+trace_draw_parameter_snapshot(trace_tool_t *tool, unreal_prop_snapshot_t *snapshot, int depth)
+{
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    str_t value = snapshot->value;
+    if (snapshot->truncated) {
+      value = str_push_fmt(tmp.arena, "%.*s%s", STR_ARG(value), str_is_empty(value) ? "truncated" : " [truncated]");
+    }
+
+    struct nk_color value_color = UI_C_PROP_VALUE_TEXT;
+    if (!str_is_empty(snapshot->tooltip)) {
+      value_color = UI_C_PROP_LINK_TEXT;
+    }
+
+    ui_text_cell_t parts[] = {
+      UI_TEXT_CELL(ui_text_span_make(tool->ctx, snapshot->type), UI_C_PROP_TYPE_TEXT),
+      UI_TEXT_CELL(ui_text_span_make(tool->ctx, snapshot->name), UI_C_TEXT),
+      UI_TEXT_CELL(ui_text_span_make(tool->ctx, value),          value_color),
+    };
+
+    ui_detail_row_t row = {
+      .parts        = parts,
+      .count        = COUNTOF(parts),
+      .has_children = snapshot->first_child != NULL,
+      .selected     = false,
+      .depth        = depth,
+      .copy_text    = snapshot->value,
+      .tooltip      = snapshot->tooltip,
+    };
+
+    bool expanded = ui_detail_row(tool, &tool->ui.parameter_grid, row, row.has_children ? &snapshot->expanded : NULL, NULL);
+    if (expanded) {
+      for (unreal_prop_snapshot_t *child = snapshot->first_child; child; child = child->next) {
+        trace_draw_parameter_snapshot(tool, child, depth + 1);
+      }
+    }
+  }
+  scratch_end(tmp);
+}
+
+static void
+trace_draw_parameter_list(trace_tool_t *tool, const char *label, unreal_prop_snapshot_t *first)
+{
+  if (!first) {
+    return;
+  }
+
+  nk_layout_row_dynamic(tool->ctx, 20.0f, 1);
+  nk_label(tool->ctx, label, NK_TEXT_LEFT);
+
+  for (unreal_prop_snapshot_t *snapshot = first; snapshot; snapshot = snapshot->next) {
+    trace_draw_parameter_snapshot(tool, snapshot, 0);
+  }
+}
+
+static void
+trace_draw_parameter_panel(trace_tool_t *tool)
+{
+  struct nk_context *ctx  = tool->ctx;
+  trace_call_t      *call = tool->ui.selected_call;
+
+  if (!call) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "Select a call to inspect its parameters", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
+    return;
+  }
+
+  nk_layout_row_dynamic(ctx, 22.0f, 1);
+  nk_labelf(ctx, NK_TEXT_LEFT, "PARAMETERS - CALL #%u", call->seq);
+
+  if (call->parameter_state == TRACE_PARAMETERS_INVOKE_UNAVAILABLE) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "Parameters unavailable for Invoke-only calls", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
+    return;
+  }
+
+  if (call->parameter_state == TRACE_PARAMETERS_INVALID) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "Parameters unavailable because the reflected layout is invalid", NK_TEXT_CENTERED, UI_C_RED);
+    return;
+  }
+
+  if (call->parameter_state == TRACE_PARAMETERS_MEMORY_LIMIT) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "Parameters unavailable because the snapshot memory limit was reached", NK_TEXT_CENTERED, UI_C_ORANGE);
+    return;
+  }
+
+  if (call->parameter_state != TRACE_PARAMETERS_AVAILABLE) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "Parameters unavailable", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
+    return;
+  }
+
+  bool has_parameters = call->first_input || call->first_output || call->first_return;
+  if (!has_parameters) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+    nk_label_colored(ctx, "No parameters", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
+    return;
+  }
+
+  ui_text_cell_t header_parts[] = {
+    UI_TEXT_CELL(ui_text_span_make(ctx, STR_LIT("TYPE")), UI_C_TEXT),
+    UI_TEXT_CELL(ui_text_span_make(ctx, STR_LIT("NAME")), UI_C_TEXT),
+    UI_TEXT_CELL(ui_text_span_make(ctx, STR_LIT("VALUE")), UI_C_TEXT),
+  };
+
+  ui_detail_row_t header = {
+    .parts        = header_parts,
+    .count        = COUNTOF(header_parts),
+    .has_children = false,
+    .selected     = false,
+    .depth        = 0,
+    .copy_text    = STR_NULL,
+  };
+  ui_detail_row(tool, &tool->ui.parameter_grid, header, NULL, NULL);
+
+  trace_draw_parameter_list(tool, "INPUTS", call->first_input);
+  trace_draw_parameter_list(tool, "OUTPUTS", call->first_output);
+  trace_draw_parameter_list(tool, "RETURN", call->first_return);
+
+  if (call->parameters_truncated) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label_colored(ctx, "Some parameter values were truncated by capture limits", NK_TEXT_LEFT, UI_C_ORANGE);
   }
 }
 
@@ -1025,6 +1320,48 @@ trace_draw_filter_dialog(trace_tool_t *tool, struct nk_context *ctx)
 }
 
 static void
+trace_save_parameter_snapshot(FILE *file, unreal_prop_snapshot_t *snapshot, const char *role, int depth)
+{
+  fprintf(file,
+          "    %-6s %*s%.*s %.*s = %.*s%s\n",
+          role,
+          depth * 2,
+          "",
+          STR_ARG(snapshot->type),
+          STR_ARG(snapshot->name),
+          STR_ARG(snapshot->value),
+          snapshot->truncated ? " [truncated]" : "");
+
+  for (unreal_prop_snapshot_t *child = snapshot->first_child; child; child = child->next) {
+    trace_save_parameter_snapshot(file, child, "", depth + 1);
+  }
+}
+
+static void
+trace_save_parameter_list(FILE *file, unreal_prop_snapshot_t *first, const char *role)
+{
+  for (unreal_prop_snapshot_t *snapshot = first; snapshot; snapshot = snapshot->next) {
+    trace_save_parameter_snapshot(file, snapshot, role, 0);
+  }
+}
+
+static void
+trace_save_parameters(FILE *file, trace_call_t *call)
+{
+  if (call->parameter_state == TRACE_PARAMETERS_INVOKE_UNAVAILABLE) {
+    fprintf(file, "    parameters unavailable for Invoke-only calls\n");
+  } else if (call->parameter_state == TRACE_PARAMETERS_INVALID) {
+    fprintf(file, "    parameters unavailable because the reflected layout is invalid\n");
+  } else if (call->parameter_state == TRACE_PARAMETERS_MEMORY_LIMIT) {
+    fprintf(file, "    parameters unavailable because the snapshot memory limit was reached\n");
+  } else if (call->parameter_state == TRACE_PARAMETERS_AVAILABLE) {
+    trace_save_parameter_list(file, call->first_input, "input");
+    trace_save_parameter_list(file, call->first_output, "output");
+    trace_save_parameter_list(file, call->first_return, "return");
+  }
+}
+
+static void
 trace_save(trace_tool_t *tool)
 {
   tmp_arena_t tmp = scratch_begin(NULL);
@@ -1095,6 +1432,8 @@ trace_save(trace_tool_t *tool)
                   max_cls_name_len,    STR_ARG(class_name),
                   max_obj_name_len,    STR_ARG(self_name),
                   STR_ARG(func_name));
+
+          trace_save_parameters(file, call);
         }
         scratch_end(tmp2);
       }
@@ -1205,7 +1544,7 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
     }
 
     uint32_t call_root_count = trace_call_root_count(tool);
-    uint32_t page_size       = (uint32_t)MAX_VAL(1, mod_cfg_get_int(&globals.mod_manager, tool->cfg.page_size_h));
+    uint32_t page_size       = (uint32_t)MAX_VAL(1, mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.page_size_h));
     uint32_t page_count      = trace_page_count(call_root_count, page_size);
     if (tool->ui.page_idx >= page_count) {
       tool->ui.page_idx = page_count - 1;
@@ -1230,9 +1569,27 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
       nk_layout_row_end(ctx);
     }
 
-    float results_h = nk_layout_get_remaining_height(ctx);
+    float gap_y          = ctx->style.window.spacing.y;
+    float splitter_h     = 8.0f;
+    float split_area_h   = nk_layout_get_remaining_height(ctx);
+    float panel_area_h   = split_area_h - splitter_h - 2.0f * gap_y;
+    float min_calls_h    = 140.0f;
+    float min_params_h   = 120.0f;
+    float results_h      = 0.0f;
+    float parameters_h   = 0.0f;
+
+    panel_area_h = NK_MAX(panel_area_h, min_calls_h + min_params_h);
+    results_h    = panel_area_h * tool->ui.parameter_splitter.ratio;
+    results_h    = NK_CLAMP(min_calls_h, results_h, panel_area_h - min_params_h);
+    parameters_h = panel_area_h - results_h;
+    if (panel_area_h > 0.0f) {
+      tool->ui.parameter_splitter.ratio = results_h / panel_area_h;
+    }
 
     nk_layout_row_dynamic(ctx, results_h, 1);
+    struct nk_rect split_track = nk_widget_bounds(ctx);
+    split_track.h              = panel_area_h;
+
     if (nk_group_begin(ctx, "ufunction_trace_calls", NK_WINDOW_BORDER)) {
       if (call_root_count > 0) {
         uint32_t first_idx = tool->ui.page_idx * page_size;
@@ -1242,14 +1599,14 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
         trace_call_t *last_call  = trace_call_root_at(tool, last_idx);
 
         ui_text_cell_t header_parts[] = {
-          UI_TEXT_CELL(tool->ui.seq, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.time, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.duration, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.depth, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.kind, UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.seq,        UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.time,       UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.duration,   UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.depth,      UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.kind,       UI_C_TEXT),
           UI_TEXT_CELL(tool->ui.class_name, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.self_name, UI_C_TEXT),
-          UI_TEXT_CELL(tool->ui.func_name, UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.self_name,  UI_C_TEXT),
+          UI_TEXT_CELL(tool->ui.func_name,  UI_C_TEXT),
         };
 
         ui_detail_row_t row = {
@@ -1257,14 +1614,32 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
           .count        = COUNTOF(header_parts),
           .depth        = 0,
           .has_children = false,
+          .selected     = false,
           .copy_text    = STR_NULL,
         };
-        ui_detail_row(tool, &tool->ui.call_grid, row, NULL);
+        ui_detail_row(tool, &tool->ui.call_grid, row, NULL, NULL);
 
         for (trace_call_t *call = first_call; call != NULL && call != last_call; call = call->next_sibling) {
           draw_detail_call(tool, call, 0);
         }
       }
+      nk_group_end(ctx);
+    }
+
+    nk_layout_row_dynamic(ctx, splitter_h, 1);
+    ui_nk_splitter_opts_t split_opts = {
+      .axis           = UI_NK_AXIS_Y,
+      .track          = split_track,
+      .gap_before     = gap_y,
+      .min_before     = min_calls_h,
+      .min_after      = min_params_h,
+      .line_thickness = 2.0f,
+    };
+    ui_splitter(ctx, &tool->ui.parameter_splitter, &split_opts);
+
+    nk_layout_row_dynamic(ctx, parameters_h, 1);
+    if (nk_group_begin(ctx, "ufunction_trace_parameters", NK_WINDOW_BORDER)) {
+      trace_draw_parameter_panel(tool);
       nk_group_end(ctx);
     }
   }
@@ -1279,19 +1654,17 @@ trace_draw_window(trace_tool_t *tool, unsigned int vw, unsigned int vh)
 }
 
 static bool MOD_CALL
-trace_init(const mod_host_api_t *host, mod_handle_t h)
+trace_init(mod_handle_t h)
 {
-  UNUSED_VAR(host);
-
   trace_tool_t *tool = &g_trace_tool;
   mem_zero(tool, sizeof(*tool));
 
-  tool->perm              = mod_arena_handle_resolve(mod_get_perm_arena(&globals.mod_manager, h));
+  tool->perm              = mod_get_perm_arena(&globals.mod_manager, h);
   tool->cfg.max_calls_h   = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_MAX_CALLS_ID));
   tool->cfg.open_window_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_OPEN_WINDOW_ID));
   tool->cfg.page_size_h   = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_PAGE_SIZE_ID));
 
-  tool->max_call_count = (uint32_t)MAX_VAL(1, mod_cfg_get_int(&globals.mod_manager, tool->cfg.max_calls_h));
+  tool->max_call_count = (uint32_t)MAX_VAL(1, mod_manager_cfg_get_int(&globals.mod_manager, tool->cfg.max_calls_h));
 
   tool->ui.capture_filter_input     = ARENA_PUSH_ARRAY_ZERO(tool->perm, char, TRACE_FILTER_TEXT_CAP);
   tool->ui.capture_filter_input_len = 0;
@@ -1322,6 +1695,9 @@ trace_init(const mod_host_api_t *host, mod_handle_t h)
   tool->ui.exact_match          = false;
   tool->ui.capture_nested_calls = false;
   tool->ui.page_idx             = 0;
+
+  tool->ui.parameter_splitter.ratio = 0.65f;
+
   tool->ui.seq                  = ui_text_span_make(globals.ui_manager.ctx, STR_LIT(TRACE_CALL_COL_SEQ));
   tool->ui.time                 = ui_text_span_make(globals.ui_manager.ctx, STR_LIT(TRACE_CALL_COL_TIME));
   tool->ui.duration             = ui_text_span_make(globals.ui_manager.ctx, STR_LIT(TRACE_CALL_COL_DURATION));
@@ -1379,7 +1755,7 @@ trace_input(mod_handle_t h, input_event_t *ev)
     return false;
   }
 
-  keybind_t toggle = mod_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
+  keybind_t toggle = mod_manager_cfg_get_keybind(&globals.mod_manager, tool->cfg.open_window_h);
   if (keybind_activated_by_event(toggle, ev)) {
     if (keybind_is_pressed(toggle)) {
       tool->ui.closed = !tool->ui.closed;
@@ -1394,7 +1770,6 @@ static bool MOD_CALL
 trace_process_event_pre(mod_handle_t h, uobject_t *self, ufunc_t *func, void *params)
 {
   UNUSED_VAR(h);
-  UNUSED_VAR(params);
 
   trace_tool_t *tool = &g_trace_tool;
   if (!tool->inited) {
@@ -1408,6 +1783,13 @@ trace_process_event_pre(mod_handle_t h, uobject_t *self, ufunc_t *func, void *pa
 
   frame->owns_logical_call = true;
   frame->call              = trace_logical_call_begin(tool, self, func, FLAG(TRACE_HOOK_PROCESS_EVENT));
+  if (frame->call) {
+    frame->call->parameter_state = TRACE_PARAMETERS_AVAILABLE;
+    trace_parameters_capture(tool, frame->call, params, true);
+    frame->call->start_us = time_now_us();
+    frame->call->end_us   = frame->call->start_us;
+  }
+
   return false;
 }
 
@@ -1442,13 +1824,18 @@ trace_ufunction_invoke_pre(mod_handle_t h, ufunc_t *func, uobject_t *self, ffram
   } else {
     frame->owns_logical_call = true;
     frame->call              = trace_logical_call_begin(tool, self, func, FLAG(TRACE_HOOK_INVOKE));
+    if (frame->call) {
+      frame->call->parameter_state = TRACE_PARAMETERS_INVOKE_UNAVAILABLE;
+      frame->call->start_us        = time_now_us();
+      frame->call->end_us          = frame->call->start_us;
+    }
   }
 
   return false;
 }
 
 static void
-trace_hook_post(trace_tool_t *tool, trace_hook_kind_t kind, uobject_t *self, ufunc_t *func, uint8_t consumed_source, bool consumed)
+trace_hook_post(trace_tool_t *tool, trace_hook_kind_t kind, uobject_t *self, ufunc_t *func, void *params, uint8_t consumed_source, bool consumed)
 {
   if (tool->dropped_frame_depth > 0) {
     tool->dropped_frame_depth -= 1;
@@ -1463,6 +1850,14 @@ trace_hook_post(trace_tool_t *tool, trace_hook_kind_t kind, uobject_t *self, ufu
   trace_frame_t *frame = trace_frame_pop(tool, kind, self, func);
 
   if (frame->owns_logical_call) {
+    if (frame->call) {
+      frame->call->end_us = time_now_us();
+
+      if (kind == TRACE_HOOK_PROCESS_EVENT) {
+        trace_parameters_capture(tool, frame->call, params, false);
+      }
+    }
+
     trace_logical_call_end(tool, frame->call);
   }
 
@@ -1481,9 +1876,8 @@ static void MOD_CALL
 trace_process_event_post(mod_handle_t h, uobject_t *self, ufunc_t *func, void *params, bool consumed)
 {
   UNUSED_VAR(h);
-  UNUSED_VAR(params);
 
-  trace_hook_post(&g_trace_tool, TRACE_HOOK_PROCESS_EVENT, self, func, FLAG(TRACE_HOOK_PROCESS_EVENT), consumed);
+  trace_hook_post(&g_trace_tool, TRACE_HOOK_PROCESS_EVENT, self, func, params, FLAG(TRACE_HOOK_PROCESS_EVENT), consumed);
 }
 
 static void MOD_CALL
@@ -1493,7 +1887,7 @@ trace_ufunction_invoke_post(mod_handle_t h, ufunc_t *func, uobject_t *self, ffra
   UNUSED_VAR(stack);
   UNUSED_VAR(result);
 
-  trace_hook_post(&g_trace_tool, TRACE_HOOK_INVOKE, self, func, FLAG(TRACE_HOOK_INVOKE), consumed);
+  trace_hook_post(&g_trace_tool, TRACE_HOOK_INVOKE, self, func, NULL, FLAG(TRACE_HOOK_INVOKE), consumed);
 }
 
 static void MOD_CALL

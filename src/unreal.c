@@ -17,7 +17,31 @@ STATIC_ASSERT(_Alignof(fcritical_section_t) == _Alignof(CRITICAL_SECTION), "crit
 
 TMAP_DEFINE_FUNCS(unreal_tmap_fname_uint8ptr, tmap_fname_uint8ptr_t, fname_t, uint8_t *, TMAP_FNAME_UINT8PTR_KEY_EQUAL, TMAP_FNAME_UINT8PTR_KEY_HASH)
 
+bool
+unreal_is_in_game_thread(void)
+{
+  return globals.game_thread_id != 0 && globals.game_thread_id == thread_current_id();
+}
+
 /* ===================================================== FNAME ====================================================== */
+
+fname_pool_t *
+unreal_get_name_pool(void)
+{
+  return globals.name_pool;
+}
+
+fuobject_array_t *
+unreal_get_object_array(void)
+{
+  return globals.uobjects;
+}
+
+uworld_t *
+unreal_get_current_world(void)
+{
+  return globals.gworld_ptr ? *globals.gworld_ptr : NULL;
+}
 
 static inline int
 u32_count_digits(uint32_t v)
@@ -153,17 +177,12 @@ fname_t
 unreal_fname_from_str(str_t s, efind_name_t find_type)
 {
   fname_t fname = {0};
-#if !defined BUILD_TEST_UI
   tmp_arena_t tmp = scratch_begin(NULL);
   {
     str16_t s16 = str16_from_str(tmp.arena, s);
     fname_construct(&fname, (const wchar_t *)s16.data, find_type);
   }
   scratch_end(tmp);
-#else
-  (void)s;
-  (void)find_type;
-#endif
   return fname;
 }
 
@@ -464,6 +483,22 @@ static uint32_t g_fcrc_table[256] = {
 };
 
 fstring_t
+unreal_fstring_view_from_str16(str16_t s)
+{
+  return (fstring_t){
+    .data = s.data,
+    .len  = (int32_t)s.len,
+    .max  = (int32_t)s.len,
+  };
+}
+
+str16_t
+unreal_fstring_view_to_str16(fstring_t fs)
+{
+  return str16_from_wstr_with_cap(fs.data, fs.len);
+}
+
+fstring_t
 unreal_fstring_from_str(str_t s, arena_t *arena)
 {
   str16_t s16 = str16_from_str(arena, s);
@@ -583,6 +618,12 @@ unreal_common_collect(unreal_common_t *common)
       common->data_asset = (uclass_t *)obj;
     } else if (str_equal(full_name, STR_LIT("/Script/Engine.DataTable"), 0)) {
       common->data_table = (uclass_t *)obj;
+    } else if (str_equal(full_name, STR_LIT("/Script/Engine.KismetSystemLibrary"), 0)) {
+      common->kismet_sys_lib_cls = (uclass_t *)obj;
+    } else if (str_equal(full_name, STR_LIT("/Script/Engine.Default__KismetSystemLibrary"), 0)) {
+      common->kismet_sys_lib_cdo = obj;
+    } else if (str_equal(full_name, STR_LIT("/Script/Engine.KismetSystemLibrary.ExecuteConsoleCommand"), 0)) {
+      common->exec_console_cmd = (ufunc_t *)obj;
     } else if (str_equal(full_name, STR_LIT("/Script/Engine.Default__GameplayStatics"), 0)) {
       common->gameplay_statics_cdo = obj;
     } else if (str_equal(full_name, STR_LIT("/Script/Engine.GameplayStatics.BeginDeferredActorSpawnFromClass"), 0)) {
@@ -591,6 +632,8 @@ unreal_common_collect(unreal_common_t *common)
       common->finish_spawn = (ufunc_t *)obj;
     } else if (str_equal(full_name, STR_LIT("/Script/Engine.Actor.K2_DestroyActor"), 0)) {
       common->destroy_actor = (ufunc_t *)obj;
+    } else if (str_equal(full_name, STR_LIT("/Engine/Transient"), 0)) {
+      common->transient_package = obj;
     }
     scratch_end(tmp);
   }
@@ -733,7 +776,6 @@ unreal_common_collect(unreal_common_t *common)
 fuobject_item_t *
 unreal_uobject_array_get_item(int idx)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
 
   fchunked_fixed_uobject_array_t *a = &globals.uobjects->obj_objs;
@@ -754,10 +796,6 @@ unreal_uobject_array_get_item(int idx)
   }
 
   return &chunk[within_idx];
-#else
-  (void)idx;
-  return false;
-#endif
 }
 
 bool
@@ -808,6 +846,53 @@ unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent)
     }
   }
   return false;
+}
+
+static bool
+unreal_uclass_find_interface(uclass_t *cls, uclass_t *interface_cls, bool native, int32_t *out_offset)
+{
+  bool valid = cls && interface_cls && (interface_cls->class_flags & CLASS_INTERFACE);
+  bool found = false;
+  for (uclass_t *current = cls; current && valid && !found; current = (uclass_t *)current->super_struct) {
+    tarray_fimplemented_interface_t *interfaces = &current->interfaces;
+    valid = interfaces->num >= 0 && interfaces->max >= interfaces->num && interfaces->num <= 4096;
+    if (valid) {
+      valid = interfaces->num == 0 || interfaces->data;
+    }
+
+    for (int32_t i = 0; i < interfaces->num && valid && !found; ++i) {
+      fimplemented_interface_t *entry = &interfaces->data[i];
+      bool matches = entry->cls && unreal_uclass_is_child_of(entry->cls, interface_cls);
+      if (matches && (!native || !entry->implemented_by_k2)) {
+        found = true;
+        if (out_offset) {
+          *out_offset = entry->pointer_offset;
+        }
+      }
+    }
+  }
+  return found;
+}
+
+bool
+unreal_uclass_implements_interface(uclass_t *cls, uclass_t *interface_cls)
+{
+  return unreal_uclass_find_interface(cls, interface_cls, false, NULL);
+}
+
+void *
+unreal_uobject_get_interface_address(uobject_t *obj, uclass_t *interface_cls)
+{
+  void   *result = NULL;
+  bool    native = interface_cls && (interface_cls->class_flags & CLASS_NATIVE);
+  int32_t offset = 0;
+  bool    found  = obj && unreal_uclass_find_interface(obj->cls, interface_cls, native, &offset);
+  if (found && native) {
+    result = (uint8_t *)obj + offset;
+  } else if (found) {
+    result = obj;
+  }
+  return result;
 }
 
 bool
@@ -959,102 +1044,114 @@ unreal_uobject_push_full_name(uobject_t *obj, arena_t *arena)
   return result;
 }
 
+str_t
+unreal_uobject_push_ue_path_name(uobject_t *obj, arena_t *arena)
+{
+  str_t result = STR_NULL;
+  if (obj) {
+    uint64_t len = unreal_uobject_get_full_name_len(obj);
+    if (len > 0) {
+      uint8_t *buf = ARENA_PUSH_ARRAY(arena, uint8_t, len + 1);
+      if (buf) {
+        tmp_arena_t tmp = scratch_begin(arena);
+        {
+          uint64_t depth = 0;
+          for (uobject_t *cur = obj; cur; cur = cur->outer) {
+            depth += 1;
+          }
+
+          uobject_t **chain = ARENA_PUSH_ARRAY(tmp.arena, uobject_t *, depth);
+          uint64_t    i     = depth;
+          for (uobject_t *cur = obj; cur; cur = cur->outer) {
+            chain[--i] = cur;
+          }
+
+          uint64_t written = 0;
+          for (i = 0; i < depth; ++i) {
+            if (i > 0) {
+              uobject_t *outer = chain[i - 1];
+              bool first_subobject = globals.unreal.core_package && outer->cls != globals.unreal.core_package &&
+                                     outer->outer && outer->outer->cls == globals.unreal.core_package;
+              buf[written++] = first_subobject ? ':' : '.';
+            }
+
+            written += unreal_fname_utf8_write(buf + written, len - written, chain[i]->name);
+          }
+          MASSERT(written == len, "UE path-name length mismatch");
+        }
+        scratch_end(tmp);
+
+        buf[len] = '\0';
+        result   = str_make(buf, len);
+      }
+    }
+  }
+  return result;
+}
+
 int
 unreal_uobject_array_count(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_objs.num_elems;
-#else
-  return 0;
-#endif
 }
 
 int
 unreal_uobject_array_capacity(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_objs.max_elems;
-#else
-  return 0;
-#endif
 }
 
 int
 unreal_uobject_array_num_chunks(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_objs.num_chunks;
-#else
-  return 0;
-#endif
 }
 
 int
 unreal_uobject_array_max_chunks(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_objs.max_chunks;
-#else
-  return 0;
-#endif
 }
 
 int
 unreal_uobject_array_first_gc_index(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_first_cg_idx;
-#else
-  return 0;
-#endif
 }
 
 int
 unreal_uobject_array_last_non_gc_index(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->obj_last_non_cg_idx;
-#else
-  return 0;
-#endif
 }
 
 bool
 unreal_uobject_array_is_open_for_disregard_for_gc(void)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   return globals.uobjects->open_for_disregard_for_gc;
-#else
-  return 0;
-#endif
 }
 
 static void
 add_uobject_create_listener(fuobject_listener_t *listener)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   int32_t idx = globals.uobjects->create_listeners.num++;
   if (globals.uobjects->create_listeners.num > globals.uobjects->create_listeners.max) {
     tarray_grow((void *)&globals.uobjects->create_listeners);
   }
   globals.uobjects->create_listeners.data[idx] = listener;
-#else
-  (void)listener;
-#endif
 }
 
 static void
 remove_uobject_create_listener(fuobject_listener_t *listener)
 {
-#if !defined BUILD_TEST_UI
   MASSERT(globals.uobjects != NULL, "uobject array is missing");
   tarray_fuobject_listener_t *arr = &globals.uobjects->create_listeners;
   int32_t                     num = arr->num;
@@ -1074,15 +1171,11 @@ remove_uobject_create_listener(fuobject_listener_t *listener)
     arr->num = num - 1;
     tarray_shrink((void *)arr);
   }
-#else
-  (void)listener;
-#endif
 }
 
 static void
 remove_uobject_delete_listener(fuobject_listener_t *listener)
 {
-#if !defined BUILD_TEST_UI
   EnterCriticalSection((LPCRITICAL_SECTION)&globals.uobjects->delete_listeners_critical);
 
   tarray_fuobject_listener_t *arr = &globals.uobjects->delete_listeners;
@@ -1105,9 +1198,6 @@ remove_uobject_delete_listener(fuobject_listener_t *listener)
   }
 
   LeaveCriticalSection((LPCRITICAL_SECTION)&globals.uobjects->delete_listeners_critical);
-#else
-  (void)listener;
-#endif
 }
 
 void
@@ -1194,14 +1284,12 @@ unreal_uobject_listener_add(uobject_listener_t *listener)
   ASSERT(listener != NULL);
 
   if (!listener->occupied) {
-#if !defined BUILD_TEST_UI
     if (listener->kind == UOBJECT_LISTENER_KIND_CREATE) {
       add_uobject_create_listener((fuobject_listener_t *)listener);
     } else if (listener->kind == UOBJECT_LISTENER_KIND_DELETE) {
       ASSERT(add_uobject_delete_listener != NULL);
       add_uobject_delete_listener(globals.uobjects, (fuobject_listener_t *)listener);
     }
-#endif
     listener->occupied = true;
   }
 }
@@ -1370,241 +1458,312 @@ unreal_uobject_find_by_full_name(uclass_t *cls, str_t full_name)
   return NULL;
 }
 
+static bool
+unreal_uobject_path_matches(uobject_t *obj, str_t path_name)
+{
+  if (!obj || str_is_empty(path_name)) {
+    return false;
+  }
+
+  uint64_t end = path_name.len;
+  for (uobject_t *current = obj; current; current = current->outer) {
+    uint64_t start = end;
+    while (start > 0 && path_name.data[start - 1] != '.' && path_name.data[start - 1] != ':') {
+      start -= 1;
+    }
+
+    str_t component = str_make(path_name.data + start, end - start);
+    if (str_is_empty(component) || !unreal_fname_match_text(current->name, component, false, true)) {
+      return false;
+    }
+
+    if (start == 0) {
+      return current->outer == NULL;
+    }
+
+    end = start - 1;
+  }
+  return false;
+}
+
+uobject_t *
+unreal_uobject_find_by_path_name(uclass_t *cls, str_t path_name)
+{
+  for (int i = 0, count = unreal_uobject_array_count(); i < count; ++i) {
+    uobject_t *obj = unreal_uobject_array_get_obj(i);
+    if (obj && (!cls || unreal_uobject_is_a(obj, cls)) && unreal_uobject_path_matches(obj, path_name)) {
+      return obj;
+    }
+  }
+  return NULL;
+}
+
+static fuobject_item_t *
+unreal_uobject_get_live_item(uobject_t *obj)
+{
+  if (!obj) {
+    return NULL;
+  }
+
+  fuobject_item_t *item = unreal_uobject_array_get_item(obj->internal_idx);
+  return item && unreal_uobject_array_item_is_valid(item) && item->obj == obj ? item : NULL;
+}
+
+uint32_t
+unreal_uobject_get_internal_flags(uobject_t *obj)
+{
+  fuobject_item_t *item = unreal_uobject_get_live_item(obj);
+  return item ? (uint32_t)item->flags : 0;
+}
+
+bool
+unreal_uobject_is_rooted(uobject_t *obj)
+{
+  fuobject_item_t *item = unreal_uobject_get_live_item(obj);
+  return item && (((uint32_t)item->flags & IOF_ROOT_SET) != 0);
+}
+
+bool
+unreal_uobject_add_to_root(uobject_t *obj)
+{
+  fuobject_item_t *item = unreal_uobject_get_live_item(obj);
+  if (!item) {
+    return false;
+  }
+
+  InterlockedOr((volatile LONG *)&item->flags, (LONG)IOF_ROOT_SET);
+  return true;
+}
+
+bool
+unreal_uobject_remove_from_root(uobject_t *obj)
+{
+  fuobject_item_t *item = unreal_uobject_get_live_item(obj);
+  if (!item) {
+    return false;
+  }
+
+  InterlockedAnd((volatile LONG *)&item->flags, (LONG)~IOF_ROOT_SET);
+  return true;
+}
+
 void
 unreal_process_event(uobject_t *self, ufunc_t *func, void *params)
 {
-#if !defined BUILD_TEST_UI
   if (self && func) {
     process_event_real(self, func, params);
   }
-#else
-  (void)self;
-  (void)func;
-  (void)params;
-#endif
 }
 
 void
 unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params)
 {
-#if !defined BUILD_TEST_UI
   if (self && self->vtable && self->vtable->process_event && func) {
     self->vtable->process_event(self, func, params);
   }
-#else
-  (void)self;
-  (void)func;
-  (void)params;
-#endif
 }
 
-static inline str_t
-unreal_fprop_class_push_type_name(arena_t *arena, str_t prefix, uclass_t *cls)
+typedef struct unreal_console_output_s unreal_console_output_t;
+struct unreal_console_output_s {
+  foutput_device_t           base;
+  unreal_console_output_fn_t callback;
+  void                      *user;
+};
+
+static void __fastcall
+unreal_console_output_destruct(foutput_device_t *base)
 {
-  str_t cls_name = cls ? unreal_uobject_push_name((uobject_t *)cls, arena) : STR_LIT("<unknown>");
-  return str_push_fmt(arena, "%.*s<%.*s>", STR_ARG(prefix), STR_ARG(cls_name));
+  (void)base;
 }
 
-bool
-unreal_fprop_class_is(fprop_t *prop, fname_t name)
+static void
+unreal_console_output_emit(foutput_device_t *base, const wchar_t *text, elog_verbosity_type_t verbosity)
 {
-  if (prop && prop->cls) {
-    return unreal_fname_equal(prop->cls->name, name, false);
+  unreal_console_output_t *output = (unreal_console_output_t *)base;
+  if (!output->callback || !text) {
+    return;
   }
+
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    str16_t text16 = str16_from_wstr_with_cap(text, 16384);
+    str_t   text8  = str_from_str16(tmp.arena, text16);
+
+    output->callback(output->user, text8, verbosity);
+  }
+  scratch_end(tmp);
+}
+
+static void __fastcall
+unreal_console_output_serialize_time(foutput_device_t *base, const wchar_t *text, elog_verbosity_type_t verbosity, const fname_t *category, const double time)
+{
+  (void)category;
+  (void)time;
+  unreal_console_output_emit(base, text, verbosity);
+}
+
+static void __fastcall
+unreal_console_output_serialize(foutput_device_t *base, const wchar_t *text, elog_verbosity_type_t verbosity, const fname_t *category)
+{
+  (void)category;
+  unreal_console_output_emit(base, text, verbosity);
+}
+
+static void __fastcall
+unreal_console_output_noop(foutput_device_t *base)
+{
+  (void)base;
+}
+
+static void __fastcall
+unreal_console_output_dump(foutput_device_t *base, void *archive)
+{
+  (void)base;
+  (void)archive;
+}
+
+static bool __fastcall
+unreal_console_output_true(foutput_device_t *base)
+{
+  (void)base;
+  return true;
+}
+
+static bool __fastcall
+unreal_console_output_false(foutput_device_t *base)
+{
+  (void)base;
   return false;
 }
 
-str_t
-unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena)
+static foutput_device_vtable_t g_unreal_console_output_vtable = {
+  .destructor                      = unreal_console_output_destruct,
+  .serialize_time                  = unreal_console_output_serialize_time,
+  .serialize                       = unreal_console_output_serialize,
+  .flush                           = unreal_console_output_noop,
+  .tear_down                       = unreal_console_output_noop,
+  .dump                            = unreal_console_output_dump,
+  .is_memory_only                  = unreal_console_output_true,
+  .can_be_used_on_any_thread       = unreal_console_output_false,
+  .can_be_used_on_multiple_threads = unreal_console_output_false,
+};
+
+static uobject_t *
+unreal_find_local_player(uworld_t *world)
 {
-  if (!prop || !prop->cls || !arena) {
-    return STR_LIT("<null>");
-  }
+  uobject_t *fallback = NULL;
+  for (int i = 0; i < unreal_uobject_array_count(); ++i) {
+    uobject_t *object = unreal_uobject_array_get_obj(i);
+    if (!object) {
+      continue;
+    }
 
-  struct {
-    str_t   name;
-    fname_t fname;
-  } simple_prop_names[] = {
-    {STR_CLIT("bool"),     globals.unreal.bool_prop  },
-    {STR_CLIT("uint8_t"),  globals.unreal.byte_prop  },
-    {STR_CLIT("int8_t"),   globals.unreal.int8_prop  },
-    {STR_CLIT("int16_t"),  globals.unreal.int16_prop },
-    {STR_CLIT("int32_t"),  globals.unreal.int_prop   },
-    {STR_CLIT("int32_t"),  globals.unreal.int32_prop },
-    {STR_CLIT("int64_t"),  globals.unreal.int64_prop },
-    {STR_CLIT("uint16_t"), globals.unreal.uint16_prop},
-    {STR_CLIT("uint32_t"), globals.unreal.uint32_prop},
-    {STR_CLIT("uint64_t"), globals.unreal.uint64_prop},
-    {STR_CLIT("float"),    globals.unreal.float_prop },
-    {STR_CLIT("double"),   globals.unreal.double_prop},
-    {STR_CLIT("FName"),    globals.unreal.name_prop  },
-    {STR_CLIT("FString"),  globals.unreal.str_prop   },
-    {STR_CLIT("FText"),    globals.unreal.text_prop  },
-  };
+    bool is_local_player = unreal_uobject_is_a(object, globals.unreal.local_player);
+    if (!is_local_player || unreal_uobject_is_default(object)) {
+      continue;
+    }
 
-  for (int i = 0; i < COUNTOF(simple_prop_names); ++i) {
-    str_t   type_name  = simple_prop_names[i].name;
-    fname_t type_fname = simple_prop_names[i].fname;
+    if (!fallback) {
+      fallback = object;
+    }
 
-    if (unreal_fprop_class_is(prop, type_fname)) {
-      return type_name; // ok, because it's string literal
+    if (!world || !object->vtable || !object->vtable->get_world) {
+      continue;
+    }
+
+    if (object->vtable->get_world(object) == world) {
+      return object;
     }
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("Object"), p->prop_class);
+  return fallback;
+}
+
+static bool
+unreal_address_is_executable(void *address)
+{
+  MEMORY_BASIC_INFORMATION info = {0};
+  if (!address || !VirtualQuery(address, &info, sizeof(info))) {
+    return false;
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    fprop_class_t *p = (fprop_class_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("Class"), p->meta_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("SoftObject"), p->prop_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("SoftClass"), p->meta_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("WeakObject"), p->prop_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("LazyObject"), p->prop_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
-    fprop_iface_t *p = (fprop_iface_t *)prop;
-    return unreal_fprop_class_push_type_name(arena, STR_LIT("Interface"), p->iface_class);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *p = (fprop_struct_t *)prop;
-
-    if (!p->script_struct) {
-      return STR_LIT("<unknown struct>");
+  DWORD protect = info.Protect & 0xff;
+  switch (protect) {
+    case PAGE_EXECUTE:
+    case PAGE_EXECUTE_READ:
+    case PAGE_EXECUTE_READWRITE:
+    case PAGE_EXECUTE_WRITECOPY: {
+      return true;
     }
 
-    return unreal_uobject_push_name((uobject_t *)p->script_struct, arena);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-    fprop_enum_t *p         = (fprop_enum_t *)prop;
-    str_t         enum_name = p->uenum ? unreal_uobject_push_name((uobject_t *)p->uenum, arena) : STR_LIT("<unknown>");
-
-    if (p->underlying_prop) {
-      str_t underlying_type_name = unreal_fprop_push_type_name(&p->underlying_prop->base, arena);
-      return str_push_fmt(arena, "Enum<%.*s:%.*s>", STR_ARG(enum_name), STR_ARG(underlying_type_name));
+    default: {
+      return false;
     }
-    return str_push_fmt(arena, "Enum<%.*s>", STR_ARG(enum_name));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
-    fprop_array_t *p               = (fprop_array_t *)prop;
-    str_t          inner_type_name = unreal_fprop_push_type_name(p->inner, arena);
-    return str_push_fmt(arena, "TArray<%.*s>", STR_ARG(inner_type_name));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
-    fprop_set_t *p              = (fprop_set_t *)prop;
-    str_t        elem_type_name = unreal_fprop_push_type_name(p->elem_prop, arena);
-    return str_push_fmt(arena, "TSet<%.*s>", STR_ARG(elem_type_name));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
-    fprop_map_t *p               = (fprop_map_t *)prop;
-    str_t        key_type_name   = unreal_fprop_push_type_name(p->key_prop, arena);
-    str_t        value_type_name = unreal_fprop_push_type_name(p->val_prop, arena);
-    return str_push_fmt(arena, "TMap<%.*s, %.*s>", STR_ARG(key_type_name), STR_ARG(value_type_name));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
-    fprop_delegate_t *p   = (fprop_delegate_t *)prop;
-    str_t             sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "Delegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastInlineDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
-    fprop_mcast_delegate_t *p   = (fprop_mcast_delegate_t *)prop;
-    str_t                   sig = p->signature_func ? unreal_uobject_push_name((uobject_t *)p->signature_func, arena) : STR_LIT("<unknown>");
-    return str_push_fmt(arena, "MulticastSparseDelegate<%.*s>", STR_ARG(sig));
-  }
-
-  return unreal_fname_to_str(prop->cls->name, arena);
-
-}
-
-void
-unreal_fprop_initialize_in_container(fprop_t *prop, void *container)
-{
-  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0) {
-    return;
-  }
-
-  uint8_t *value = (uint8_t *)container + prop->offset_internal;
-  if (prop->prop_flags & CPF_ZERO_CONSTRUCTOR) {
-    mem_zero(value, (uint64_t)prop->elem_size * (uint64_t)prop->array_dim);
-    return;
-  }
-
-  if (!prop->vtable || !prop->vtable->initialize_value_internal) {
-    return;
-  }
-
-  for (int32_t i = 0; i < prop->array_dim; ++i) {
-    prop->vtable->initialize_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
   }
 }
 
-void
-unreal_fprop_destroy_in_container(fprop_t *prop, void *container)
+bool
+unreal_execute_console_command(str_t command, unreal_console_output_fn_t callback, void *user)
 {
-  if (!prop || !container || prop->elem_size <= 0 || prop->array_dim <= 0 || (prop->prop_flags & CPF_NO_DESTRUCTOR)) {
-    return;
+  if (str_is_empty(command)) {
+    return false;
   }
 
-  if (!prop->vtable || !prop->vtable->destroy_value_internal) {
-    return;
+  uworld_t  *world        = unreal_get_current_world();
+  uobject_t *local_player = unreal_find_local_player(world);
+  if (local_player) {
+    fexec_t *exec = (fexec_t *)((uint8_t *)local_player + sizeof(uobject_t));
+    if (exec->vtable && unreal_address_is_executable((void *)exec->vtable->exec)) {
+      tmp_arena_t tmp = scratch_begin(NULL);
+      {
+        fstring_t               cmd    = unreal_fstring_from_str(command, tmp.arena);
+        unreal_console_output_t output = {
+          .base = {
+            .vftable                   = &g_unreal_console_output_vtable,
+            .auto_emit_line_terminator = true,
+          },
+          .callback = callback,
+          .user     = user,
+        };
+
+        bool handled = exec->vtable->exec(exec, world, (const wchar_t *)cmd.data, &output.base);
+        if (!handled) {
+          unreal_console_output_emit(&output.base, L"Command not recognized", ELVT_WARNING);
+        }
+      }
+      scratch_end(tmp);
+      return true;
+    }
   }
 
-  uint8_t *value = (uint8_t *)container + prop->offset_internal;
-  for (int32_t i = 0; i < prop->array_dim; ++i) {
-    prop->vtable->destroy_value_internal(prop, value + (uint64_t)i * (uint64_t)prop->elem_size);
+  uobject_t *cdo  = globals.unreal.kismet_sys_lib_cdo;
+  ufunc_t   *func = globals.unreal.exec_console_cmd;
+  if (!cdo || !func) {
+    return false;
   }
-}
 
-const wchar_t *
-unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner)
-{
-  if (!prop || !prop->vtable || !prop->vtable->import_text_internal || !text || !value) {
-    return NULL;
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    execute_console_cmd_params_t params = {
+      .world_ctx_obj = (uobject_t *)world,
+      .cmd           = unreal_fstring_from_str(command, tmp.arena),
+    };
+    unreal_process_event_observed(cdo, func, &params);
   }
-  return prop->vtable->import_text_internal(prop, text, value, 0, owner, NULL);
+  scratch_end(tmp);
+  return true;
 }
 
 uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls)
 {
+  bool valid_class = cls && globals.unreal.actor && unreal_uclass_is_child_of(cls, globals.unreal.actor);
+  bool ready       = world_ctx_obj && valid_class && !(cls->class_flags & CLASS_ABSTRACT);
+  ready            = ready && globals.unreal.gameplay_statics_cdo && globals.unreal.begin_spawn && globals.unreal.finish_spawn;
+  if (!ready) {
+    return NULL;
+  }
+
   uobject_t  *result = NULL;
   tmp_arena_t tmp    = scratch_begin(NULL);
   {
@@ -1627,22 +1786,14 @@ unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls)
         .collision_handling_override = 3,
       };
 
-      uobject_t *gameplay_statics_cdo = globals.unreal.gameplay_statics_cdo;
-      ufunc_t   *begin_spawn          = globals.unreal.begin_spawn;
-      ufunc_t   *finish_spawn         = globals.unreal.finish_spawn;
-
-      MASSERT(gameplay_statics_cdo != NULL, "missing /Script/Engine.Default__GameplayStatics");
-      MASSERT(begin_spawn != NULL, "missing /Script/Engine.GameplayStatics.BeginDeferredActorSpawnFromClass");
-      MASSERT(finish_spawn != NULL, "missing /Script/Engine.GameplayStatics.FinishSpawningActor");
-
-      unreal_process_event(gameplay_statics_cdo, begin_spawn, p1);
+      unreal_process_event(globals.unreal.gameplay_statics_cdo, globals.unreal.begin_spawn, p1);
       if (p1->return_value) {
         *p2 = (finish_actor_spawn_params_t){
           .actor           = p1->return_value,
-            .spawn_transform = xf,
+          .spawn_transform = xf,
         };
 
-        unreal_process_event(gameplay_statics_cdo, finish_spawn, p2);
+        unreal_process_event(globals.unreal.gameplay_statics_cdo, globals.unreal.finish_spawn, p2);
         if (p2->return_value) {
           result = (uobject_t *)p2->return_value;
         }
@@ -1657,7 +1808,7 @@ void
 unreal_despawn_actor(uobject_t *actor)
 {
   ufunc_t *destroy_actor = globals.unreal.destroy_actor;
-  if (actor) {
+  if (actor && destroy_actor && globals.unreal.actor && unreal_uobject_is_a(actor, globals.unreal.actor)) {
     unreal_process_event(actor, destroy_actor, NULL);
   }
 }
@@ -1669,6 +1820,34 @@ unreal_static_construct_object(fstatic_construct_obj_params_t *params)
     return NULL;
   }
   return static_construct_object(params);
+}
+
+uobject_t *
+unreal_get_transient_package(void)
+{
+  return globals.unreal.transient_package;
+}
+
+uobject_t *
+unreal_construct_object(uclass_t *cls, uobject_t *outer)
+{
+  if (!cls || !outer || (cls->class_flags & CLASS_ABSTRACT)) {
+    return NULL;
+  }
+
+  if (globals.unreal.actor && unreal_uclass_is_child_of(cls, globals.unreal.actor)) {
+    return NULL;
+  }
+
+  if (cls->class_within && !unreal_uobject_is_a(outer, cls->class_within)) {
+    return NULL;
+  }
+
+  fstatic_construct_obj_params_t params = {
+    .cls   = cls,
+    .outer = outer,
+  };
+  return unreal_static_construct_object(&params);
 }
 
 uobject_t *
@@ -1684,18 +1863,7 @@ unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t
     const wchar_t *namew     = str16_is_empty(name16)     ? NULL : name16.data;
     const wchar_t *filenamew = str16_is_empty(filename16) ? NULL : filename16.data;
 
-#if !defined BUILD_TEST_UI
     result = static_load_object(obj_cls, outer, namew, filenamew, load_flags, sandbox, allow_obj_reconcile, instancing_ctx);
-#else
-    (void)filenamew;
-    (void)namew;
-    (void)obj_cls;
-    (void)outer;
-    (void)load_flags;
-    (void)sandbox;
-    (void)allow_obj_reconcile;
-    (void)instancing_ctx;
-#endif
   }
   scratch_end(tmp);
   return result;
@@ -1714,16 +1882,7 @@ unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t
     const wchar_t *namew     = str16_is_empty(name16) ? NULL : name16.data;
     const wchar_t *filenamew = str16_is_empty(filename16) ? NULL : filename16.data;
 
-#if !defined BUILD_TEST_UI
     result = static_load_class(base_cls, outer, namew, filenamew, load_flags);
-#else
-    (void)filenamew;
-    (void)namew;
-    (void)base_cls;
-    (void)outer;
-    (void)load_flags;
-#endif
-
   }
   scratch_end(tmp);
   return result;
@@ -1800,7 +1959,6 @@ unreal_mount_pak(str_t file_path, int order)
 
       str16_t mount_file_path16 = str16_from_str(tmp.arena, mount_file_path);
       if (!str16_is_empty(mount_file_path16)) {
-#if !defined BUILD_TEST_UI
         if (pak_only) {
           unreal_pak_only_mount_push();
         }
@@ -1808,10 +1966,6 @@ unreal_mount_pak(str_t file_path, int order)
         if (pak_only) {
           unreal_pak_only_mount_pop();
         }
-#else
-        (void)order;
-        (void)pak_only;
-#endif
       }
     }
   }
@@ -1863,14 +2017,7 @@ unreal_mount_iostore(str_t file_path, int order)
         faes_key_t    enc_key       = {0};
         fio_status_t *result_status = NULL;
 
-#if !defined BUILD_TEST_UI
         result_status = io_dispatcher_mount(globals.io_dispatcher, &status, &env, &enc_guid, &enc_key);
-#else
-        (void)env;
-        (void)status;
-        (void)enc_guid;
-        (void)enc_key;
-#endif
         result = (result_status && result_status->err_code == IO_ERROR_OK);
       }
     }
@@ -1882,14 +2029,8 @@ unreal_mount_iostore(str_t file_path, int order)
 fnative_func_ptr_t
 unreal_get_native(uint8_t opcode)
 {
-  fnative_func_ptr_t func = NULL;
-#if !defined BUILD_TEST_UI
   ASSERT(globals.natives != NULL);
-  func = globals.natives[opcode];
-#else
-  (void)opcode;
-#endif
-  return func;
+  return globals.natives[opcode];
 }
 
 bool
@@ -1909,17 +2050,6 @@ unreal_fframe_step(fframe_t *stack, void *result)
 }
 
 /* ================================================ CLASS INTROSPECTION ============================================= */
-fprop_t *
-unreal_ustruct_find_prop(ustruct_t *s, str_t name)
-{
-  for (fprop_t *p = s->prop_link; p; p = p->prop_link_next) {
-    if (unreal_fname_match_text(p->name, name, false, true)) {
-      return p;
-    }
-  }
-
-  return NULL;
-}
 
 ufunc_t *
 unreal_ustruct_find_func(ustruct_t *s, str_t name)
@@ -1952,14 +2082,9 @@ unreal_ustruct_find_func_fname(ustruct_t *s, fname_t name, bool ignore_num)
 void *
 unreal_get_mcast_sparse_delegate(uobject_t *delegate_owner, fname_t delegate_name)
 {
-#if !defined BUILD_TEST_UI
   if (get_mcast_sparse_delegate) {
     return get_mcast_sparse_delegate(delegate_owner, delegate_name);
   }
-#else
-  (void)delegate_owner;
-  (void)delegate_name;
-#endif
   return NULL;
 }
 
@@ -2047,64 +2172,6 @@ unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_ha
   return data[key_hash & (uint32_t)(hash_size - 1)];
 }
 
-void
-unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val)
-{
-  if (!map || !prop || !prop->key_prop || !prop->val_prop || !key || !val || !fscript_map_add_pair) {
-    return;
-  }
-
-  fscript_map_helper_t helper = {
-    .key_prop = prop->key_prop,
-    .val_prop = prop->val_prop,
-    .map      = map,
-    .layout   = prop->map_layout,
-    .flags    = prop->map_flags,
-  };
-
-  fscript_map_add_ctx_t ctx = {
-    .helper   = &helper,
-    .key      = key,
-    .value    = val,
-    .key_prop = prop->key_prop,
-    .val_prop = prop->val_prop,
-  };
-
-  fscript_map_add_pair(&helper, &ctx);
-}
-
-bool
-unreal_map_remove(void *map, fprop_map_t *prop, const void *key)
-{
-  if (!map || !prop || !prop->key_prop || !key || !fscript_map_remove_pair) {
-    return false;
-  }
-
-  fscript_map_helper_t helper = {
-    .key_prop = prop->key_prop,
-    .val_prop = prop->val_prop,
-    .map      = map,
-    .layout   = prop->map_layout,
-    .flags    = prop->map_flags,
-  };
-
-  fscript_map_remove_ctx_t ctx = {
-    .helper   = &helper,
-    .key      = key,
-    .key_prop = prop->key_prop,
-  };
-
-  return fscript_map_remove_pair(&helper, &ctx);
-}
-
-bool
-unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val)
-{
-  if (!map || !prop || !key || !out_val || !generic_map_find) {
-    return false;
-  }
-  return generic_map_find(map, prop, key, out_val);
-}
 
 /* =================================================== DATA TABLE =================================================== */
 
@@ -2151,6 +2218,28 @@ unreal_udata_table_find_row(udata_table_t *table, fname_t row_name)
 }
 
 /* ================================================= GAMEPLAY TAGS ================================================== */
+
+bool
+unreal_add_gameplay_tag(fname_t tag_name)
+{
+  if (unreal_fname_is_none(tag_name) || globals.num_custom_tags >= CONFIG_MAX_CUSTOM_GAMEPLAY_TAGS) {
+    return false;
+  }
+
+  globals.custom_tags[globals.num_custom_tags++].tag_name = tag_name;
+  return true;
+}
+
+bool
+unreal_check_gameplay_tag_exists(fname_t tag_name)
+{
+  if (unreal_fname_is_none(tag_name)) {
+    return false;
+  }
+
+  fgameplay_tag_t tag = unreal_gameplay_tags_manager_request_tag(tag_name);
+  return !unreal_fname_is_none(tag.tag_name);
+}
 
 bool
 unreal_gameplay_tags_manager_add(fname_t tag_name)

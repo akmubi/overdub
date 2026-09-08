@@ -64,6 +64,23 @@ log_emit(log_level_t level, log_sink_flags_t sinks, const char *fmt, ...) ATTR_F
 void
 log_emitv(log_level_t level, log_sink_flags_t sinks, const char *fmt, va_list ap);
 
+typedef struct log_message_s log_message_t;
+struct log_message_s {
+  log_level_t level;
+  uint64_t    timestamp;
+  uint64_t    frame;
+  str_t       text;
+};
+
+void
+log_ui_enqueue(log_level_t level, str_t text);
+void
+log_ui_on_frame_begin(uint64_t frame_counter);
+
+typedef struct ui_console_s ui_console_t;
+
+bool
+log_ui_flush(ui_console_t *console);
 void
 log_flush(void);
 void

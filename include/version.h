@@ -3,12 +3,21 @@
 
 #include "types.h"
 
-#define MAKE_VERSION(MAJOR, MINOR, PATCH) \
-  { \
-    .major = MAJOR, \
-    .minor = MINOR, \
-    .patch = PATCH, \
-  }
+#ifdef __cplusplus
+#  define MAKE_VERSION(MAJOR, MINOR, PATCH) \
+    version_t{                              \
+      .major = MAJOR,                       \
+      .minor = MINOR,                       \
+      .patch = PATCH,                       \
+    }
+#else
+#  define MAKE_VERSION(MAJOR, MINOR, PATCH) \
+    {                                       \
+      .major = MAJOR,                       \
+      .minor = MINOR,                       \
+      .patch = PATCH,                       \
+    }
+#endif
 
 #define VERSION_ARG(V) (V).major, (V).minor, (V).patch
 

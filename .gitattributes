@@ -1,0 +1,13 @@
+*         text=auto eol=lf
+*.c       text      eol=lf
+*.h       text      eol=lf
+Makefile  text      eol=lf
+*.bat     text      eol=crlf
+*.png    -text
+*.jpg    -text
+*.jpeg   -text
+*.gif    -text
+*.pdf    -text
+*.zip    -text
+*.exe    -text
+*.dll    -text

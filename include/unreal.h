@@ -5,7 +5,13 @@
 #include "str.h"
 #include "types.h"
 
-#define FNAME_NONE (fname_t){0}
+MOD_EXTERN_C_BEGIN
+
+#ifdef __cplusplus
+#  define FNAME_NONE fname_t{}
+#else
+#  define FNAME_NONE (fname_t){0}
+#endif
 
 #define FNAME_MAX_BLOCK_BITS    13
 #define FNAME_BLOCK_OFFSET_BITS 16
@@ -21,6 +27,8 @@
 #define FIO_STATUS_ERR_MSG_LEN 128
 
 #define UOBJECT_ARRAY_NUM_ELEMS_PER_CHUNK (64 * 1024)
+
+typedef uint32_t efunc_flags_t;
 
 #define FUNC_FLAG_NONE                     0x00000000
 #define FUNC_FLAG_FINAL                    0x00000001
@@ -164,6 +172,58 @@ enum {
   RF_DYNAMIC                        = 0X04000000,
   RF_WILL_BE_LOADED                 = 0X08000000,
   RF_HAS_EXTERNAL_PACKAGE           = 0X10000000,
+};
+
+typedef uint32_t eclass_flags_t;
+enum {
+  CLASS_NONE                         = 0x00000000u,
+  CLASS_ABSTRACT                     = 0x00000001u,
+  CLASS_DEFAULT_CONFIG               = 0x00000002u,
+  CLASS_CONFIG                       = 0x00000004u,
+  CLASS_TRANSIENT                    = 0x00000008u,
+  CLASS_PARSED                       = 0x00000010u,
+  CLASS_MATCHED_SERIALIZERS          = 0x00000020u,
+  CLASS_PROJECT_USER_CONFIG          = 0x00000040u,
+  CLASS_NATIVE                       = 0x00000080u,
+  CLASS_NO_EXPORT                    = 0x00000100u,
+  CLASS_NOT_PLACEABLE                = 0x00000200u,
+  CLASS_PER_OBJECT_CONFIG            = 0x00000400u,
+  CLASS_REPLICATION_DATA_IS_SET_UP   = 0x00000800u,
+  CLASS_EDIT_INLINE_NEW              = 0x00001000u,
+  CLASS_COLLAPSE_CATEGORIES          = 0x00002000u,
+  CLASS_INTERFACE                    = 0x00004000u,
+  CLASS_CUSTOM_CONSTRUCTOR           = 0x00008000u,
+  CLASS_CONST                        = 0x00010000u,
+  CLASS_LAYOUT_CHANGING              = 0x00020000u,
+  CLASS_COMPILED_FROM_BLUEPRINT      = 0x00040000u,
+  CLASS_MINIMAL_API                  = 0x00080000u,
+  CLASS_REQUIRED_API                 = 0x00100000u,
+  CLASS_DEFAULT_TO_INSTANCED         = 0x00200000u,
+  CLASS_TOKEN_STREAM_ASSEMBLED       = 0x00400000u,
+  CLASS_HAS_INSTANCED_REFERENCE      = 0x00800000u,
+  CLASS_HIDDEN                       = 0x01000000u,
+  CLASS_DEPRECATED                   = 0x02000000u,
+  CLASS_HIDE_DROP_DOWN               = 0x04000000u,
+  CLASS_GLOBAL_USER_CONFIG           = 0x08000000u,
+  CLASS_INTRINSIC                    = 0x10000000u,
+  CLASS_CONSTRUCTED                  = 0x20000000u,
+  CLASS_CONFIG_DO_NOT_CHECK_DEFAULTS = 0x40000000u,
+  CLASS_NEWER_VERSION_EXISTS         = 0x80000000u,
+  CLASS_INHERIT                      = CLASS_TRANSIENT                    |
+                                       CLASS_DEFAULT_CONFIG               |
+                                       CLASS_CONFIG                       |
+                                       CLASS_PER_OBJECT_CONFIG            |
+                                       CLASS_CONFIG_DO_NOT_CHECK_DEFAULTS |
+                                       CLASS_NOT_PLACEABLE                |
+                                       CLASS_CONST                        |
+                                       CLASS_HAS_INSTANCED_REFERENCE      |
+                                       CLASS_DEPRECATED                   |
+                                       CLASS_DEFAULT_TO_INSTANCED         |
+                                       CLASS_GLOBAL_USER_CONFIG           |
+                                       CLASS_PROJECT_USER_CONFIG,
+  CLASS_SCRIPT_INHERIT               = CLASS_INHERIT                      |
+                                       CLASS_EDIT_INLINE_NEW              |
+                                       CLASS_COLLAPSE_CATEGORIES,
 };
 
 typedef enum {
@@ -613,10 +673,10 @@ struct finput_key_event_args_s {
   float          amount_depressed;
   bool           is_touch_event;
 };
-STATIC_ASSERT(offsetof(finput_key_event_args_t, key) == 0x10, "invalid offset");
-STATIC_ASSERT(offsetof(finput_key_event_args_t, event) == 0x28, "invalid offset");
+STATIC_ASSERT(offsetof(finput_key_event_args_t, key)              == 0x10, "invalid offset");
+STATIC_ASSERT(offsetof(finput_key_event_args_t, event)            == 0x28, "invalid offset");
 STATIC_ASSERT(offsetof(finput_key_event_args_t, amount_depressed) == 0x2C, "invalid offset");
-STATIC_ASSERT(offsetof(finput_key_event_args_t, is_touch_event) == 0x30, "invalid offset");
+STATIC_ASSERT(offsetof(finput_key_event_args_t, is_touch_event)   == 0x30, "invalid offset");
 
 typedef struct fvector2d_s fvector2d_t;
 struct fvector2d_s {
@@ -659,11 +719,11 @@ struct finput_event_s {
   uint32_t               user_idx;
   void                  *event_path;
 };
-STATIC_ASSERT(sizeof(finput_event_t) == 0x18, "size mismatch");
+STATIC_ASSERT(sizeof(finput_event_t)                  == 0x18, "size mismatch");
 STATIC_ASSERT(offsetof(finput_event_t, modifier_keys) == 0x08, "invalid offset");
-STATIC_ASSERT(offsetof(finput_event_t, is_repeat) == 0x0A, "invalid offset");
-STATIC_ASSERT(offsetof(finput_event_t, user_idx) == 0x0C, "invalid offset");
-STATIC_ASSERT(offsetof(finput_event_t, event_path) == 0x10, "invalid offset");
+STATIC_ASSERT(offsetof(finput_event_t, is_repeat)     == 0x0A, "invalid offset");
+STATIC_ASSERT(offsetof(finput_event_t, user_idx)      == 0x0C, "invalid offset");
+STATIC_ASSERT(offsetof(finput_event_t, event_path)    == 0x10, "invalid offset");
 
 typedef struct fkey_event_s fkey_event_t;
 struct fkey_event_s {
@@ -672,10 +732,10 @@ struct fkey_event_s {
   uint32_t       character_code;
   uint32_t       key_code;
 };
-STATIC_ASSERT(sizeof(fkey_event_t) == 0x38, "size mismatch");
-STATIC_ASSERT(offsetof(fkey_event_t, key) == 0x18, "invalid offset");
+STATIC_ASSERT(sizeof(fkey_event_t)                   == 0x38, "size mismatch");
+STATIC_ASSERT(offsetof(fkey_event_t, key)            == 0x18, "invalid offset");
 STATIC_ASSERT(offsetof(fkey_event_t, character_code) == 0x30, "invalid offset");
-STATIC_ASSERT(offsetof(fkey_event_t, key_code) == 0x34, "invalid offset");
+STATIC_ASSERT(offsetof(fkey_event_t, key_code)       == 0x34, "invalid offset");
 
 typedef struct fanalog_input_event_s fanalog_input_event_t;
 struct fanalog_input_event_s {
@@ -683,7 +743,7 @@ struct fanalog_input_event_s {
   float        analog_value;
   uint8_t      _pad0[4];
 };
-STATIC_ASSERT(sizeof(fanalog_input_event_t) == 0x40, "size mismatch");
+STATIC_ASSERT(sizeof(fanalog_input_event_t)                 == 0x40, "size mismatch");
 STATIC_ASSERT(offsetof(fanalog_input_event_t, analog_value) == 0x38, "invalid offset");
 
 typedef struct fcharacter_event_s fcharacter_event_t;
@@ -692,7 +752,7 @@ struct fcharacter_event_s {
   uint16_t       character;
   uint8_t        _pad0[6];
 };
-STATIC_ASSERT(sizeof(fcharacter_event_t) == 0x20, "size mismatch");
+STATIC_ASSERT(sizeof(fcharacter_event_t)              == 0x20, "size mismatch");
 STATIC_ASSERT(offsetof(fcharacter_event_t, character) == 0x18, "invalid offset");
 
 typedef struct fpointer_event_s fpointer_event_t;
@@ -715,21 +775,21 @@ struct fpointer_event_s {
   bool             is_touch_first_move;
   uint8_t          _pad1[5];
 };
-STATIC_ASSERT(sizeof(fpointer_event_t) == 0x70, "size mismatch");
-STATIC_ASSERT(offsetof(fpointer_event_t, screen_space_pos) == 0x18, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, last_screen_space_pos) == 0x20, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, cursor_delta) == 0x28, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, pressed_buttons) == 0x30, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, effecting_button) == 0x38, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, pointer_idx) == 0x50, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, touchpad_idx) == 0x54, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, force) == 0x58, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_event) == 0x5C, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, gesture_type) == 0x5D, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, wheel_or_gesture_delta) == 0x60, "invalid offset");
+STATIC_ASSERT(sizeof(fpointer_event_t)                                      == 0x70, "size mismatch");
+STATIC_ASSERT(offsetof(fpointer_event_t, screen_space_pos)                  == 0x18, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, last_screen_space_pos)             == 0x20, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, cursor_delta)                      == 0x28, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, pressed_buttons)                   == 0x30, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, effecting_button)                  == 0x38, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, pointer_idx)                       == 0x50, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, touchpad_idx)                      == 0x54, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, force)                             == 0x58, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_event)                    == 0x5C, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, gesture_type)                      == 0x5D, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, wheel_or_gesture_delta)            == 0x60, "invalid offset");
 STATIC_ASSERT(offsetof(fpointer_event_t, is_direction_inverted_from_device) == 0x68, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_force_changed) == 0x69, "invalid offset");
-STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_first_move) == 0x6A, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_force_changed)            == 0x69, "invalid offset");
+STATIC_ASSERT(offsetof(fpointer_event_t, is_touch_first_move)               == 0x6A, "invalid offset");
 
 typedef struct fname_entry_header_s fname_entry_header_t;
 struct fname_entry_header_s {
@@ -1323,15 +1383,15 @@ struct fprop_s {
   struct fprop_s  *post_ctor_link_next;
 };
 
-STATIC_ASSERT(offsetof(fprop_t, array_dim) == 0x38, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, elem_size) == 0x3C, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, prop_flags) == 0x40, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, rep_idx) == 0x48, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, offset_internal) == 0x4C, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, rep_notify_func) == 0x50, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, prop_link_next) == 0x58, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, next_ref) == 0x60, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_t, dtor_link_next) == 0x68, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, array_dim)           == 0x38, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, elem_size)           == 0x3C, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, prop_flags)          == 0x40, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, rep_idx)             == 0x48, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, offset_internal)     == 0x4C, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, rep_notify_func)     == 0x50, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, prop_link_next)      == 0x58, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, next_ref)            == 0x60, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_t, dtor_link_next)      == 0x68, "invalid offset");
 STATIC_ASSERT(offsetof(fprop_t, post_ctor_link_next) == 0x70, "invalid offset");
 
 /* ByteProperty */
@@ -1406,15 +1466,96 @@ struct fprop_bool_s {
   uint8_t byte_mask;
   uint8_t field_mask;
 };
-STATIC_ASSERT(offsetof(fprop_bool_t, field_size) == 0x78, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_bool_t, field_size)  == 0x78, "invalid offset");
 STATIC_ASSERT(offsetof(fprop_bool_t, byte_offset) == 0x79, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_bool_t, byte_mask) == 0x7a, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_bool_t, field_mask) == 0x7b, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_bool_t, byte_mask)   == 0x7a, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_bool_t, field_mask)  == 0x7b, "invalid offset");
 
-/* ObjectPropertyBase */
 typedef struct fprop_obj_base_s fprop_obj_base_t;
+
+typedef fstring_t  (__fastcall *fprop_obj_get_cpp_type_custom_fn_t)   (fprop_obj_base_t *, fstring_t *extended_type_text, uint32_t cpp_export_flags, const fstring_t *inner_native_type_name);
+typedef uobject_t *(__fastcall *fprop_obj_load_object_prop_value_fn_t)(fprop_obj_base_t *, const void *prop_value_addr);
+typedef uobject_t *(__fastcall *fprop_obj_get_object_prop_value_fn_t) (fprop_obj_base_t *, const void *prop_value_addr);
+typedef void       (__fastcall *fprop_obj_set_object_prop_value_fn_t) (fprop_obj_base_t *, void* prop_value_addr, uobject_t *value);
+typedef bool       (__fastcall *fprop_obj_allow_cross_level_fn_t)     (fprop_obj_base_t *);
+typedef void       (__fastcall *fprop_obj_check_valid_object_fn_t)    (fprop_obj_base_t *, void *value);
+
+typedef struct fprop_obj_base_vtable_s fprop_obj_base_vtable_t;
+struct fprop_obj_base_vtable_s {
+  ffield_destructor_fn_t                        destructor;
+  ffield_serialize_fn_t                         serialize;
+  ffield_post_load_fn_t                         post_load;
+  ffield_get_preload_deps_fn_t                  get_preload_deps;
+  ffield_begin_destroy_fn_t                     begin_destroy;
+  ffield_add_referenced_objs_fn_t               add_referenced_objs;
+  ffield_add_cpp_prop_fn_t                      add_cpp_prop;
+  ffield_bind_fn_t                              bind;
+  ffield_post_duplicate_fn_t                    post_duplicate;
+  ffield_get_inner_field_by_name_fn_t           get_inner_field_by_name;
+  ffield_get_inner_fields_fn_t                  get_inner_fields;
+  fprop_get_cpp_macro_type_fn_t                 get_cpp_macro_type;
+  fprop_pass_cpp_args_by_ref_fn_t               pass_cpp_args_by_ref;
+  fprop_get_cpp_type_fn_t                       get_cpp_type;
+  fprop_get_cpp_type_forward_declaration_fn_t   get_cpp_type_forward_declaration;
+  fprop_link_internal_fn_t                      link_internal;
+  fprop_convert_from_type_fn_t                  convert_from_type;
+  fprop_identical_fn_t                          identical;
+  fprop_serialize_item_fn_t                     serialize_item;
+  fprop_netserialize_item_fn_t                  netserialize_item;
+  fprop_supports_net_shared_serialization_fn_t  supports_net_shared_serialization;
+  fprop_export_text_item_fn_t                   export_text_item;
+  fprop_import_text_internal_fn_t               import_text_internal;
+  fprop_copy_values_internal_fn_t               copy_values_internal;
+  fprop_get_value_type_hash_internal_fn_t       get_value_type_hash_internal;
+  fprop_copy_single_value_to_script_vm_fn_t     copy_single_value_to_script_vm;
+  fprop_copy_complete_value_to_script_vm_fn_t   copy_complete_value_to_script_vm;
+  fprop_copy_single_value_from_script_vm_fn_t   copy_single_value_from_script_vm;
+  fprop_copy_complete_value_from_script_vm_fn_t copy_complete_value_from_script_vm;
+  fprop_clear_value_internal_fn_t               clear_value_internal;
+  fprop_destroy_value_internal_fn_t             destroy_value_internal;
+  fprop_initialize_value_internal_fn_t          initialize_value_internal;
+  fprop_get_id_fn_t                             get_id;
+  fprop_instance_subobjects_fn_t                instance_subobjects;
+  fprop_get_min_alignment_fn_t                  get_min_alignment;
+  fprop_contains_object_reference_fn_t          contains_object_reference;
+  fprop_emit_reference_info_fn_t                emit_reference_info;
+  fprop_same_type_fn_t                          same_type;
+  fprop_obj_get_cpp_type_custom_fn_t            get_cpp_type_custom;
+  fprop_obj_load_object_prop_value_fn_t         load_object_prop_value;
+  fprop_obj_get_object_prop_value_fn_t          get_object_prop_value;
+  fprop_obj_set_object_prop_value_fn_t          set_object_prop_value;
+  fprop_obj_allow_cross_level_fn_t              allow_cross_level;
+  fprop_obj_check_valid_object_fn_t             check_valid_object;
+};
+STATIC_ASSERT(offsetof(fprop_obj_base_vtable_t, load_object_prop_value) == 0x138, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_obj_base_vtable_t, get_object_prop_value)  == 0x140, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_obj_base_vtable_t, set_object_prop_value)  == 0x148, "invalid offset");
+STATIC_ASSERT(sizeof(fprop_obj_base_vtable_t)                           == 0x160, "size mismatch");
+
 struct fprop_obj_base_s {
-  fprop_t          base;
+  /* ffield_t */
+  fprop_obj_base_vtable_t *vtable;
+  ffield_class_t          *cls;
+  ffield_variant_t         owner;
+  struct ffield_s         *next;
+  fname_t                  name;
+  uint32_t                 flags;
+  uint32_t                 pad;
+
+  /* fprop_t */
+  int32_t         array_dim;
+  int32_t         elem_size;
+  eprop_flags_t   prop_flags;
+  uint16_t        rep_idx;
+  uint8_t         bp_rep_cond;
+  int32_t         offset_internal;
+  fname_t         rep_notify_func;
+  struct fprop_s *prop_link_next;
+  struct fprop_s *next_ref;
+  struct fprop_s *dtor_link_next;
+  struct fprop_s *post_ctor_link_next;
+
+  /* fprop_obj_base_t */
   struct uclass_s *prop_class;
 };
 STATIC_ASSERT(offsetof(fprop_obj_base_t, prop_class) == 0x78, "invalid offset");
@@ -1492,8 +1633,38 @@ struct fprop_array_s {
   fprop_t            *inner;
   earray_prop_flags_t array_flags;
 };
-STATIC_ASSERT(offsetof(fprop_array_t, inner) == 0x78, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_array_t, inner)       == 0x78, "invalid offset");
 STATIC_ASSERT(offsetof(fprop_array_t, array_flags) == 0x80, "invalid offset");
+
+/* Non-owning views of UE 4.27's heap-backed FScript containers. Mutation must
+ * still go through FProperty/FScript helper operations so element lifetimes
+ * and set/map hashes remain valid. */
+typedef TARRAY(void) fscript_array_t;
+
+typedef struct fscript_sparse_array_s fscript_sparse_array_t;
+struct fscript_sparse_array_s {
+  fscript_array_t data;
+  tbit_array_t    alloc_flags;
+  int32_t         first_free_idx;
+  int32_t         num_free_idx;
+};
+
+typedef struct fscript_set_s fscript_set_t;
+struct fscript_set_s {
+  fscript_sparse_array_t elems;
+  hash_allocator_t       hash;
+  int32_t                hash_size;
+};
+
+typedef struct fscript_map_s fscript_map_t;
+struct fscript_map_s {
+  fscript_set_t pairs;
+};
+
+STATIC_ASSERT(sizeof(fscript_array_t)        == 0x10, "size mismatch");
+STATIC_ASSERT(sizeof(fscript_sparse_array_t) == 0x38, "size mismatch");
+STATIC_ASSERT(sizeof(fscript_set_t)          == 0x50, "size mismatch");
+STATIC_ASSERT(sizeof(fscript_map_t)          == 0x50, "size mismatch");
 
 typedef uint32_t emap_prop_flags_t;
 enum {
@@ -1514,6 +1685,18 @@ struct fscript_set_layout_s {
   int32_t                       size;
   fscript_sparse_array_layout_t sparse_array_layout;
 };
+
+typedef struct fscript_set_helper_s fscript_set_helper_t;
+struct fscript_set_helper_s {
+  fprop_t             *elem_prop;
+  void                *set;
+  fscript_set_layout_t layout;
+  uint32_t             pad;
+};
+STATIC_ASSERT(offsetof(fscript_set_helper_t, elem_prop) == 0x00, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_set_helper_t, set)       == 0x08, "invalid offset");
+STATIC_ASSERT(offsetof(fscript_set_helper_t, layout)    == 0x10, "invalid offset");
+STATIC_ASSERT(sizeof(fscript_set_helper_t)              == 0x28, "size mismatch");
 
 typedef struct fscript_map_layout_s fscript_map_layout_t;
 struct fscript_map_layout_s {
@@ -1576,7 +1759,7 @@ struct fprop_set_s {
   fprop_t             *elem_prop;
   fscript_set_layout_t set_layout;
 };
-STATIC_ASSERT(offsetof(fprop_set_t, elem_prop) == 0x78, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_set_t, elem_prop)  == 0x78, "invalid offset");
 STATIC_ASSERT(offsetof(fprop_set_t, set_layout) == 0x80, "invalid offset");
 
 /* StructProperty */
@@ -1633,7 +1816,7 @@ struct fprop_enum_s {
   struct uenum_s  *uenum;
 };
 STATIC_ASSERT(offsetof(fprop_enum_t, underlying_prop) == 0x78, "invalid offset");
-STATIC_ASSERT(offsetof(fprop_enum_t, uenum) == 0x80, "invalid offset");
+STATIC_ASSERT(offsetof(fprop_enum_t, uenum)           == 0x80, "invalid offset");
 
 /* FieldPathProperty */
 typedef struct fprop_field_path_s fprop_field_path_t;
@@ -1846,7 +2029,7 @@ struct icpp_struct_ops_s {
   int32_t size;
   int32_t alignment;
 };
-STATIC_ASSERT(offsetof(icpp_struct_ops_t, size) == 0x08, "invalid offset");
+STATIC_ASSERT(offsetof(icpp_struct_ops_t, size)      == 0x08, "invalid offset");
 STATIC_ASSERT(offsetof(icpp_struct_ops_t, alignment) == 0x0c, "invalid offset");
 
 typedef struct uscript_struct_s uscript_struct_t;
@@ -1880,9 +2063,9 @@ struct uscript_struct_s {
   bool                 prep_cpp_struct_ops_completed;
   icpp_struct_ops_t   *cpp_struct_ops;
 };
-STATIC_ASSERT(offsetof(uscript_struct_t, struct_flags) == 0xb0, "invalid offset");
+STATIC_ASSERT(offsetof(uscript_struct_t, struct_flags)                  == 0xb0, "invalid offset");
 STATIC_ASSERT(offsetof(uscript_struct_t, prep_cpp_struct_ops_completed) == 0xb4, "invalid offset");
-STATIC_ASSERT(offsetof(uscript_struct_t, cpp_struct_ops) == 0xb8, "invalid offset");
+STATIC_ASSERT(offsetof(uscript_struct_t, cpp_struct_ops)                == 0xb8, "invalid offset");
 
 typedef struct ufunc_s ufunc_t;
 struct ufunc_s {
@@ -1911,7 +2094,7 @@ struct ufunc_s {
   void                *unresolved_script_props;
   void                *unversioned_schema;
   /* ufunc_t */
-  uint32_t             func_flags;
+  efunc_flags_t        func_flags;
   uint8_t              num_params;
   uint16_t             params_size;
   uint16_t             return_val_offset;
@@ -1941,7 +2124,7 @@ typedef struct foverride_s {
 
 typedef struct fsubobject_init_s {
   struct uobject_s *subobject;
-  struct uobject_s *template;
+  struct uobject_s *template_obj;
 } fsubobject_init_t;
 
 typedef TARRAY_INLINE(foverride_t,       8) foverrides_t;
@@ -1968,6 +2151,15 @@ STATIC_ASSERT(offsetof(fobject_initializer_t, component_overrides)              
 STATIC_ASSERT(offsetof(fobject_initializer_t, component_inits)                     == 0x0B0, "invalid offset");
 STATIC_ASSERT(offsetof(fobject_initializer_t, last_constructed_object)             == 0x140, "invalid offset");
 STATIC_ASSERT(sizeof(fobject_initializer_t)                                        == 0x148, "size mismatch");
+
+ 
+
+typedef struct fclass_func_link_info_s fclass_func_link_info_t;
+struct fclass_func_link_info_s {
+  ufunc_t    *(*create_func_ptr)();
+  const char *func_name;
+};
+
 
 typedef struct uclass_s  *(__fastcall *uclass_get_authoritative_class_fn_t)             (struct uclass_s *);
 typedef void              (__fastcall *uclass_post_init_instance_fn_t)                  (struct uclass_s *, struct uobject_s *);
@@ -2133,6 +2325,17 @@ typedef TARRAY(struct ufield_s *)       tarray_ufieldptr_t;
 typedef TARRAY(fnative_func_lookup_t)   tarray_fnative_func_lookup_t;
 typedef TMAP(fname_t, struct ufunc_s *) tmap_fname_ufuncptr_t;
 
+typedef struct fimplemented_interface_s fimplemented_interface_t;
+struct fimplemented_interface_s {
+  struct uclass_s *cls;
+  int32_t          pointer_offset;
+  bool             implemented_by_k2;
+  uint8_t          _pad0[3];
+};
+STATIC_ASSERT(sizeof(fimplemented_interface_t) == 0x10, "size mismatch");
+
+typedef TARRAY(fimplemented_interface_t) tarray_fimplemented_interface_t;
+
 typedef struct uclass_s uclass_t;
 struct uclass_s {
   /* uobject_t */
@@ -2164,7 +2367,7 @@ struct uclass_s {
   uclass_class_vtable_helper_ctor_caller_fn_t class_vtable_helper_ctor_caller;
   uclass_class_add_referenced_objects_fn_t    class_add_referenced_objects;
   uint32_t                                    class_unique_and_cooked;
-  uint32_t                                    class_flags;
+  eclass_flags_t                              class_flags;
   uint64_t                                    class_cast_flags;
   struct uclass_s                            *class_within;
   uobject_t                                  *class_generated_by;
@@ -2178,7 +2381,7 @@ struct uclass_s {
   tmap_fname_ufuncptr_t                       func_map;
   tmap_fname_ufuncptr_t                       super_func_map;
   frwlock_t                                   super_func_map_lock;
-  tarray_void_t                               interfaces;
+  tarray_fimplemented_interface_t             interfaces;
   fgc_ref_token_stream_t                      ref_token_stream;
   fcritical_section_t                         ref_token_stream_critical;
   tarray_fnative_func_lookup_t                native_func_lookup_table;
@@ -2403,6 +2606,8 @@ typedef uint8_t elog_verbosity_type_t;
 #define ELVT_SET_COLOR      0x40
 #define ELVT_BREAK_ON_LOG   0x80
 
+typedef void (*unreal_console_output_fn_t)(void *user, str_t text, elog_verbosity_type_t verbosity);
+
 struct foutput_device_s;
 
 typedef void (__fastcall *foutput_device_destructor_fn_t)                     (struct foutput_device_s *);
@@ -2436,6 +2641,23 @@ struct foutput_device_s {
   uint8_t                  auto_emit_line_terminator;
 };
 
+struct uworld_s;
+struct fexec_s;
+
+typedef void (__fastcall *fexec_destructor_fn_t)(struct fexec_s *self);
+typedef bool (__fastcall *fexec_exec_fn_t)      (struct fexec_s *self, struct uworld_s *world, const wchar_t *command, foutput_device_t *output);
+
+typedef struct fexec_vtable_s fexec_vtable_t;
+struct fexec_vtable_s {
+  fexec_destructor_fn_t destructor;
+  fexec_exec_fn_t       exec;
+};
+
+typedef struct fexec_s fexec_t;
+struct fexec_s {
+  fexec_vtable_t *vtable;
+};
+
 typedef struct fout_parm_rec_s fout_parm_rec_t;
 struct fout_parm_rec_s {
   fprop_t                *prop;
@@ -2466,18 +2688,18 @@ struct fframe_s {
   ufunc_t         *current_native_func;
   uint8_t          array_ctx_failed;
 };
-STATIC_ASSERT(offsetof(fframe_t, node) == 0x10, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, obj) == 0x18, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, code) == 0x20, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, locals) == 0x28, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, most_recent_prop) == 0x30, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, most_recent_prop_addr) == 0x38, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, flow_stack) == 0x40, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, prev_frame) == 0x70, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, out_params) == 0x78, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, node)                       == 0x10, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, obj)                        == 0x18, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, code)                       == 0x20, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, locals)                     == 0x28, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, most_recent_prop)           == 0x30, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, most_recent_prop_addr)      == 0x38, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, flow_stack)                 == 0x40, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, prev_frame)                 == 0x70, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, out_params)                 == 0x78, "invalid offset");
 STATIC_ASSERT(offsetof(fframe_t, prop_chain_for_compiled_in) == 0x80, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, current_native_func) == 0x88, "invalid offset");
-STATIC_ASSERT(offsetof(fframe_t, array_ctx_failed) == 0x90, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, current_native_func)        == 0x88, "invalid offset");
+STATIC_ASSERT(offsetof(fframe_t, array_ctx_failed)           == 0x90, "invalid offset");
 
 typedef void(__fastcall *fnative_func_ptr_t)(uobject_t *context, fframe_t *stack, void *result);
 
@@ -2725,11 +2947,11 @@ struct begin_actor_spawn_s {
   void        *owner;
   void        *return_value;
 };
-STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, actor_class) == 8, "invalid offset");
-STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, spawn_transform) == 16, "invalid offset");
+STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, actor_class)                 == 8,  "invalid offset");
+STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, spawn_transform)             == 16, "invalid offset");
 STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, collision_handling_override) == 64, "invalid offset");
-STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, owner) == 72, "invalid offset");
-STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, return_value) == 80, "invalid offset");
+STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, owner)                       == 72, "invalid offset");
+STATIC_ASSERT(offsetof(begin_actor_spawn_params_t, return_value)                == 80, "invalid offset");
 
 typedef struct finish_actor_spawn_s finish_actor_spawn_params_t;
 struct finish_actor_spawn_s {
@@ -2753,6 +2975,9 @@ struct execute_console_cmd_params_s {
   fstring_t  cmd;
   void      *specific_player; // APlayerController *
 };
+STATIC_ASSERT(offsetof(execute_console_cmd_params_t, cmd)             == 8,  "invalid offset");
+STATIC_ASSERT(offsetof(execute_console_cmd_params_t, specific_player) == 24, "invalid offset");
+STATIC_ASSERT(sizeof(execute_console_cmd_params_t)                    == 32, "size mismatch");
 
 typedef tmulticast_delegate_t fon_gameplay_tag_loaded_t;
 typedef uint16_t              fgameplay_tag_net_idx_t;
@@ -2901,53 +3126,63 @@ STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, network_idx_invalidated)       
 STATIC_ASSERT(offsetof(ugameplay_tags_manager_t, gameplay_tag_tables)                  == 0x230, "invalid offset");
 STATIC_ASSERT(sizeof(ugameplay_tags_manager_t)                                         == 0x240, "size mismatch");
 
+MOD_API bool
+unreal_is_in_game_thread(void);
+
 /* ===================================================== FNAME ====================================================== */
 
-bool
+MOD_API fname_pool_t *
+unreal_get_name_pool(void);
+MOD_API fuobject_array_t *
+unreal_get_object_array(void);
+MOD_API uworld_t *
+unreal_get_current_world(void);
+
+MOD_API bool
 unreal_fname_equal(fname_t a, fname_t b, bool ignore_num);
-uint32_t
+MOD_API uint32_t
 unreal_fname_hash(fname_t name);
-bool
+MOD_API bool
 unreal_fname_is_none(fname_t name);
-fname_entry_t *
+MOD_API fname_entry_t *
 unreal_fname_entry_get(uint32_t cmp_idx);
 
-uint64_t
+MOD_API uint64_t
 unreal_fname_utf8_len(fname_t name);
-uint64_t
+MOD_API uint64_t
 unreal_fname_utf8_write(uint8_t *buf, uint64_t max_len, fname_t name);
-str_t
+MOD_API str_t
 unreal_fname_to_str(fname_t fname, arena_t *perm);
-fname_t
+MOD_API fname_t
 unreal_fname_from_str(str_t s, efind_name_t find_type);
 
 typedef bool (*fname_pool_iter_cb_t)(fname_t name, fname_entry_t *entry, void *user);
-void
+MOD_API void
 unreal_fname_pool_iterate(fname_pool_iter_cb_t cb, void *user);
 
-bool
+MOD_API bool
 unreal_fname_entry_match_text(fname_entry_t *entry, str_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_entry_match_text16(fname_entry_t *entry, str16_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_match_text(fname_t name, str_t text, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_fname_match_text16(fname_t name, str16_t text, bool ignore_case, bool exact_match);
 
 /* ==================================================== FSTRING ===================================================== */
-fstring_t
+MOD_API fstring_t
 unreal_fstring_view_from_str16(str16_t s);
-str16_t
+MOD_API str16_t
 unreal_fstring_view_to_str16(fstring_t fs);
-fstring_t
+MOD_API fstring_t
 unreal_fstring_from_str(str_t s, arena_t *perm);
-str_t
+MOD_API str_t
 unreal_fstring_to_str(fstring_t fs, arena_t *perm);
-uint32_t
+MOD_API uint32_t
 unreal_fstring_hash(fstring_t str);
 
 /* =================================================== FIOSTATUS ==================================================== */
-str_t
+MOD_API str_t
 unreal_fio_status_to_str(fio_status_t status, arena_t *perm);
 
 /* ==================================================== UOBJECT ===================================================== */
@@ -2978,7 +3213,9 @@ struct unreal_common_s {
   ufunc_t   *finish_spawn;         // Function /Script/Engine.GameplayStatics.FinishSpawningActor
   ufunc_t   *destroy_actor;        // Function /Script/Engine.Actor.K2_DestroyActor
   uclass_t  *kismet_sys_lib_cls;
+  uobject_t *kismet_sys_lib_cdo;
   ufunc_t   *exec_console_cmd;
+  uobject_t *transient_package;    // Package /Engine/Transient
 
   // fnames
   fname_t bool_prop;
@@ -3037,7 +3274,7 @@ struct unreal_common_s {
   fname_t int_vector;
 };
 
-void
+MOD_API void
 unreal_common_collect(unreal_common_t *common);
 
 typedef enum {
@@ -3057,247 +3294,196 @@ struct uobject_listener_s {
   void                        *user;
 };
 
-void
+MOD_API void
 uobject_listener_destroy_cb(fuobject_listener_t *self);
-void
+MOD_API void
 uobject_listener_on_notify_cb(fuobject_listener_t *self, const uobject_t *obj, int32_t idx);
-void
+MOD_API void
 uobject_listener_on_shutdown_cb(fuobject_listener_t *self);
 
-void
+MOD_API void
 unreal_register_uobject_listener(uobject_listener_kind_t kind, uobject_on_notify_cb_t notify_cb, void *user);
-void
+MOD_API void
 unreal_deregister_object_listener(uobject_listener_kind_t kind, uobject_on_notify_cb_t notify_cb, void *user);
 
-void
+MOD_API void
 unreal_uobject_listener_add(uobject_listener_t *listener);
-void
+MOD_API void
 unreal_uobject_listener_del(uobject_listener_t *listener);
 
-fuobject_item_t *
+MOD_API fuobject_item_t *
 unreal_uobject_array_get_item(int idx);
-bool
+MOD_API bool
 unreal_uobject_array_item_is_valid(fuobject_item_t *item);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_array_get_obj(int idx);
-bool
+MOD_API bool
 unreal_uobject_is_a(uobject_t *obj, uclass_t *cls);
-bool
+MOD_API bool
 unreal_uclass_is_child_of(uclass_t *child, uclass_t *parent);
-bool
+MOD_API bool
+unreal_uclass_implements_interface(uclass_t *cls, uclass_t *interface_cls);
+MOD_API void *
+unreal_uobject_get_interface_address(uobject_t *obj, uclass_t *interface_cls);
+MOD_API bool
 unreal_uobject_is_default(uobject_t *obj);
-bool
+MOD_API bool
 unreal_uobject_is_valid(uobject_t *obj);
 
-uint64_t
+MOD_API uint64_t
 unreal_uobject_get_name_len(uobject_t *obj);
-uint64_t
+MOD_API uint64_t
 unreal_uobject_write_name(uobject_t *obj, uint8_t *dst, uint64_t cap);
-str_t
+MOD_API str_t
 unreal_uobject_push_name(uobject_t *obj, arena_t *perm);
 
-bool
+MOD_API bool
 unreal_outer_chain_contains(uobject_t *obj, str_t str, bool ignore_case, bool exact_match);
-bool
+MOD_API bool
 unreal_super_chain_contains(uclass_t *cls, str_t str, bool ignore_case, bool exact_match);
 
-uint64_t
+MOD_API uint64_t
 unreal_uobject_get_full_name_len(uobject_t *obj);
-uint64_t
+MOD_API uint64_t
 unreal_uobject_write_full_name(uobject_t *obj, uint8_t *dst, uint64_t cap);
-str_t
+MOD_API str_t
 unreal_uobject_push_full_name(uobject_t *obj, arena_t *perm);
+MOD_API str_t
+unreal_uobject_push_ue_path_name(uobject_t *obj, arena_t *perm);
 
-int
+MOD_API int
 unreal_uobject_array_count(void);
-int
+MOD_API int
 unreal_uobject_array_capacity(void);
-int
+MOD_API int
 unreal_uobject_array_num_chunks(void);
-int
+MOD_API int
 unreal_uobject_array_max_chunks(void);
 
-int
+MOD_API int
 unreal_uobject_array_first_gc_index(void);
-int
+MOD_API int
 unreal_uobject_array_last_non_gc_index(void);
-bool
+MOD_API bool
 unreal_uobject_array_is_open_for_disregard_for_gc(void);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find(str_t name, bool ignore_case, bool exact_match);
-uclass_t *
+MOD_API uclass_t *
 unreal_uclass_find(str_t name, bool ignore_case, bool exact_match);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_first_of(uclass_t *cls);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_first_of_by_name(uclass_t *cls, str_t name, bool ignore_case, bool exact_match);
-uclass_t *
+MOD_API uclass_t *
 unreal_uobject_find_class_by_full_name(str_t full_name);
-uobject_t *
+MOD_API uobject_t *
 unreal_uobject_find_by_full_name(uclass_t *cls, str_t full_name);
+/* finds an already-loaded object by the same path syntax produced by unreal_uobject_push_ue_path_name, including ':' for subobjects */
+MOD_API uobject_t *
+unreal_uobject_find_by_path_name(uclass_t *cls, str_t path_name);
 
-void
+MOD_API uint32_t
+unreal_uobject_get_internal_flags(uobject_t *obj);
+MOD_API bool
+unreal_uobject_is_rooted(uobject_t *obj);
+MOD_API bool
+unreal_uobject_add_to_root(uobject_t *obj);
+MOD_API bool
+unreal_uobject_remove_from_root(uobject_t *obj);
+
+MOD_API void
 unreal_process_event(uobject_t *self, ufunc_t *func, void *params);
 /* Calls the virtual ProcessEvent entry so normal Overdub hooks/listeners observe the call. */
-void
+MOD_API void
 unreal_process_event_observed(uobject_t *self, ufunc_t *func, void *params);
+MOD_API bool
+unreal_execute_console_command(str_t command, unreal_console_output_fn_t output, void *user);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_spawn_actor(uobject_t *world_ctx_obj, uclass_t *cls);
-void
+MOD_API void
 unreal_despawn_actor(uobject_t *actor);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_static_construct_object(fstatic_construct_obj_params_t *params);
+MOD_API uobject_t *
+unreal_get_transient_package(void);
+MOD_API uobject_t *
+unreal_construct_object(uclass_t *cls, uobject_t *outer);
 
-uobject_t *
+MOD_API uobject_t *
 unreal_static_load_object(uclass_t *obj_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags, void *sandbox, bool allow_obj_reconcile, void *instancing_ctx);
-uclass_t *
+MOD_API uclass_t *
 unreal_static_load_class(uclass_t *base_cls, uobject_t *outer, str_t name, str_t filename, uint32_t load_flags);
 
-bool
+MOD_API bool
 unreal_pak_is_standalone(str_t file_path);
-void
+MOD_API void
 unreal_pak_only_mount_push(void);
-void
+MOD_API void
 unreal_pak_only_mount_pop(void);
-bool
+MOD_API bool
 unreal_is_pak_only_mount_active(void);
 
-bool
+MOD_API bool
 unreal_mount_pak(str_t file_path, int order);
-bool
+MOD_API bool
 unreal_mount_iostore(str_t file_path, int order);
 
-fnative_func_ptr_t
+MOD_API fnative_func_ptr_t
 unreal_get_native(uint8_t opcode);
-bool
+MOD_API bool
 unreal_fframe_step(fframe_t *stack, void *result);
 
 /* ================================================ CLASS INTROSPECTION ============================================= */
-fprop_t *
-unreal_ustruct_find_prop(ustruct_t *s, str_t name);
-ufunc_t *
+MOD_API ufunc_t *
 unreal_ustruct_find_func(ustruct_t *s, str_t name);
 
-ufunc_t *
+MOD_API ufunc_t *
 unreal_ustruct_find_func_fname(ustruct_t *s, fname_t name, bool ignore_num);
 
-void *
+MOD_API void *
 unreal_get_mcast_sparse_delegate(uobject_t *s, fname_t name);
-
-/* ================================================= PROPERTY ACCESS ================================================ */
-static inline void *
-unreal_uprop_ptr(fprop_t *prop, void *container)
-{
-  return (uint8_t *)container + prop->offset_internal;
-}
-
-static inline bool
-unreal_uprop_get_bool(fprop_bool_t *prop, void *container)
-{
-  uint8_t *byte = (uint8_t *)container + prop->base.offset_internal + prop->byte_offset;
-  return (*byte & prop->field_mask) != 0;
-}
-
-static inline void
-unreal_uprop_set_bool(fprop_bool_t *prop, void *container, bool val)
-{
-  uint8_t *byte = (uint8_t *)container + prop->base.offset_internal + prop->byte_offset;
-  if (val) {
-    *byte |= prop->field_mask;
-  } else {
-    *byte &= ~prop->field_mask;
-  }
-}
-
-static inline fname_t
-unreal_uprop_get_fname(fprop_t *prop, void *container)
-{
-  return *(fname_t *)unreal_uprop_ptr(prop, container);
-}
-
-static inline void
-unreal_uprop_set_fname(fprop_t *prop, void *container, fname_t val)
-{
-  *(fname_t *)unreal_uprop_ptr(prop, container) = val;
-}
-
-static inline fstring_t
-unreal_uprop_get_fstr(fprop_t *prop, void *container)
-{
-  return *(fstring_t *)unreal_uprop_ptr(prop, container);
-}
-
-static inline uobject_t *
-unreal_uprop_get_obj(fprop_t *prop, void *container)
-{
-  return *(uobject_t **)unreal_uprop_ptr(prop, container);
-}
-
-static inline void
-unreal_uprop_set_obj(fprop_t *prop, void *container, uobject_t *val)
-{
-  *(uobject_t **)unreal_uprop_ptr(prop, container) = val;
-}
-
-bool
-unreal_fprop_class_is(fprop_t *prop, fname_t name);
-str_t
-unreal_fprop_push_type_name(fprop_t *prop, arena_t *arena);
-
-/* FProperty value lifecycle helpers. `container` is the owner buffer, not the
- * address of the property value. These cover the property's complete static
- * array dimension. */
-void
-unreal_fprop_initialize_in_container(fprop_t *prop, void *container);
-void
-unreal_fprop_destroy_in_container(fprop_t *prop, void *container);
-
-/* Imports one direct property value. `value` points at the property value,
- * rather than its containing struct. The returned pointer is inside `text`, or
- * NULL when Unreal rejected the input. */
-const wchar_t *
-unreal_fprop_import_text_direct(fprop_t *prop, const wchar_t *text, void *value, uobject_t *owner);
 
 /* =============================================== CONTAINER UTILITIES ============================================== */
 
-bool
+MOD_API bool
 unreal_tbit_array_is_set(tbit_array_t *bits, int32_t idx);
-int32_t
+MOD_API int32_t
 unreal_tbit_array_find_next_set(tbit_array_t *bits, int32_t start_idx);
-int32_t
+MOD_API int32_t
 unreal_tset_hash_head(hash_allocator_t *hash, int32_t hash_size, uint32_t key_hash);
-
-void
-unreal_map_add(void *map, fprop_map_t *prop, const void *key, const void *val);
-bool
-unreal_map_remove(void *map, fprop_map_t *prop, const void *key);
-bool
-unreal_map_find(void *map, fprop_map_t *prop, const void *key, void *out_val);
 
 /* =================================================== DATA TABLE =================================================== */
 
-tmap_fname_uint8ptr_t *
+MOD_API tmap_fname_uint8ptr_t *
 unreal_udata_table_get_row_map(udata_table_t *table);
-void
+MOD_API void
 unreal_udata_table_add_row(udata_table_t *table, fname_t row_name, const ftable_row_base_t *row_data);
-void
+MOD_API void
 unreal_udata_table_remove_row(udata_table_t *table, fname_t row_name);
-void
+MOD_API void
 unreal_udata_table_empty(udata_table_t *table);
-uint8_t *
+MOD_API uint8_t *
 unreal_udata_table_find_row(udata_table_t *table, fname_t row_name);
 
 /* ============================================= GAMEPLAY TAGS MANAGER ============================================== */
 
-bool
+/* Queue a tag for Overdub to add when the engine tag tree is ready. */
+MOD_API bool
+unreal_add_gameplay_tag(fname_t tag_name);
+MOD_API bool
+unreal_check_gameplay_tag_exists(fname_t tag_name);
+
+MOD_API bool
 unreal_gameplay_tags_manager_add(fname_t tag_name);
-void
+MOD_API void
 unreal_gameplay_tags_manager_broadcast_tree_changed(void);
 
-fgameplay_tag_t
+MOD_API fgameplay_tag_t
 unreal_gameplay_tags_manager_request_tag(fname_t tag_name);
+
+MOD_EXTERN_C_END
 
 #endif /* UE_TYPES_H */

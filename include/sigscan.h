@@ -4,6 +4,8 @@
 #include "arena.h"
 #include "types.h"
 
+MOD_EXTERN_C_BEGIN
+
 typedef uint8_t sig_kind_t;
 enum {
   SIG_DIRECT,      // use match address + add
@@ -129,13 +131,15 @@ struct sigscan_exec_span_s {
   uintptr_t rva;
 };
 
-int
+MOD_API int
 sigscan_build_exec_spans(sigscan_exec_span_t *spans, int max_spans, void *module_base);
 
-bool
+MOD_API bool
 sigscan_snapshot_exec_spans(sigscan_exec_span_t *spans, int num_spans, arena_t *arena);
 
-sigscan_err_t
+MOD_API sigscan_err_t
 sigscan_scan_entry(sigscan_exec_span_t *spans, int num_spans, void *module_base, sigscan_entry_t *entry);
+
+MOD_EXTERN_C_END
 
 #endif /* SIGSCAN_H */

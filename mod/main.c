@@ -1,21 +1,21 @@
-#include "mod_sdk.h"
-#include "mod_unreal.h"
+#include "mod.h"
 
 static bool
-mod_init(const mod_host_api_t *host, mod_t m)
+mod_init(mod_handle_t mod)
 {
-  mod_sdk_init(host, m);
-  unreal_cache_objects();
-
-  MOD_LOG_INFO("Hello from example mod!!!");
+  MOD_LOG_INFO(mod, "Hello from example mod!!!");
   return true;
+}
+
+MOD_ABI_VERSION_ENTRY()
+{
+  return MOD_ABI_VERSION;
 }
 
 MOD_ENTRY()
 {
   static const mod_api_t api = {
     .struct_size = sizeof(mod_api_t),
-    .abi_version = MOD_ABI_VERSION,
     .init        = mod_init,
   };
 

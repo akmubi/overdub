@@ -87,6 +87,26 @@ ui_force_os_cursor_visible_tick(void)
 }
 
 static void
+on_uobject_created(uobject_t *object, int32_t idx, void *user)
+{
+  (void)idx;
+
+  mod_manager_t *manager = user;
+  if (manager && object) {
+    mod_manager_dispatch_uobject_constructed(manager, object);
+  }
+}
+
+static void
+on_uobject_deleted(uobject_t *object, int32_t idx, void *user)
+{
+  mod_manager_t *manager = user;
+  if (manager && object) {
+    mod_manager_dispatch_uobject_deleted(manager, object, idx);
+  }
+}
+
+static void
 on_engine_init(void)
 {
   LOG_INFO("Engine initialized");
@@ -99,8 +119,11 @@ on_engine_init(void)
 
   enable_input_hooks();
   unreal_common_collect(&globals.unreal);
+  unreal_register_uobject_listener(UOBJECT_LISTENER_KIND_CREATE, on_uobject_created, &globals.mod_manager);
+  unreal_register_uobject_listener(UOBJECT_LISTENER_KIND_DELETE, on_uobject_deleted, &globals.mod_manager);
 
   mod_manager_start_dlls(&globals.mod_manager);
+  mod_manager_start_lua(&globals.mod_manager);
   mod_manager_start_blueprints(&globals.mod_manager);
 }
 
@@ -274,10 +297,18 @@ on_input_event(input_event_t *ev)
       break;
     }
 
+    case INPUT_EVENT_ANALOG: {
+      if (ev->key != INPUT_KEY_NONE) {
+        globals.analog_values[ev->key] = ev->analog_value;
+      }
+      break;
+    }
+
     case INPUT_EVENT_APP_ACTIVATION: {
       if (!ev->app_activated) {
         /* out of focus, all held keys should be released */
         input_key_lost_focus();
+        mem_zero(globals.analog_values, sizeof(globals.analog_values));
       }
       break;
     }
@@ -535,7 +566,7 @@ game_engine_tick_hook(void *self, float delta, bool idle_mode)
 void __fastcall
 process_event_hook(uobject_t *self, ufunc_t *func, void *params)
 {
-  if (globals.game_thread_id != GetCurrentThreadId() || !globals.engine_inited) {
+  if (!unreal_is_in_game_thread() || !globals.engine_inited) {
     process_event_real(self, func, params);
     return;
   }
@@ -548,9 +579,28 @@ process_event_hook(uobject_t *self, ufunc_t *func, void *params)
 }
 
 void __fastcall
+conditional_post_load_hook(uobject_t *self)
+{
+  bool on_game_thread  = unreal_is_in_game_thread();
+  bool can_dispatch    = self && globals.engine_inited && on_game_thread;
+  bool has_hooks       = can_dispatch && mod_manager_has_post_load_hooks(&globals.mod_manager);
+  bool should_dispatch = has_hooks && (self->obj_flags & RF_NEED_POST_LOAD) != 0;
+
+  if (should_dispatch) {
+    mod_manager_dispatch_post_load(&globals.mod_manager, self, false);
+  }
+
+  conditional_post_load_real(self);
+
+  if (should_dispatch) {
+    mod_manager_dispatch_post_load(&globals.mod_manager, self, true);
+  }
+}
+
+void __fastcall
 ufunction_invoke_hook(ufunc_t *func, uobject_t *obj, fframe_t *stack, void *result)
 {
-  if (globals.game_thread_id != GetCurrentThreadId() || !globals.engine_inited) {
+  if (!unreal_is_in_game_thread() || !globals.engine_inited) {
     ufunction_invoke_real(func, obj, stack, result);
     return;
   }

@@ -2,6 +2,7 @@
 #include "uobject_search_internal.h"
 
 #include "globals.h"
+#include "unreal_prop.h"
 
 bool
 uobject_item_matches_record(fuobject_item_t *item, record_t *record)
@@ -60,83 +61,77 @@ prop_matches_query(search_tool_t *tool, fprop_t *prop)
     return true;
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *p = (fprop_struct_t *)prop;
-
-    if (query_matches_uobject_name(tool, (uobject_t *)p->script_struct)) {
-      return true;
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_STRUCT: {
+      fprop_struct_t *p = (fprop_struct_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->script_struct);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
-    fprop_array_t *p = (fprop_array_t *)prop;
 
-    if (prop_matches_query(tool, p->inner)) {
-      return true;
+    case UNREAL_PROP_KIND_ARRAY: {
+      fprop_array_t *p = (fprop_array_t *)prop;
+      return prop_matches_query(tool, p->inner);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
-    fprop_set_t *p = (fprop_set_t *)prop;
 
-    if (prop_matches_query(tool, p->elem_prop)) {
-      return true;
+    case UNREAL_PROP_KIND_SET: {
+      fprop_set_t *p = (fprop_set_t *)prop;
+      return prop_matches_query(tool, p->elem_prop);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
-    fprop_map_t *p = (fprop_map_t *)prop;
 
-    if (prop_matches_query(tool, p->key_prop) || prop_matches_query(tool, p->val_prop)) {
-      return true;
+    case UNREAL_PROP_KIND_MAP: {
+      fprop_map_t *p = (fprop_map_t *)prop;
+      return prop_matches_query(tool, p->key_prop) || prop_matches_query(tool, p->val_prop);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop)) {
-    fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->prop_class)) {
-      return true;
+    case UNREAL_PROP_KIND_OBJECT:
+    case UNREAL_PROP_KIND_WEAK_OBJECT:
+    case UNREAL_PROP_KIND_LAZY_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_OBJECT: {
+      fprop_obj_base_t *p = (fprop_obj_base_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->prop_class);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    fprop_class_t *p = (fprop_class_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) || query_matches_uobject_name(tool, (uobject_t *)p->meta_class)) {
-      return true;
+    case UNREAL_PROP_KIND_CLASS: {
+      fprop_class_t *p = (fprop_class_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) ||
+             query_matches_uobject_name(tool, (uobject_t *)p->meta_class);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) || query_matches_uobject_name(tool, (uobject_t *)p->meta_class)) {
-      return true;
+    case UNREAL_PROP_KIND_SOFT_CLASS: {
+      fprop_class_soft_t *p = (fprop_class_soft_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->base.base.prop_class) ||
+             query_matches_uobject_name(tool, (uobject_t *)p->meta_class);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
-    fprop_iface_t *p = (fprop_iface_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->iface_class)) {
-      return true;
+    case UNREAL_PROP_KIND_INTERFACE: {
+      fprop_iface_t *p = (fprop_iface_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->iface_class);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
-    fprop_byte_t *p = (fprop_byte_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->uenum)) {
-      return true;
+    case UNREAL_PROP_KIND_BYTE: {
+      fprop_byte_t *p = (fprop_byte_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->uenum);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-    fprop_enum_t *p = (fprop_enum_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->uenum) || prop_matches_query(tool, (fprop_t *)p->underlying_prop)) {
-      return true;
+    case UNREAL_PROP_KIND_ENUM: {
+      fprop_enum_t *p = (fprop_enum_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->uenum) ||
+             prop_matches_query(tool, (fprop_t *)p->underlying_prop);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
-    fprop_delegate_t *p = (fprop_delegate_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->signature_func)) {
-      return true;
+    case UNREAL_PROP_KIND_DELEGATE: {
+      fprop_delegate_t *p = (fprop_delegate_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->signature_func);
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
-    fprop_mcast_delegate_t *p = (fprop_mcast_delegate_t *)prop;
 
-    if (query_matches_uobject_name(tool, (uobject_t *)p->signature_func)) {
-      return true;
+    case UNREAL_PROP_KIND_MULTICAST_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE: {
+      fprop_mcast_delegate_t *p = (fprop_mcast_delegate_t *)prop;
+      return query_matches_uobject_name(tool, (uobject_t *)p->signature_func);
     }
+
+    default:
+      break;
   }
 
   return false;

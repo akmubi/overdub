@@ -41,6 +41,10 @@ struct ui_inspector_state_s {
   enum nk_collapse_states code_dll_info_open;
   enum nk_collapse_states code_runtime_open;
 
+  enum nk_collapse_states lua_open;
+  enum nk_collapse_states lua_info_open;
+  enum nk_collapse_states lua_runtime_open;
+
   enum nk_collapse_states blueprints_open;
   enum nk_collapse_states blueprints_info_open;
   enum nk_collapse_states blueprints_runtime_open;

@@ -19,6 +19,7 @@
 
 #define NK_PROFILE_SCOPE_BEGIN(NAME, SCOPE) PROF_SCOPE_BEGIN(NAME, SCOPE)
 #define NK_PROFILE_SCOPE_END(SCOPE)         PROF_SCOPE_END(SCOPE)
+#define NK_API                              extern MOD_API
 #include "nuklear/src/nuklear.c"
 
 #include "nk_font_runtime.h"
@@ -97,10 +98,6 @@ nk_runtime_font_rasterize(const void           *ttf,
 
   return result;
 }
-
-#if defined BUILD_TEST_UI
-#  include "nuklear/d3d11/nuklear_d3d11.c"
-#endif
 
 #if COMPILER_MSVC
 #  pragma warning(pop)

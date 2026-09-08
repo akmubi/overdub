@@ -3,11 +3,12 @@
 #include "arena.h"
 #include "globals.h"
 #include "log.h"
-#include "mod_host.h"
+#include "mod.h"
 #include "scratch.h"
 #include "str.h"
 #include "ui_nuklear.h"
 #include "unreal.h"
+#include "unreal_prop.h"
 
 #include "vendor_stb.h"
 
@@ -17,23 +18,23 @@
 #define CALL_SEARCH_CAP          (128)
 #define CALL_STATUS_CAP          (512)
 #define CALL_MAX_CONTAINER_ELEMS (128)
+#define CALL_MAX_PICKER_RESULTS  (256)
+#define CALL_PICKER_BUDGET_US    (500)
 
-#define CALL_C_TYPE_TEXT  nk_rgba(218, 156, 62, 255)
-#define CALL_C_VALUE_TEXT nk_rgba(139, 191, 166, 255)
-#define CALL_C_LINK_TEXT  nk_rgba(122, 184, 232, 255)
+#define CALL_C_TYPE_TEXT  UI_C_PROP_TYPE_TEXT
+#define CALL_C_VALUE_TEXT UI_C_PROP_VALUE_TEXT
+#define CALL_C_LINK_TEXT  UI_C_PROP_LINK_TEXT
 
-typedef uint8_t call_param_role_t;
-enum {
-  CALL_PARAM_INPUT = 0,
-  CALL_PARAM_OUTPUT,
-  CALL_PARAM_RETURN,
-};
+typedef unreal_func_param_role_t call_param_role_t;
 
 typedef uint8_t call_value_kind_t;
 enum {
   CALL_VALUE_LEAF = 0,
   CALL_VALUE_STRUCT,
   CALL_VALUE_ARRAY,
+  CALL_VALUE_SET,
+  CALL_VALUE_MAP,
+  CALL_VALUE_MAP_PAIR,
   CALL_VALUE_FIXED_ARRAY,
 };
 
@@ -64,39 +65,46 @@ struct call_value_s {
   bool expanded;
   bool auto_world;
   bool class_picker;
+  bool interface_picker;
   bool soft_picker;
 
   call_object_ref_t object_ref;
   char              input[CALL_TEXT_CAP];
 };
 
-typedef struct call_result_s call_result_t;
-struct call_result_s {
-  call_result_t *next;
-  call_result_t *first_child;
-  call_result_t *last_child;
-
-  str_t name;
-  str_t type;
-  char  value[CALL_TEXT_CAP];
-  char  tooltip[CALL_TEXT_CAP];
-  bool  expanded;
-};
+typedef unreal_prop_snapshot_t call_result_t;
 
 typedef struct call_picker_s call_picker_t;
 struct call_picker_s {
   call_object_ref_t *ref;
-  fprop_t           *soft_prop;
   char              *soft_input;
   uclass_t          *required_class;
   bool               class_values;
+  bool               interface_values;
   bool               allow_none;
 
-  uint64_t  generation;
   uint32_t  count;
+  uint32_t  scan_cursor;
+  uint32_t  scan_total;
+  uint32_t  scan_instance_slot;
+  bool      scan_complete;
   uint32_t *slots;
-  char      search[CALL_SEARCH_CAP];
+  bool      active_this_frame;
+  bool      active_last_frame;
+
+  uint32_t match_count;
+  uint32_t match_slots[CALL_MAX_PICKER_RESULTS];
+  uint32_t filter_cursor;
+  bool     filter_complete;
+  bool     matches_truncated;
+  char     search[CALL_SEARCH_CAP];
+  char     filtered_search[CALL_SEARCH_CAP];
 };
+
+typedef struct call_picker_tooltip_s {
+  struct nk_rect anchor;
+  char           text[CALL_TEXT_CAP];
+} call_picker_tooltip_t;
 
 struct ufunc_call_dialog_s {
   arena_t *model_arena;
@@ -126,22 +134,60 @@ struct ufunc_call_dialog_s {
   bool status_is_error;
 };
 
-typedef TARRAY(void) call_tarray_view_t;
+static inline bool
+call_value_kind_is_dynamic_container(call_value_kind_t kind)
+{
+  return kind == CALL_VALUE_ARRAY || kind == CALL_VALUE_SET || kind == CALL_VALUE_MAP;
+}
 
-typedef struct call_fsoft_object_ptr_s call_fsoft_object_ptr_t;
-struct call_fsoft_object_ptr_s {
-  int32_t             object_idx;
-  int32_t             serial_num;
-  int32_t             tag_at_last_test;
-  int32_t             pad0;
-  fsoft_object_path_t path;
-};
+static inline bool
+call_prop_kind_uses_object_picker(unreal_prop_kind_t kind)
+{
+  return kind == UNREAL_PROP_KIND_OBJECT      || kind == UNREAL_PROP_KIND_CLASS       ||
+         kind == UNREAL_PROP_KIND_WEAK_OBJECT || kind == UNREAL_PROP_KIND_LAZY_OBJECT ||
+         kind == UNREAL_PROP_KIND_INTERFACE;
+}
+
+static inline bool
+call_prop_kind_accepts_blank_input(unreal_prop_kind_t kind)
+{
+  return kind == UNREAL_PROP_KIND_STRUCT                       ||
+         kind == UNREAL_PROP_KIND_DELEGATE                     ||
+         kind == UNREAL_PROP_KIND_MULTICAST_DELEGATE           ||
+         kind == UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE    ||
+         kind == UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE;
+}
+
+static inline const char *
+call_tree_prefix(bool expanded)
+{
+  if (expanded) {
+    return "-";
+  }
+
+  return "+";
+}
+
+static void *
+call_prop_value_alloc(arena_t *arena, fprop_t *prop)
+{
+  int32_t  alignment = unreal_fprop_min_alignment(prop);
+  uint64_t size      = unreal_fprop_complete_size(prop);
+  if (alignment <= 0 || size == 0) {
+    return NULL;
+  }
+
+  return arena_push_aligned(arena, size, (uint64_t)alignment);
+}
 
 static bool
 call_record_is_live_object(search_tool_t *tool, uint32_t slot, uobject_t *expected)
 {
   record_t *record = record_from_slot(tool, slot);
-  return record && expected && record_has_flag(record, RECORD_FLAG_LIVE) && record->obj == expected && unreal_uobject_is_valid(expected);
+  return record && expected &&
+         record_has_flag(record, RECORD_FLAG_LIVE) &&
+         record->obj == expected &&
+         unreal_uobject_is_valid(expected);
 }
 
 static void
@@ -183,7 +229,11 @@ call_object_ref_set(search_tool_t *tool, call_object_ref_t *ref, uobject_t *obj)
     return;
   }
 
-  uint32_t  slot   = (obj->internal_idx >= 0) ? (uint32_t)obj->internal_idx : RECORD_SLOT_INVALID;
+  uint32_t slot = RECORD_SLOT_INVALID;
+  if (obj->internal_idx >= 0) {
+    slot = (uint32_t)obj->internal_idx;
+  }
+
   record_t *record = record_from_slot(tool, slot);
   if (!record || !record_has_flag(record, RECORD_FLAG_LIVE) || record->obj != obj) {
     call_object_ref_set_none(ref);
@@ -210,23 +260,41 @@ call_prop_is_supported(fprop_t *prop)
     return false;
   }
 
-  fname_t supported[] = {
-    globals.unreal.bool_prop,       globals.unreal.byte_prop,       globals.unreal.int8_prop,
-    globals.unreal.int16_prop,      globals.unreal.int_prop,        globals.unreal.int32_prop,
-    globals.unreal.int64_prop,      globals.unreal.uint16_prop,     globals.unreal.uint32_prop,
-    globals.unreal.uint64_prop,     globals.unreal.float_prop,      globals.unreal.double_prop,
-    globals.unreal.name_prop,       globals.unreal.str_prop,        globals.unreal.text_prop,
-    globals.unreal.obj_prop,        globals.unreal.class_prop,      globals.unreal.soft_obj_prop,
-    globals.unreal.soft_class_prop, globals.unreal.struct_prop,     globals.unreal.array_prop,
-    globals.unreal.enum_prop,
-  };
-
-  for (int i = 0; i < COUNTOF(supported); ++i) {
-    if (unreal_fprop_class_is(prop, supported[i])) {
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_BOOL:
+    case UNREAL_PROP_KIND_BYTE:
+    case UNREAL_PROP_KIND_INT8:
+    case UNREAL_PROP_KIND_INT16:
+    case UNREAL_PROP_KIND_INT32:
+    case UNREAL_PROP_KIND_INT64:
+    case UNREAL_PROP_KIND_UINT16:
+    case UNREAL_PROP_KIND_UINT32:
+    case UNREAL_PROP_KIND_UINT64:
+    case UNREAL_PROP_KIND_FLOAT:
+    case UNREAL_PROP_KIND_DOUBLE:
+    case UNREAL_PROP_KIND_NAME:
+    case UNREAL_PROP_KIND_STRING:
+    case UNREAL_PROP_KIND_TEXT:
+    case UNREAL_PROP_KIND_OBJECT:
+    case UNREAL_PROP_KIND_CLASS:
+    case UNREAL_PROP_KIND_SOFT_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_CLASS:
+    case UNREAL_PROP_KIND_WEAK_OBJECT:
+    case UNREAL_PROP_KIND_LAZY_OBJECT:
+    case UNREAL_PROP_KIND_INTERFACE:
+    case UNREAL_PROP_KIND_STRUCT:
+    case UNREAL_PROP_KIND_ARRAY:
+    case UNREAL_PROP_KIND_SET:
+    case UNREAL_PROP_KIND_MAP:
+    case UNREAL_PROP_KIND_ENUM:
+    case UNREAL_PROP_KIND_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE:
       return true;
-    }
+    default:
+      return false;
   }
-  return false;
 }
 
 static void
@@ -236,25 +304,28 @@ call_value_set_default(call_value_t *node)
     return;
   }
 
-  fprop_t *prop = node->prop;
-  if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "false");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "0.0");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int8_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int16_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int_prop)    ||
-             unreal_fprop_class_is(prop, globals.unreal.int32_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int64_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.uint16_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint32_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint64_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-    str_write_fmt(node->input, sizeof(node->input), "0");
-  } else {
-    node->input[0] = '\0';
+  switch (unreal_fprop_get_kind(node->prop)) {
+    case UNREAL_PROP_KIND_BOOL:
+      str_write_fmt(node->input, sizeof(node->input), "false");
+      break;
+    case UNREAL_PROP_KIND_FLOAT:
+    case UNREAL_PROP_KIND_DOUBLE:
+      str_write_fmt(node->input, sizeof(node->input), "0.0");
+      break;
+    case UNREAL_PROP_KIND_BYTE:
+    case UNREAL_PROP_KIND_INT8:
+    case UNREAL_PROP_KIND_INT16:
+    case UNREAL_PROP_KIND_INT32:
+    case UNREAL_PROP_KIND_INT64:
+    case UNREAL_PROP_KIND_UINT16:
+    case UNREAL_PROP_KIND_UINT32:
+    case UNREAL_PROP_KIND_UINT64:
+    case UNREAL_PROP_KIND_ENUM:
+      str_write_fmt(node->input, sizeof(node->input), "0");
+      break;
+    default:
+      node->input[0] = '\0';
+      break;
   }
 }
 
@@ -292,13 +363,16 @@ call_value_build_base(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, ca
     .is_none = true,
   };
 
-  if (unreal_fprop_class_is(prop, globals.unreal.class_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+  unreal_prop_kind_t kind = unreal_fprop_get_kind(prop);
+  if (kind == UNREAL_PROP_KIND_CLASS || kind == UNREAL_PROP_KIND_SOFT_CLASS) {
     node->class_picker = true;
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
+  if (kind == UNREAL_PROP_KIND_INTERFACE) {
+    node->interface_picker = true;
+  }
+
+  if (kind == UNREAL_PROP_KIND_SOFT_OBJECT || kind == UNREAL_PROP_KIND_SOFT_CLASS) {
     node->soft_picker = true;
   }
 
@@ -330,14 +404,21 @@ call_value_build(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, call_pa
     return node;
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    node->kind = CALL_VALUE_STRUCT;
+  unreal_prop_kind_t prop_kind = unreal_fprop_get_kind(prop);
+  if (prop_kind == UNREAL_PROP_KIND_STRUCT) {
     fprop_struct_t *struct_prop = (fprop_struct_t *)prop;
-    if (!struct_prop->script_struct || !struct_prop->script_struct->child_props) {
+    if (!struct_prop->script_struct) {
       node->supported = false;
       return node;
     }
 
+    /* NOTE: native structs without reflected fields can still be entered using the engine's ImportText syntax */
+    if (!struct_prop->script_struct->child_props) {
+      node->kind = CALL_VALUE_LEAF;
+      return node;
+    }
+
+    node->kind = CALL_VALUE_STRUCT;
     for (ffield_t *field = struct_prop->script_struct->child_props; field; field = field->next) {
       fprop_t *child_prop = (fprop_t *)field;
       str_t    child_name = unreal_fname_to_str(child_prop->name, dialog->model_arena);
@@ -351,7 +432,7 @@ call_value_build(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, call_pa
       call_value_push_child(node, child);
       node->supported = node->supported && child->supported;
     }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
+  } else if (prop_kind == UNREAL_PROP_KIND_ARRAY) {
     fprop_array_t *array_prop = (fprop_array_t *)prop;
 
     node->kind        = CALL_VALUE_ARRAY;
@@ -359,6 +440,28 @@ call_value_build(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, call_pa
     str_write_fmt(node->input, sizeof(node->input), "0");
 
     if (!array_prop->inner || !call_prop_is_supported(array_prop->inner)) {
+      node->supported = false;
+    }
+  } else if (prop_kind == UNREAL_PROP_KIND_SET) {
+    fprop_set_t *set_prop = (fprop_set_t *)prop;
+
+    node->kind        = CALL_VALUE_SET;
+    node->array_count = 0;
+    str_write_fmt(node->input, sizeof(node->input), "0");
+
+    if (!set_prop->elem_prop || !call_prop_is_supported(set_prop->elem_prop)) {
+      node->supported = false;
+    }
+  } else if (prop_kind == UNREAL_PROP_KIND_MAP) {
+    fprop_map_t *map_prop = (fprop_map_t *)prop;
+
+    node->kind        = CALL_VALUE_MAP;
+    node->array_count = 0;
+    str_write_fmt(node->input, sizeof(node->input), "0");
+
+    if (!map_prop->key_prop || !map_prop->val_prop ||
+        !call_prop_is_supported(map_prop->key_prop) ||
+        !call_prop_is_supported(map_prop->val_prop)) {
       node->supported = false;
     }
   } else {
@@ -369,9 +472,10 @@ call_value_build(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, call_pa
 }
 
 static bool
-call_array_parse_count(call_value_t *node, int32_t *out_count)
+call_container_parse_count(call_value_t *node, int32_t *out_count)
 {
-  if (!node || node->kind != CALL_VALUE_ARRAY || !out_count || node->input[0] == '\0') {
+  if (!node || !call_value_kind_is_dynamic_container(node->kind) ||
+      !out_count || node->input[0] == '\0') {
     return false;
   }
 
@@ -386,19 +490,60 @@ call_array_parse_count(call_value_t *node, int32_t *out_count)
   return true;
 }
 
+static call_value_t *
+call_map_pair_build(ufunc_call_dialog_t *dialog, call_value_t *map, int32_t idx)
+{
+  fprop_map_t  *map_prop = (fprop_map_t *)map->prop;
+  call_value_t *pair     = ARENA_PUSH_ZERO(dialog->model_arena, call_value_t);
+  if (!pair) {
+    return NULL;
+  }
+
+  str_t key_type = unreal_fprop_push_type_name(map_prop->key_prop, dialog->model_arena);
+  str_t val_type = unreal_fprop_push_type_name(map_prop->val_prop, dialog->model_arena);
+
+  pair->prop        = map->prop;
+  pair->name        = str_push_fmt(dialog->model_arena, "[%d]", idx);
+  pair->type        = str_push_fmt(dialog->model_arena, "TPair<%.*s, %.*s>", STR_ARG(key_type), STR_ARG(val_type));
+  pair->role        = map->role;
+  pair->kind        = CALL_VALUE_MAP_PAIR;
+  pair->array_index = idx;
+  pair->supported   = true;
+  pair->expanded    = true;
+  call_object_ref_set_none(&pair->object_ref);
+
+  call_value_t *key = call_value_build(dialog, map_prop->key_prop, STR_LIT("Key"), map->role, true);
+  call_value_t *val = call_value_build(dialog, map_prop->val_prop, STR_LIT("Value"), map->role, true);
+  if (!key || !val) {
+    return NULL;
+  }
+
+  call_value_push_child(pair, key);
+  call_value_push_child(pair, val);
+  pair->supported = key->supported && val->supported;
+  return pair;
+}
+
 static bool
-call_array_sync(ufunc_call_dialog_t *dialog, call_value_t *node)
+call_container_sync(ufunc_call_dialog_t *dialog, call_value_t *node)
 {
   int32_t count = 0;
-  if (!call_array_parse_count(node, &count)) {
+  if (!call_container_parse_count(node, &count)) {
     return false;
   }
 
-  fprop_array_t *array_prop = (fprop_array_t *)node->prop;
   while (node->child_count < count) {
-    int32_t idx = node->child_count;
-
-    call_value_t *child = call_value_build(dialog, array_prop->inner, str_push_fmt(dialog->model_arena, "[%d]", idx), node->role, true);
+    int32_t       idx   = node->child_count;
+    call_value_t *child = NULL;
+    if (node->kind == CALL_VALUE_ARRAY) {
+      fprop_array_t *array_prop = (fprop_array_t *)node->prop;
+      child = call_value_build(dialog, array_prop->inner, str_push_fmt(dialog->model_arena, "[%d]", idx), node->role, true);
+    } else if (node->kind == CALL_VALUE_SET) {
+      fprop_set_t *set_prop = (fprop_set_t *)node->prop;
+      child = call_value_build(dialog, set_prop->elem_prop, str_push_fmt(dialog->model_arena, "[%d]", idx), node->role, true);
+    } else {
+      child = call_map_pair_build(dialog, node, idx);
+    }
     if (!child) {
       return false;
     }
@@ -410,23 +555,6 @@ call_array_sync(ufunc_call_dialog_t *dialog, call_value_t *node)
 
   node->array_count = count;
   return true;
-}
-
-static call_param_role_t
-call_param_role(fprop_t *prop)
-{
-  if (prop->prop_flags & CPF_RETURN_PARM) {
-    return CALL_PARAM_RETURN;
-  }
-
-  /* ReferenceParm describes reference passing, not a second pin direction.
-   * UHT commonly emits OutParm | ReferenceParm for ordinary output arrays and
-   * structs, so OutParm must classify the parameter as output-only. */
-  if (prop->prop_flags & CPF_OUT_PARM) {
-    return CALL_PARAM_OUTPUT;
-  }
-
-  return CALL_PARAM_INPUT;
 }
 
 static void
@@ -443,21 +571,26 @@ call_model_build(search_tool_t *tool, ufunc_call_dialog_t *dialog)
   dialog->first_result = NULL;
   dialog->last_result  = NULL;
 
-  ufunc_t *func = dialog->func_expected;
-  for (ffield_t *field = func ? func->child_props : NULL; field; field = field->next) {
+  ufunc_t  *func  = dialog->func_expected;
+  ffield_t *field = NULL;
+  if (func) {
+    field = func->child_props;
+  }
+
+  for (; field; field = field->next) {
     fprop_t *prop = (fprop_t *)field;
     if (!(prop->prop_flags & CPF_PARM)) {
       continue;
     }
 
-    call_param_role_t role = call_param_role(prop);
+    call_param_role_t role = unreal_fprop_get_param_role(prop);
     call_value_t     *node = call_value_build(dialog, prop, unreal_fname_to_str(prop->name, dialog->model_arena), role, true);
     if (!node) {
       call_status_set(dialog, true, "Failed to allocate the reflected parameter model");
       return;
     }
 
-    if (role == CALL_PARAM_INPUT && call_name_is_world_context(prop->name) &&
+    if (role == UNREAL_FUNC_PARAM_INPUT && call_name_is_world_context(prop->name) &&
         unreal_fprop_class_is(prop, globals.unreal.obj_prop)) {
       node->auto_world = true;
     }
@@ -471,31 +604,18 @@ call_model_build(search_tool_t *tool, ufunc_call_dialog_t *dialog)
   UNUSED_VAR(tool);
 }
 
-static uclass_t *
-call_node_required_class(call_value_t *node)
+static bool
+call_candidate_class_matches(uclass_t *candidate, uclass_t *required_class, bool interface_values)
 {
-  if (!node || !node->prop) {
-    return NULL;
+  if (interface_values) {
+    return unreal_uclass_implements_interface(candidate, required_class);
   }
 
-  if (unreal_fprop_class_is(node->prop, globals.unreal.class_prop)) {
-    return ((fprop_class_t *)node->prop)->meta_class;
-  }
-
-  if (unreal_fprop_class_is(node->prop, globals.unreal.soft_class_prop)) {
-    return ((fprop_class_soft_t *)node->prop)->meta_class;
-  }
-
-  if (unreal_fprop_class_is(node->prop, globals.unreal.obj_prop) ||
-      unreal_fprop_class_is(node->prop, globals.unreal.soft_obj_prop)) {
-    return ((fprop_obj_base_t *)node->prop)->prop_class;
-  }
-
-  return NULL;
+  return unreal_uclass_is_child_of(candidate, required_class);
 }
 
 static bool
-call_candidate_matches(uobject_t *obj, uclass_t *required_class, bool class_values)
+call_candidate_matches(uobject_t *obj, uclass_t *required_class, bool class_values, bool interface_values)
 {
   if (!obj || !required_class) {
     return false;
@@ -508,185 +628,60 @@ call_candidate_matches(uobject_t *obj, uclass_t *required_class, bool class_valu
     return unreal_uclass_is_child_of((uclass_t *)obj, required_class);
   }
 
-  return unreal_uobject_is_a(obj, required_class);
+  return call_candidate_class_matches(obj->cls, required_class, interface_values);
 }
 
 static void
-call_picker_rebuild(search_tool_t *tool, ufunc_call_dialog_t *dialog)
+call_picker_rebuild_tick(search_tool_t *tool, ufunc_call_dialog_t *dialog)
 {
   call_picker_t *picker = &dialog->picker;
-
-  picker->count = 0;
-  if (!picker->required_class || !picker->slots) {
-    picker->generation = tool->cache.generation;
+  if (picker->scan_complete || !picker->required_class || !picker->slots) {
+    picker->scan_complete = true;
     return;
   }
 
-  for (uint32_t i = 0; i < tool->cache.live_slots.count; ++i) {
-    uint32_t  slot   = tool->cache.live_slots.slots[i];
-    record_t *record = record_from_slot(tool, slot);
-    if (!record || !record_has_flag(record, RECORD_FLAG_LIVE) || !record->obj) {
-      continue;
-    }
+  uint64_t start_us = time_now_us();
+  uint32_t work     = 0;
+  while (!picker->scan_complete && picker->count < tool->cache.record_cap) {
+    if (record_slot_valid(picker->scan_instance_slot)) {
+      uint32_t  slot   = picker->scan_instance_slot;
+      record_t *record = record_from_slot(tool, slot);
 
-    if (call_candidate_matches(record->obj, picker->required_class, picker->class_values)) {
-      picker->slots[picker->count++] = slot;
-    }
-  }
-  picker->generation = tool->cache.generation;
-}
+      picker->scan_instance_slot = RECORD_SLOT_INVALID;
+      if (record) {
+        picker->scan_instance_slot = record->next_instance_slot;
+      }
 
-static bool
-call_append_escaped_quoted(arena_t *arena, str_t raw, str_t *out)
-{
-  uint64_t cap = raw.len * 2 + 3;
-  uint8_t *buf = ARENA_PUSH_ARRAY(arena, uint8_t, cap);
-  if (!buf) {
-    return false;
-  }
-
-  uint64_t at = 0;
-  buf[at++] = '"';
-  for (uint64_t i = 0; i < raw.len; ++i) {
-    uint8_t c = raw.data[i];
-    if (c == '\\' || c == '"') {
-      buf[at++] = '\\';
-      buf[at++] = c;
-    } else if (c == '\n') {
-      buf[at++] = '\\';
-      buf[at++] = 'n';
-    } else if (c == '\r') {
-      buf[at++] = '\\';
-      buf[at++] = 'r';
-    } else if (c == '\t') {
-      buf[at++] = '\\';
-      buf[at++] = 't';
+      if (record && record_has_flag(record, RECORD_FLAG_LIVE) && record->obj) {
+        picker->slots[picker->count++] = slot;
+      }
     } else {
-      buf[at++] = c;
-    }
-  }
-  buf[at++] = '"';
-  buf[at]   = '\0';
-
-  *out = str_make(buf, at);
-  return true;
-}
-
-static str_t
-call_object_literal(search_tool_t *tool, call_object_ref_t ref, arena_t *arena)
-{
-  if (ref.is_none || !ref.expected) {
-    return STR_LIT("None");
-  }
-
-  if (!call_record_is_live_object(tool, ref.slot, ref.expected)) {
-    return STR_NULL;
-  }
-
-  str_t cls_name = unreal_uobject_push_name((uobject_t *)ref.expected->cls, arena);
-  str_t path     = unreal_uobject_push_full_name(ref.expected, arena);
-  return str_push_fmt(arena, "%.*s'%.*s'", STR_ARG(cls_name), STR_ARG(path));
-}
-
-static str_t
-call_value_literal(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_value_t *node, arena_t *arena)
-{
-  if (!node || !node->supported) {
-    return STR_NULL;
-  }
-
-  if (node->kind == CALL_VALUE_STRUCT) {
-    str_list_t parts = {0};
-    for (call_value_t *child = node->first_child; child; child = child->next) {
-      str_t value = call_value_literal(tool, dialog, child, arena);
-      if (str_is_empty(value)) {
-        return STR_NULL;
+      if (picker->scan_cursor >= picker->scan_total || picker->scan_cursor >= tool->cache.live_slots.count) {
+        picker->scan_complete = true;
+        break;
       }
 
-      str_list_push(arena, &parts, str_push_fmt(arena, "%.*s=%.*s", STR_ARG(child->name), STR_ARG(value)));
-    }
-
-    return str_list_join(arena, parts, STR_LIT("("), STR_LIT(","), STR_LIT(")"));
-  }
-
-  if (node->kind == CALL_VALUE_ARRAY || node->kind == CALL_VALUE_FIXED_ARRAY) {
-    if (node->kind == CALL_VALUE_ARRAY && !call_array_sync(dialog, node)) {
-      return STR_NULL;
-    }
-
-    int32_t    count = node->kind == CALL_VALUE_ARRAY ? node->array_count : node->child_count;
-    str_list_t parts = {0};
-    int32_t    idx   = 0;
-    for (call_value_t *child = node->first_child; child && idx < count; child = child->next, ++idx) {
-      str_t value = call_value_literal(tool, dialog, child, arena);
-      if (str_is_empty(value)) {
-        return STR_NULL;
+      uint32_t  slot   = tool->cache.live_slots.slots[picker->scan_cursor++];
+      record_t *record = record_from_slot(tool, slot);
+      if (record && record_has_flag(record, RECORD_FLAG_LIVE) && record->obj && record->kind == UOBJECT_KIND_CLASS &&
+          call_candidate_class_matches((uclass_t *)record->obj, picker->required_class, picker->interface_values)) {
+        if (picker->class_values) {
+          picker->slots[picker->count++] = slot;
+        } else {
+          picker->scan_instance_slot = record->first_instance_slot;
+        }
       }
-
-      str_list_push(arena, &parts, value);
     }
 
-    return str_list_join(arena, parts, STR_LIT("("), STR_LIT(","), STR_LIT(")"));
-  }
-
-  fprop_t *prop = node->prop;
-  if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    if (node->auto_world) {
-      uworld_t         *world     = globals.gworld_ptr ? *globals.gworld_ptr : NULL;
-      call_object_ref_t world_ref = {
-        .slot     = RECORD_SLOT_INVALID,
-        .expected = (uobject_t *)world,
-        .is_none  = (world == NULL),
-      };
-
-      if (world) {
-        world_ref.slot = (uint32_t)((uobject_t *)world)->internal_idx;
-      }
-      return call_object_literal(tool, world_ref, arena);
+    work += 1;
+    if ((work & 63u) == 0 && time_now_us() - start_us >= CALL_PICKER_BUDGET_US) {
+      break;
     }
-
-    return call_object_literal(tool, node->object_ref, arena);
   }
 
-  str_t raw = str_from_cstr_with_cap(node->input, sizeof(node->input));
-  if (unreal_fprop_class_is(prop, globals.unreal.str_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.text_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.name_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) ||
-      unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    str_t quoted = STR_NULL;
-    if (!call_append_escaped_quoted(arena, raw, &quoted)) {
-      return STR_NULL;
-    }
-    return quoted;
+  if (picker->count >= tool->cache.record_cap) {
+    picker->scan_complete = true;
   }
-
-  return str_push_copy(arena, raw);
-}
-
-static bool
-call_import_literal(fprop_t *prop, void *value, uobject_t *owner, str_t literal, arena_t *arena)
-{
-  if (!prop || !value || str_is_empty(literal)) {
-    return false;
-  }
-
-  str16_t wide = str16_from_str(arena, literal);
-  if (!wide.data) {
-    return false;
-  }
-
-  const wchar_t *end = unreal_fprop_import_text_direct(prop, (const wchar_t *)wide.data, value, owner);
-  if (!end) {
-    return false;
-  }
-
-  while (*end == L' ' || *end == L'\t' || *end == L'\r' || *end == L'\n') {
-    end += 1;
-  }
-
-  return *end == L'\0';
 }
 
 static bool
@@ -716,229 +711,167 @@ call_apply_value(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_value_t 
   }
 
   if (node->kind == CALL_VALUE_ARRAY) {
-    if (!call_array_sync(dialog, node)) {
+    if (!call_container_sync(dialog, node) || !unreal_array_clear(value, (fprop_array_t *)node->prop)) {
       return false;
     }
+
+    fprop_array_t *array_prop = (fprop_array_t *)node->prop;
+    int32_t        idx        = 0;
+    for (call_value_t *child = node->first_child; child && idx < node->array_count; child = child->next, ++idx) {
+      void *item = call_prop_value_alloc(arena, array_prop->inner);
+      if (!item || !unreal_fprop_initialize_value(array_prop->inner, item)) {
+        return false;
+      }
+
+      bool ok = call_apply_value(tool, dialog, child, item, owner, arena) &&
+                unreal_array_add(value, array_prop, item) >= 0;
+      unreal_fprop_destroy_value(array_prop->inner, item);
+      if (!ok) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
-  if (node->kind == CALL_VALUE_LEAF &&
-      (unreal_fprop_class_is(node->prop, globals.unreal.obj_prop) ||
-       unreal_fprop_class_is(node->prop, globals.unreal.class_prop))) {
+  if (node->kind == CALL_VALUE_SET) {
+    if (!call_container_sync(dialog, node) || !unreal_set_clear(value, (fprop_set_t *)node->prop)) {
+      return false;
+    }
+
+    fprop_set_t *set_prop = (fprop_set_t *)node->prop;
+    int32_t      idx      = 0;
+    for (call_value_t *child = node->first_child; child && idx < node->array_count; child = child->next, ++idx) {
+      void *item = call_prop_value_alloc(arena, set_prop->elem_prop);
+      if (!item || !unreal_fprop_initialize_value(set_prop->elem_prop, item)) {
+        return false;
+      }
+
+      bool ok = call_apply_value(tool, dialog, child, item, owner, arena);
+      if (ok) {
+        unreal_set_add(value, set_prop, item);
+      }
+
+      unreal_fprop_destroy_value(set_prop->elem_prop, item);
+      if (!ok) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  if (node->kind == CALL_VALUE_MAP) {
+    if (!call_container_sync(dialog, node) || !unreal_map_clear(value, (fprop_map_t *)node->prop)) {
+      return false;
+    }
+
+    fprop_map_t *map_prop = (fprop_map_t *)node->prop;
+    int32_t      idx      = 0;
+    for (call_value_t *pair = node->first_child; pair && idx < node->array_count; pair = pair->next, ++idx) {
+      call_value_t *key_node = pair->first_child;
+      call_value_t *val_node = NULL;
+      if (key_node) {
+        val_node = key_node->next;
+      }
+
+      void *key = call_prop_value_alloc(arena, map_prop->key_prop);
+      void *val = call_prop_value_alloc(arena, map_prop->val_prop);
+      if (!key_node || !val_node || !key || !val) {
+        return false;
+      }
+
+      bool key_initialized = unreal_fprop_initialize_value(map_prop->key_prop, key);
+      bool val_initialized = unreal_fprop_initialize_value(map_prop->val_prop, val);
+      if (!key_initialized || !val_initialized) {
+        if (key_initialized) {
+          unreal_fprop_destroy_value(map_prop->key_prop, key);
+        }
+
+        if (val_initialized) {
+          unreal_fprop_destroy_value(map_prop->val_prop, val);
+        }
+        return false;
+      }
+
+      bool ok = call_apply_value(tool, dialog, key_node, key, owner, arena) &&
+                call_apply_value(tool, dialog, val_node, val, owner, arena);
+      if (ok) {
+        unreal_map_add(value, map_prop, key, val);
+      }
+
+      unreal_fprop_destroy_value(map_prop->key_prop, key);
+      unreal_fprop_destroy_value(map_prop->val_prop, val);
+
+      if (!ok) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  unreal_prop_kind_t prop_kind = unreal_fprop_get_kind(node->prop);
+  if (node->kind == CALL_VALUE_LEAF && call_prop_kind_uses_object_picker(prop_kind)) {
     uobject_t *selected = NULL;
     if (node->auto_world) {
-      selected = globals.gworld_ptr ? (uobject_t *)*globals.gworld_ptr : NULL;
+      if (globals.gworld_ptr) {
+        selected = (uobject_t *)*globals.gworld_ptr;
+      }
     } else if (!node->object_ref.is_none) {
       if (!call_record_is_live_object(tool, node->object_ref.slot, node->object_ref.expected)) {
         return false;
       }
+
       selected = node->object_ref.expected;
     }
 
-    if (selected && !call_candidate_matches(selected, call_node_required_class(node), node->class_picker)) {
+    uclass_t *required_class = unreal_fprop_get_reference_class(node->prop);
+    if (selected && !call_candidate_matches(selected, required_class, node->class_picker, node->interface_picker)) {
       return false;
     }
 
-    *(uobject_t **)value = selected;
+    if (prop_kind == UNREAL_PROP_KIND_INTERFACE) {
+      return unreal_fprop_set_interface((fprop_iface_t *)node->prop, value, selected);
+    }
+
+    return unreal_fprop_set_object((fprop_obj_base_t *)node->prop, value, selected);
+  }
+
+  if (node->kind == CALL_VALUE_LEAF && node->input[0] == '\0' && call_prop_kind_accepts_blank_input(prop_kind)) {
+    /* NOTE: the initialized value is already the useful blank/default value */
     return true;
   }
 
-  str_t literal = call_value_literal(tool, dialog, node, arena);
-  return call_import_literal(node->prop, value, owner, literal, arena);
-}
-
-static int64_t
-call_read_integer(fprop_t *prop, void *value)
-{
-  if (unreal_fprop_class_is(prop, globals.unreal.byte_prop))   return *(uint8_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int8_prop))   return *(int8_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int16_prop))  return *(int16_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int_prop))    return *(int32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int32_prop))  return *(int32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.int64_prop))  return *(int64_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) return *(uint16_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) return *(uint32_t *)value;
-  if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) return (int64_t)*(uint64_t *)value;
-
-  return 0;
-}
-
-static void
-call_result_format_leaf(call_result_t *result, fprop_t *prop, void *value, arena_t *arena)
-{
-  if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
-    fprop_bool_t *bp   = (fprop_bool_t *)prop;
-    uint8_t       byte = *((uint8_t *)value + bp->byte_offset);
-    str_write_fmt(result->value, sizeof(result->value), "%s", (byte & bp->field_mask) ? "true" : "false");
-  } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%.9g", (double)*(float *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%.17g", *(double *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%llu", (unsigned long long)*(uint64_t *)value);
-  } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int8_prop)   ||
-             unreal_fprop_class_is(prop, globals.unreal.int16_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int_prop)    ||
-             unreal_fprop_class_is(prop, globals.unreal.int32_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.int64_prop)  ||
-             unreal_fprop_class_is(prop, globals.unreal.uint16_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
-    str_write_fmt(result->value, sizeof(result->value), "%lld", (long long)call_read_integer(prop, value));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-    fprop_enum_t *enum_prop = (fprop_enum_t *)prop;
-    int64_t       integer   = enum_prop->underlying_prop ? call_read_integer(&enum_prop->underlying_prop->base, value) : 0;
-    str_t         name      = STR_NULL;
-    if (enum_prop->uenum) {
-      for (int32_t i = 0; i < enum_prop->uenum->names.num; ++i) {
-        if (enum_prop->uenum->names.data[i].value == integer) {
-          name = unreal_fname_to_str(enum_prop->uenum->names.data[i].key, arena);
-          break;
-        }
-      }
-    }
-
-    if (!str_is_empty(name)) {
-      str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(name));
-    } else {
-      str_write_fmt(result->value, sizeof(result->value), "%lld", (long long)integer);
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.name_prop)) {
-    str_t text = unreal_fname_to_str(*(fname_t *)value, arena);
-    str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.str_prop)) {
-    str_t text = unreal_fstring_to_str(*(fstring_t *)value, arena);
-    str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.text_prop)) {
-    ftext_t   *text         = (ftext_t *)value;
-    fstring_t *display      = (text->text_data.obj && text->text_data.obj->vtable) ? text->text_data.obj->vtable->get_display_string(text->text_data.obj) : NULL;
-    str_t      display_text = display ? unreal_fstring_to_str(*display, arena) : STR_NULL;
-    str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(display_text));
-  } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    uobject_t *obj = *(uobject_t **)value;
-    if (!obj) {
-      str_write_fmt(result->value, sizeof(result->value), "None");
-    } else if (!unreal_uobject_is_valid(obj)) {
-      str_write_fmt(result->value, sizeof(result->value), "<invalid>");
-    } else {
-      str_t name      = unreal_uobject_push_name(obj, arena);
-      str_t full_name = unreal_uobject_push_full_name(obj, arena);
-      str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(name));
-      str_write_fmt(result->tooltip, sizeof(result->tooltip), "%.*s", STR_ARG(full_name));
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) ||
-             unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    call_fsoft_object_ptr_t *soft  = (call_fsoft_object_ptr_t *)value;
-    str_t                    asset = unreal_fname_to_str(soft->path.asset_path_name, arena);
-    str_t                    sub   = unreal_fstring_to_str(soft->path.sub_path_string, arena);
-    if (!str_is_empty(sub)) {
-      str_write_fmt(result->value, sizeof(result->value), "%.*s:%.*s", STR_ARG(asset), STR_ARG(sub));
-    } else {
-      str_write_fmt(result->value, sizeof(result->value), "%.*s", STR_ARG(asset));
-    }
-  } else {
-    str_write_fmt(result->value, sizeof(result->value), "<unavailable>");
-  }
+  str_t input = str_from_cstr_with_cap(node->input, sizeof(node->input));
+  return unreal_fprop_import_text(node->prop, value, owner, input, arena);
 }
 
 static call_result_t *
-call_result_snapshot(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, uint8_t *value, bool allow_fixed_array)
+call_result_snapshot(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, uint8_t *value)
 {
-  call_result_t *result = ARENA_PUSH_ZERO(dialog->result_arena, call_result_t);
-  if (!result) {
-    return NULL;
-  }
+  unreal_prop_snapshot_builder_t builder = {0};
+  unreal_prop_snapshot_builder_init(&builder, dialog->result_arena);
+  builder.max_container_elements = CALL_MAX_CONTAINER_ELEMS;
 
-  result->name     = str_push_copy(dialog->result_arena, name);
-  result->type     = unreal_fprop_push_type_name(prop, dialog->result_arena);
-  result->expanded = true;
-
-  if (allow_fixed_array && prop->array_dim > 1) {
-    str_write_fmt(result->value, sizeof(result->value), "Num=%d", prop->array_dim);
-    for (int32_t i = 0; i < prop->array_dim; ++i) {
-      call_result_t *child = call_result_snapshot(dialog, prop, str_push_fmt(dialog->result_arena, "[%d]", i), value + (uint64_t)i * (uint64_t)prop->elem_size, false);
-      if (child) {
-        QUEUE_PUSH(result->first_child, result->last_child, child);
-      }
-    }
-    return result;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *struct_prop = (fprop_struct_t *)prop;
-    str_write_fmt(result->value, sizeof(result->value), "{...}");
-    if (struct_prop->script_struct) {
-      for (ffield_t *field = struct_prop->script_struct->child_props; field; field = field->next) {
-        fprop_t       *child_prop = (fprop_t *)field;
-        call_result_t *child      = call_result_snapshot(dialog, child_prop, unreal_fname_to_str(child_prop->name, dialog->result_arena), value + child_prop->offset_internal, true);
-        if (child) {
-          QUEUE_PUSH(result->first_child, result->last_child, child);
-        }
-      }
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
-    fprop_array_t      *array_prop = (fprop_array_t *)prop;
-    call_tarray_view_t *array      = (call_tarray_view_t *)value;
-    int32_t             count      = (array->num >= 0 && array->num <= array->max && array->data) ? array->num : 0;
-
-    str_write_fmt(result->value, sizeof(result->value), "Num=%d", count);
-
-    int32_t shown = MIN_VAL(count, CALL_MAX_CONTAINER_ELEMS);
-    for (int32_t i = 0; i < shown; ++i) {
-      call_result_t *child = call_result_snapshot(dialog, array_prop->inner, str_push_fmt(dialog->result_arena, "[%d]", i), (uint8_t *)array->data + (uint64_t)i * (uint64_t)array_prop->inner->elem_size, true);
-      if (child) {
-        QUEUE_PUSH(result->first_child, result->last_child, child);
-      }
-    }
-  } else {
-    call_result_format_leaf(result, prop, value, dialog->result_arena);
-  }
-  return result;
+  return unreal_fprop_snapshot_build(&builder, prop, name, value);
 }
 
 static call_result_t *
-call_result_placeholder(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name, bool allow_fixed_array)
+call_result_placeholder(ufunc_call_dialog_t *dialog, fprop_t *prop, str_t name)
 {
-  call_result_t *result = ARENA_PUSH_ZERO(dialog->result_arena, call_result_t);
-  if (!result) {
-    return NULL;
-  }
-
-  result->name     = str_push_copy(dialog->result_arena, name);
-  result->type     = unreal_fprop_push_type_name(prop, dialog->result_arena);
-  result->expanded = true;
-
-  if (allow_fixed_array && prop->array_dim > 1) {
-    for (int32_t i = 0; i < prop->array_dim; ++i) {
-      call_result_t *child = call_result_placeholder(dialog, prop, str_push_fmt(dialog->result_arena, "[%d]", i), false);
-      if (child) {
-        QUEUE_PUSH(result->first_child, result->last_child, child);
-      }
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *struct_prop = (fprop_struct_t *)prop;
-    if (struct_prop->script_struct) {
-      for (ffield_t *field = struct_prop->script_struct->child_props; field; field = field->next) {
-        fprop_t       *child_prop = (fprop_t *)field;
-        call_result_t *child      = call_result_placeholder(dialog, child_prop, unreal_fname_to_str(child_prop->name, dialog->result_arena), true);
-        if (child) {
-          QUEUE_PUSH(result->first_child, result->last_child, child);
-        }
-      }
-    }
-  }
-  return result;
+  return call_result_snapshot(dialog, prop, name, NULL);
 }
 
 static void
 call_results_build_placeholders(ufunc_call_dialog_t *dialog)
 {
   for (call_value_t *node = dialog->first_param; node; node = node->next) {
-    if (node->role != CALL_PARAM_OUTPUT && node->role != CALL_PARAM_RETURN) {
+    if (node->role != UNREAL_FUNC_PARAM_OUTPUT && node->role != UNREAL_FUNC_PARAM_RETURN) {
       continue;
     }
 
-    call_result_t *result = call_result_placeholder(dialog, node->prop, node->name, true);
+    call_result_t *result = call_result_placeholder(dialog, node->prop, node->name);
     if (result) {
       QUEUE_PUSH(dialog->first_result, dialog->last_result, result);
     }
@@ -969,8 +902,8 @@ call_validate_schema(ufunc_call_dialog_t *dialog, ufunc_t *func)
       return false;
     }
 
-    if (node->kind == CALL_VALUE_ARRAY && !call_array_sync(dialog, node)) {
-      call_status_set(dialog, true, "Array %.*s Num must be between 0 and %d", STR_ARG(node->name), CALL_MAX_CONTAINER_ELEMS);
+    if (call_value_kind_is_dynamic_container(node->kind) && !call_container_sync(dialog, node)) {
+      call_status_set(dialog, true, "Container %.*s Num must be between 0 and %d", STR_ARG(node->name), CALL_MAX_CONTAINER_ELEMS);
       return false;
     }
   }
@@ -1008,12 +941,6 @@ call_validate_target(search_tool_t *tool, ufunc_call_dialog_t *dialog, uobject_t
 static void
 call_execute(search_tool_t *tool, ufunc_call_dialog_t *dialog)
 {
-#if defined BUILD_TEST_UI
-  (void)tool;
-  call_status_set(dialog, true, "Unavailable");
-  return;
-#else
-
   if (!call_record_is_live_object(tool, dialog->func_slot, (uobject_t *)dialog->func_expected)) {
     call_status_set(dialog, true, "The function was unloaded or replaced");
     return;
@@ -1039,35 +966,36 @@ call_execute(search_tool_t *tool, ufunc_call_dialog_t *dialog)
       }
       initialized = true;
 
-      for (call_value_t *node = dialog->first_param; node; node = node->next) {
-        if (node->role == CALL_PARAM_OUTPUT || node->role == CALL_PARAM_RETURN) {
-          continue;
-        }
-
-        uint8_t *value = params + node->prop->offset_internal;
-        if (!call_apply_value(tool, dialog, node, value, target, tmp.arena)) {
-          call_status_set(dialog, true, "Could not parse %.*s (%.*s)", STR_ARG(node->name), STR_ARG(node->type));
-          imported = false;
-          break;
+      for (call_value_t *node = dialog->first_param; node && imported; node = node->next) {
+        if (node->role == UNREAL_FUNC_PARAM_INPUT) {
+          uint8_t *value = params + node->prop->offset_internal;
+          if (!call_apply_value(tool, dialog, node, value, target, tmp.arena)) {
+            call_status_set(dialog, true, "Could not parse %.*s (%.*s)", STR_ARG(node->name), STR_ARG(node->type));
+            imported = false;
+          }
         }
       }
 
       if (imported) {
-        unreal_process_event_observed(target, func, func->params_size ? params : NULL);
+        void *params_arg = params;
+        if (func->params_size == 0) {
+          params_arg = NULL;
+        }
+
+        unreal_process_event_observed(target, func, params_arg);
 
         arena_reset(dialog->result_arena);
         dialog->first_result = NULL;
         dialog->last_result  = NULL;
         for (call_value_t *node = dialog->first_param; node; node = node->next) {
-          if (node->role != CALL_PARAM_OUTPUT && node->role != CALL_PARAM_RETURN) {
-            continue;
-          }
-
-          call_result_t *result = call_result_snapshot(dialog, node->prop, node->name, params + node->prop->offset_internal, true);
-          if (result) {
-            QUEUE_PUSH(dialog->first_result, dialog->last_result, result);
+          if (node->role == UNREAL_FUNC_PARAM_OUTPUT || node->role == UNREAL_FUNC_PARAM_RETURN) {
+            call_result_t *result = call_result_snapshot(dialog, node->prop, node->name, params + node->prop->offset_internal);
+            if (result) {
+              QUEUE_PUSH(dialog->first_result, dialog->last_result, result);
+            }
           }
         }
+
         call_status_set(dialog, false, "Call completed");
       }
     }
@@ -1079,13 +1007,12 @@ call_execute(search_tool_t *tool, ufunc_call_dialog_t *dialog)
     }
   }
   scratch_end(tmp);
-#endif
 }
 
 bool
-ufunc_call_init(search_tool_t *tool, const mod_host_api_t *host, mod_handle_t h)
+ufunc_call_init(search_tool_t *tool, mod_handle_t h)
 {
-  if (!tool || !host) {
+  if (!tool) {
     return false;
   }
 
@@ -1094,8 +1021,8 @@ ufunc_call_init(search_tool_t *tool, const mod_host_api_t *host, mod_handle_t h)
     return false;
   }
 
-  dialog->model_arena  = mod_arena_handle_resolve(host->arena_create(h, 32 * MB, 64 * KB));
-  dialog->result_arena = mod_arena_handle_resolve(host->arena_create(h, 32 * MB, 64 * KB));
+  dialog->model_arena  = mod_arena_create(h, 32 * MB, 64 * KB);
+  dialog->result_arena = mod_arena_create(h, 32 * MB, 64 * KB);
   dialog->picker.slots = ARENA_PUSH_ARRAY(tool->perm, uint32_t, tool->cache.record_cap);
   dialog->func_slot    = RECORD_SLOT_INVALID;
   call_object_ref_set_none(&dialog->target);
@@ -1118,7 +1045,11 @@ ufunc_call_open(search_tool_t *tool, record_t *func_record, record_t *suggested_
 
   ufunc_call_dialog_t *dialog = tool->call_dialog;
   ufunc_t             *func   = (ufunc_t *)func_record->obj;
-  uobject_t           *outer  = func ? func->outer : NULL;
+  uobject_t           *outer  = NULL;
+  if (func) {
+    outer = func->outer;
+  }
+
   if (!func || !outer || !unreal_uobject_is_a(outer, globals.unreal.core_class)) {
     call_status_set(dialog, true, "UFunction has no valid owning UClass");
     return;
@@ -1130,7 +1061,6 @@ ufunc_call_open(search_tool_t *tool, record_t *func_record, record_t *suggested_
   dialog->receiver_class    = (uclass_t *)outer;
   dialog->picker.ref        = NULL;
   dialog->picker.soft_input = NULL;
-  dialog->picker.generation = UINT64_MAX;
 
   nk_grid_state_reset(&dialog->target_grid);
   nk_grid_state_reset(&dialog->input_grid);
@@ -1154,9 +1084,11 @@ ufunc_call_close(search_tool_t *tool)
     return;
   }
 
-  tool->call_dialog->open              = false;
-  tool->call_dialog->picker.ref        = NULL;
-  tool->call_dialog->picker.soft_input = NULL;
+  tool->call_dialog->open                     = false;
+  tool->call_dialog->picker.ref               = NULL;
+  tool->call_dialog->picker.soft_input        = NULL;
+  tool->call_dialog->picker.active_this_frame = false;
+  tool->call_dialog->picker.active_last_frame = false;
 }
 
 void
@@ -1190,40 +1122,105 @@ static void
 call_picker_activate(search_tool_t       *tool,
                      ufunc_call_dialog_t *dialog,
                      call_object_ref_t   *ref,
-                     fprop_t             *soft_prop,
                      char                *soft_input,
                      uclass_t            *required_class,
                      bool                 class_values,
+                     bool                 interface_values,
                      bool                 allow_none)
 {
-  call_picker_t *picker = &dialog->picker;
+  call_picker_t *picker       = &dialog->picker;
+  bool           newly_opened = !picker->active_last_frame;
 
-  if (picker->ref            != ref            ||
-      picker->soft_input     != soft_input     ||
-      picker->required_class != required_class ||
-      picker->class_values   != class_values   ||
-      picker->allow_none     != allow_none) {
-    picker->ref            = ref;
-    picker->soft_prop      = soft_prop;
-    picker->soft_input     = soft_input;
-    picker->required_class = required_class;
-    picker->class_values   = class_values;
-    picker->allow_none     = allow_none;
-    picker->search[0]      = '\0';
-    picker->generation     = UINT64_MAX;
-  }
-
-  if (picker->generation != tool->cache.generation) {
-    call_picker_rebuild(tool, dialog);
+  picker->active_this_frame = true;
+  if (newly_opened                                 ||
+      picker->ref              != ref              ||
+      picker->soft_input       != soft_input       ||
+      picker->required_class   != required_class   ||
+      picker->class_values     != class_values     ||
+      picker->interface_values != interface_values ||
+      picker->allow_none       != allow_none) {
+    picker->ref                = ref;
+    picker->soft_input         = soft_input;
+    picker->required_class     = required_class;
+    picker->class_values       = class_values;
+    picker->interface_values   = interface_values;
+    picker->allow_none         = allow_none;
+    picker->search[0]          = '\0';
+    picker->filtered_search[0] = '\0';
+    picker->count              = 0;
+    picker->scan_cursor        = 0;
+    picker->scan_total         = tool->cache.live_slots.count;
+    picker->scan_instance_slot = RECORD_SLOT_INVALID;
+    picker->scan_complete      = required_class == NULL || picker->scan_total == 0;
+    picker->match_count        = 0;
+    picker->filter_cursor      = 0;
+    picker->filter_complete    = false;
+    picker->matches_truncated  = false;
   }
 }
 
 static void
-call_draw_popup_tooltip(struct nk_context *ctx, struct nk_rect owner_bounds, struct nk_rect anchor, str_t text)
+call_picker_filter_tick(search_tool_t *tool, ufunc_call_dialog_t *dialog)
 {
-  if (!ctx || str_is_empty(text)) {
+  call_picker_t *picker = &dialog->picker;
+  str_t search          = str_from_cstr_with_cap(picker->search, sizeof(picker->search));
+  str_t filtered        = str_from_cstr_with_cap(picker->filtered_search, sizeof(picker->filtered_search));
+  if (!str_equal(search, filtered, 0)) {
+    str_write_fmt(picker->filtered_search, sizeof(picker->filtered_search), "%.*s", STR_ARG(search));
+    picker->match_count       = 0;
+    picker->filter_cursor     = 0;
+    picker->filter_complete   = false;
+    picker->matches_truncated = false;
+  }
+
+  if (picker->filter_complete && picker->filter_cursor >= picker->count) {
     return;
   }
+
+  uint64_t    start_us = time_now_us();
+  uint32_t    work     = 0;
+  bool        budget_exhausted = false;
+  tmp_arena_t tmp      = scratch_begin(NULL);
+  while (picker->filter_cursor < picker->count && picker->match_count < CALL_MAX_PICKER_RESULTS && !budget_exhausted) {
+    uint32_t  slot   = picker->slots[picker->filter_cursor++];
+    record_t *record = record_from_slot(tool, slot);
+    if (record && record_has_flag(record, RECORD_FLAG_LIVE) && record->obj &&
+        call_candidate_matches(record->obj, picker->required_class, picker->class_values, picker->interface_values)) {
+      bool matches = str_is_empty(search);
+      if (!matches) {
+        str_t full_name = unreal_uobject_push_full_name(record->obj, tmp.arena);
+        matches = str_find(full_name, search, STR_CMP_FLAG_IGNORE_CASE, NULL);
+      }
+
+      if (matches) {
+        picker->match_slots[picker->match_count++] = slot;
+      }
+    }
+
+    work += 1;
+    if ((work & 63u) == 0 && time_now_us() - start_us >= CALL_PICKER_BUDGET_US) {
+      budget_exhausted = true;
+    }
+  }
+  scratch_end(tmp);
+
+  if (picker->match_count == CALL_MAX_PICKER_RESULTS) {
+    picker->matches_truncated = true;
+    picker->filter_complete   = true;
+  } else {
+    picker->filter_complete = picker->scan_complete && picker->filter_cursor >= picker->count;
+  }
+}
+
+static void
+call_draw_popup_tooltip(struct nk_context *ctx, struct nk_rect owner_bounds, call_picker_tooltip_t *tooltip)
+{
+  if (!ctx || !ctx->current || !ctx->current->popup.active || tooltip->text[0] == '\0') {
+    return;
+  }
+
+  str_t          text   = str_from_cstr_with_cap(tooltip->text, sizeof(tooltip->text));
+  struct nk_rect anchor = tooltip->anchor;
 
   struct {
     int   offset;
@@ -1252,7 +1249,12 @@ call_draw_popup_tooltip(struct nk_context *ctx, struct nk_rect owner_bounds, str
 
       line_width = nk_text_width(ctx, ctx->style.font, ctx->style.font_size, (const char *)text.data + offset, end - offset);
       if (line_width > max_text_width) {
-        end = (last_break > offset) ? last_break : NK_MAX(offset + 1, end - 1);
+        if (last_break > offset) {
+          end = last_break;
+        } else {
+          end = NK_MAX(offset + 1, end - 1);
+        }
+
         line_width = nk_text_width(ctx, ctx->style.font, ctx->style.font_size, (const char *)text.data + offset, end - offset);
         break;
       }
@@ -1288,20 +1290,24 @@ call_draw_popup_tooltip(struct nk_context *ctx, struct nk_rect owner_bounds, str
     nk_draw_text(out, label, (const char *)text.data + lines[i].offset, lines[i].len, ctx->style.font, UI_C_BG_PANEL, UI_C_TEXT);
   }
   nk_push_scissor(out, old_clip);
+
+  /* NOTE: keep these commands in the popup range, which Nuklear draws above the parent window */
+  nk_finish_popup(ctx, ctx->current);
 }
 
 static bool
-call_picker_draw_contents(search_tool_t *tool, ufunc_call_dialog_t *dialog)
+call_picker_draw_contents(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_picker_tooltip_t *tooltip)
 {
   struct nk_context *ctx    = tool->ctx;
   call_picker_t     *picker = &dialog->picker;
 
-  bool           selected                         = false;
-  char           hovered_full_name[CALL_TEXT_CAP] = {0};
-  struct nk_rect hovered_bounds                   = {0};
+  bool selected = false;
 
   nk_layout_row_dynamic(ctx, 24.0f, 1);
   nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, picker->search, sizeof(picker->search), nk_filter_default);
+
+  call_picker_rebuild_tick(tool, dialog);
+  call_picker_filter_tick(tool, dialog);
 
   if (picker->allow_none) {
     nk_layout_row_dynamic(ctx, 22.0f, 1);
@@ -1315,41 +1321,38 @@ call_picker_draw_contents(search_tool_t *tool, ufunc_call_dialog_t *dialog)
     }
   }
 
-  str_t query = str_from_cstr_with_cap(picker->search, sizeof(picker->search));
-  int   shown = 0;
-
-  for (uint32_t i = 0; i < picker->count && shown < 256; ++i) {
-    uint32_t  slot   = picker->slots[i];
+  for (uint32_t i = 0; i < picker->match_count; ++i) {
+    uint32_t  slot   = picker->match_slots[i];
     record_t *record = record_from_slot(tool, slot);
-    if (!record || !record_has_flag(record, RECORD_FLAG_LIVE) || !record->obj) {
+    if (!record || !record_has_flag(record, RECORD_FLAG_LIVE) || !record->obj ||
+        !call_candidate_matches(record->obj, picker->required_class, picker->class_values, picker->interface_values)) {
       continue;
     }
 
     tmp_arena_t tmp = scratch_begin(NULL);
     {
-      str_t full_name = unreal_uobject_push_full_name(record->obj, tmp.arena);
-      str_t name      = unreal_uobject_push_name(record->obj, tmp.arena);
-      bool  matches   = str_is_empty(query) || str_find(full_name, query, STR_CMP_FLAG_IGNORE_CASE, NULL);
-      if (matches) {
-        struct nk_color object_color = uobject_kind_color(record->kind);
+      str_t           name         = unreal_uobject_push_name(record->obj, tmp.arena);
+      struct nk_color object_color = uobject_kind_color(record->kind);
 
-        nk_layout_row_dynamic(ctx, 22.0f, 1);
-        struct nk_rect item_bounds = nk_widget_bounds(ctx);
-        bool           hovered     = nk_widget_is_hovered(ctx);
+      nk_layout_row_dynamic(ctx, 22.0f, 1);
+      struct nk_rect item_bounds = nk_widget_bounds(ctx);
+      bool           hovered     = nk_widget_is_hovered(ctx);
 
-        nk_style_push_color(ctx, &ctx->style.button.text_normal, object_color);
-        nk_style_push_color(ctx, &ctx->style.button.text_hover, object_color);
-        nk_style_push_color(ctx, &ctx->style.button.text_active, object_color);
+      nk_style_push_color(ctx, &ctx->style.button.text_normal, object_color);
+      nk_style_push_color(ctx, &ctx->style.button.text_hover, object_color);
+      nk_style_push_color(ctx, &ctx->style.button.text_active, object_color);
 
-        bool pressed = nk_button_text(ctx, (const char *)name.data, (int)name.len);
+      bool pressed = nk_button_text(ctx, (const char *)name.data, (int)name.len);
 
-        nk_style_pop_color(ctx);
-        nk_style_pop_color(ctx);
-        nk_style_pop_color(ctx);
+      nk_style_pop_color(ctx);
+      nk_style_pop_color(ctx);
+      nk_style_pop_color(ctx);
 
+      if (hovered || pressed) {
+        str_t full_name = unreal_uobject_push_full_name(record->obj, tmp.arena);
         if (hovered) {
-          str_write_fmt(hovered_full_name, sizeof(hovered_full_name), "%.*s", STR_ARG(full_name));
-          hovered_bounds = item_bounds;
+          str_write_fmt(tooltip->text, sizeof(tooltip->text), "%.*s", STR_ARG(full_name));
+          tooltip->anchor = item_bounds;
         }
 
         if (pressed) {
@@ -1360,23 +1363,22 @@ call_picker_draw_contents(search_tool_t *tool, ufunc_call_dialog_t *dialog)
           }
           selected = true;
         }
-        shown += 1;
       }
     }
     scratch_end(tmp);
   }
 
-  if (shown >= 256) {
+  if (!picker->scan_complete || !picker->filter_complete) {
+    nk_layout_row_dynamic(ctx, 20.0f, 1);
+    nk_labelf_colored(ctx, NK_TEXT_CENTERED, UI_C_TEXT_MUTED, "Searching... %u candidates", picker->count);
+  } else if (picker->matches_truncated) {
     nk_layout_row_dynamic(ctx, 20.0f, 1);
     nk_label_colored(ctx, "More matches exist; narrow the search.", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
-  } else if (shown == 0 && !(picker->allow_none && str_is_empty(query))) {
+  } else if (picker->match_count == 0) {
     nk_layout_row_dynamic(ctx, 20.0f, 1);
     nk_label_colored(ctx, "No loaded matches", NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
   }
 
-  if (hovered_full_name[0] != '\0') {
-    call_draw_popup_tooltip(ctx, dialog->bounds, hovered_bounds, str_from_cstr_with_cap(hovered_full_name, sizeof(hovered_full_name)));
-  }
   return selected;
 }
 
@@ -1386,15 +1388,17 @@ call_draw_object_combo(search_tool_t       *tool,
                        call_object_ref_t   *ref,
                        uclass_t            *required_class,
                        bool                 class_values,
+                       bool                 interface_values,
                        bool                 allow_none)
 {
   tmp_arena_t tmp = scratch_begin(NULL);
   {
-    str_t label = call_object_ref_label(tool, ref, tmp.arena);
-    float width = NK_MAX(260.0f, nk_widget_width(tool->ctx));
-    struct nk_color label_color = ref && !ref->is_none && call_record_is_live_object(tool, ref->slot, ref->expected)
-                                  ? uobject_kind_color(uobject_kind(ref->expected))
-                                  : UI_C_TEXT_DIM;
+    str_t           label       = call_object_ref_label(tool, ref, tmp.arena);
+    float           width       = NK_MAX(260.0f, nk_widget_width(tool->ctx));
+    struct nk_color label_color = UI_C_TEXT_DIM;
+    if (ref && !ref->is_none && call_record_is_live_object(tool, ref->slot, ref->expected)) {
+      label_color = uobject_kind_color(uobject_kind(ref->expected));
+    }
 
     nk_style_push_color(tool->ctx, &tool->ctx->style.combo.label_normal, label_color);
     nk_style_push_color(tool->ctx, &tool->ctx->style.combo.label_hover, label_color);
@@ -1413,11 +1417,14 @@ call_draw_object_combo(search_tool_t       *tool,
     }
 
     if (open) {
-      call_picker_activate(tool, dialog, ref, NULL, NULL, required_class, class_values, allow_none);
-      if (call_picker_draw_contents(tool, dialog)) {
+      call_picker_tooltip_t tooltip = {0};
+      call_picker_activate(tool, dialog, ref, NULL, required_class, class_values, interface_values, allow_none);
+      if (call_picker_draw_contents(tool, dialog, &tooltip)) {
         nk_combo_close(tool->ctx);
       }
+
       nk_combo_end(tool->ctx);
+      call_draw_popup_tooltip(tool->ctx, dialog->bounds, &tooltip);
     }
   }
   scratch_end(tmp);
@@ -1451,11 +1458,14 @@ call_draw_soft_value(search_tool_t *tool, ufunc_call_dialog_t *dialog, call_valu
 
       nk_layout_row_push(ctx, picker_w);
       if (nk_combo_begin_label(ctx, "...", nk_vec2(440.0f, 360.0f))) {
-        call_picker_activate(tool, dialog, &node->object_ref, node->prop, node->input, call_node_required_class(node), node->class_picker, true);
-        if (call_picker_draw_contents(tool, dialog)) {
+        call_picker_tooltip_t tooltip = {0};
+        call_picker_activate(tool, dialog, &node->object_ref, node->input, unreal_fprop_get_reference_class(node->prop), node->class_picker, false, true);
+        if (call_picker_draw_contents(tool, dialog, &tooltip)) {
           nk_combo_close(ctx);
         }
+
         nk_combo_end(ctx);
+        call_draw_popup_tooltip(ctx, dialog->bounds, &tooltip);
       }
     }
     nk_layout_row_end(ctx);
@@ -1467,8 +1477,8 @@ static void
 call_grid_begin(struct nk_context *ctx, struct nk_grid *grid, struct nk_grid_state *state, float row_height)
 {
   static const struct nk_grid_column columns[] = {
-    {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 80.0f},
-    {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 72.0f},
+    {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 80.0f },
+    {.sizing = NK_GRID_COLUMN_CONTENT, .min_width = 72.0f },
     {.sizing = NK_GRID_COLUMN_FLEX,    .min_width = 160.0f},
   };
 
@@ -1536,11 +1546,7 @@ call_tree_button(struct nk_context *ctx, str_t title)
 }
 
 static void
-call_draw_value_row(search_tool_t       *tool,
-                    ufunc_call_dialog_t *dialog,
-                    struct nk_grid_state *grid_state,
-                    call_value_t         *node,
-                    int32_t               depth)
+call_draw_value_row(search_tool_t *tool, ufunc_call_dialog_t *dialog, struct nk_grid_state *grid_state, call_value_t *node, int32_t depth)
 {
   struct nk_context *ctx = tool->ctx;
 
@@ -1552,7 +1558,7 @@ call_draw_value_row(search_tool_t       *tool,
     nk_grid_row_begin(&grid);
 
     if (node->kind != CALL_VALUE_LEAF) {
-      str_t title = str_push_fmt(tmp.arena, "%s %.*s", node->expanded ? "-" : "+", STR_ARG(node->type));
+      str_t title = str_push_fmt(tmp.arena, "%s %.*s", call_tree_prefix(node->expanded), STR_ARG(node->type));
       float width = ui_text_width(ctx, title) + 2.0f * ctx->style.button.padding.x;
       nk_grid_push(&grid, 0, nk_vec2(width, ctx->style.font_size));
       if (call_tree_button(ctx, title)) {
@@ -1567,14 +1573,18 @@ call_draw_value_row(search_tool_t       *tool,
     nk_grid_push(&grid, 2, nk_vec2(0.0f, 22.0f));
     if (!node->supported) {
       nk_label_colored(ctx, "<unsupported>", NK_TEXT_LEFT, UI_C_RED);
-    } else if (node->kind == CALL_VALUE_ARRAY) {
+    } else if (call_value_kind_is_dynamic_container(node->kind)) {
       nk_spacer(ctx);
     } else if (node->kind == CALL_VALUE_FIXED_ARRAY) {
       nk_labelf_selectable_colored(ctx, NK_TEXT_LEFT, CALL_C_VALUE_TEXT, "Num=%d", node->child_count);
-    } else if (node->kind == CALL_VALUE_STRUCT) {
+    } else if (node->kind == CALL_VALUE_STRUCT || node->kind == CALL_VALUE_MAP_PAIR) {
       nk_label_selectable_colored(ctx, "{...}", NK_TEXT_LEFT, CALL_C_VALUE_TEXT);
     } else if (node->auto_world) {
-      uworld_t *world = globals.gworld_ptr ? *globals.gworld_ptr : NULL;
+      uworld_t *world = NULL;
+      if (globals.gworld_ptr) {
+        world = *globals.gworld_ptr;
+      }
+
       if (world && unreal_uobject_is_valid((uobject_t *)world)) {
         str_t name      = unreal_uobject_push_name((uobject_t *)world, tmp.arena);
         str_t full_name = unreal_uobject_push_full_name((uobject_t *)world, tmp.arena);
@@ -1585,9 +1595,8 @@ call_draw_value_row(search_tool_t       *tool,
       } else {
         nk_label_colored(ctx, "<no current world>", NK_TEXT_LEFT, UI_C_RED);
       }
-    } else if (unreal_fprop_class_is(node->prop, globals.unreal.obj_prop) ||
-               unreal_fprop_class_is(node->prop, globals.unreal.class_prop)) {
-      call_draw_object_combo(tool, dialog, &node->object_ref, call_node_required_class(node), node->class_picker, true);
+    } else if (call_prop_kind_uses_object_picker(unreal_fprop_get_kind(node->prop))) {
+      call_draw_object_combo(tool, dialog, &node->object_ref, unreal_fprop_get_reference_class(node->prop), node->class_picker, node->interface_picker, true);
     } else if (node->soft_picker) {
       call_draw_soft_value(tool, dialog, node);
     } else {
@@ -1603,7 +1612,7 @@ call_draw_value_row(search_tool_t       *tool,
     return;
   }
 
-  if (node->kind == CALL_VALUE_ARRAY) {
+  if (call_value_kind_is_dynamic_container(node->kind)) {
     tmp_arena_t label_tmp = scratch_begin(NULL);
     {
       struct nk_grid grid;
@@ -1620,7 +1629,7 @@ call_draw_value_row(search_tool_t       *tool,
     }
     scratch_end(label_tmp);
 
-    call_array_sync(dialog, node);
+    call_container_sync(dialog, node);
 
     int32_t idx = 0;
     for (call_value_t *child = node->first_child; child && idx < node->array_count; child = child->next, ++idx) {
@@ -1634,22 +1643,25 @@ call_draw_value_row(search_tool_t       *tool,
 }
 
 static void
-call_draw_result_row(search_tool_t         *tool,
-                     struct nk_grid_state *grid_state,
-                     call_result_t         *result,
-                     int32_t                depth)
+call_draw_result_row(search_tool_t *tool, struct nk_grid_state *grid_state, call_result_t *result, int32_t depth)
 {
   struct nk_context *ctx = tool->ctx;
 
   tmp_arena_t tmp = scratch_begin(NULL);
   {
     str_t indented_name = str_push_fmt(tmp.arena, "%*s%.*s", depth * 2, "", STR_ARG(result->name));
+    str_t value         = result->value;
+    if (result->truncated) {
+      const char *suffix = str_is_empty(value) ? "truncated" : " [truncated]";
+      value              = str_push_fmt(tmp.arena, "%.*s%s", STR_ARG(value), suffix);
+    }
+
     struct nk_grid grid;
     call_grid_begin(ctx, &grid, grid_state, 24.0f);
     nk_grid_row_begin(&grid);
 
     if (result->first_child) {
-      str_t title = str_push_fmt(tmp.arena, "%s %.*s", result->expanded ? "-" : "+", STR_ARG(result->type));
+      str_t title = str_push_fmt(tmp.arena, "%s %.*s", call_tree_prefix(result->expanded), STR_ARG(result->type));
       float width = ui_text_width(ctx, title) + 2.0f * ctx->style.button.padding.x;
       nk_grid_push(&grid, 0, nk_vec2(width, ctx->style.font_size));
       if (call_tree_button(ctx, title)) {
@@ -1661,16 +1673,9 @@ call_draw_result_row(search_tool_t         *tool,
 
     call_grid_text(&grid, 1, indented_name, UI_C_TEXT);
 
-    nk_grid_push(&grid, 2, nk_vec2(0.0f, 22.0f));
-    call_edit_colored(ctx,
-                      (nk_flags)NK_EDIT_FIELD | (nk_flags)NK_EDIT_READ_ONLY,
-                      result->value,
-                      sizeof(result->value),
-                      nk_filter_default,
-                      CALL_C_VALUE_TEXT);
-    if (result->tooltip[0] != '\0' && nk_widget_is_hovered(ctx)) {
-      str_t tooltip = str_from_cstr_with_cap(result->tooltip, sizeof(result->tooltip));
-      nk_tooltip_text(ctx, (const char *)tooltip.data, (int)tooltip.len);
+    call_grid_text(&grid, 2, value, CALL_C_VALUE_TEXT);
+    if (!str_is_empty(result->tooltip) && nk_widget_is_hovered(ctx)) {
+      nk_tooltip_text(ctx, (const char *)result->tooltip.data, (int)result->tooltip.len);
     }
     nk_grid_row_end(&grid);
     nk_grid_end(&grid);
@@ -1688,7 +1693,7 @@ static bool
 call_has_input_params(ufunc_call_dialog_t *dialog)
 {
   for (call_value_t *node = dialog->first_param; node; node = node->next) {
-    if (node->role == CALL_PARAM_INPUT) {
+    if (node->role == UNREAL_FUNC_PARAM_INPUT) {
       return true;
     }
   }
@@ -1699,7 +1704,7 @@ static bool
 call_has_output_params(ufunc_call_dialog_t *dialog)
 {
   for (call_value_t *node = dialog->first_param; node; node = node->next) {
-    if (node->role == CALL_PARAM_OUTPUT || node->role == CALL_PARAM_RETURN) {
+    if (node->role == UNREAL_FUNC_PARAM_OUTPUT || node->role == UNREAL_FUNC_PARAM_RETURN) {
       return true;
     }
   }
@@ -1767,6 +1772,7 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
   ufunc_call_dialog_t *dialog      = tool->call_dialog;
   struct nk_context   *ctx         = tool->ctx;
   const char          *window_name = "uobject_search.ufunction_call";
+  dialog->picker.active_this_frame = false;
 
   if (nk_window_is_active(ctx, "uobject_search")) {
     nk_window_set_focus(ctx, window_name);
@@ -1781,9 +1787,10 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
   }
 
   tmp_arena_t title_tmp = scratch_begin(NULL);
-  str_t func_name = (dialog->func_expected && unreal_uobject_is_valid((uobject_t *)dialog->func_expected))
-                    ? unreal_uobject_push_full_name((uobject_t *)dialog->func_expected, title_tmp.arena)
-                    : STR_LIT("<stale UFunction>");
+  str_t func_name = STR_LIT("<stale UFunction>");
+  if (dialog->func_expected && unreal_uobject_is_valid((uobject_t *)dialog->func_expected)) {
+    func_name = unreal_uobject_push_full_name((uobject_t *)dialog->func_expected, title_tmp.arena);
+  }
 
   str_t    title = str_push_fmt(title_tmp.arena, "Call %.*s", STR_ARG(func_name));
   nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE | NK_WINDOW_NO_SCROLLBAR;
@@ -1805,16 +1812,19 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
       tmp_arena_t target_tmp = scratch_begin(NULL);
       {
         struct nk_grid grid;
-        str_t target_type = dialog->receiver_class
-                            ? str_push_fmt(target_tmp.arena, "Object<%.*s>", STR_ARG(unreal_uobject_push_name((uobject_t *)dialog->receiver_class, target_tmp.arena)))
-                            : STR_LIT("Object<?>" );
+        str_t          target_type = STR_LIT("Object<?>");
+        if (dialog->receiver_class) {
+          str_t receiver_name = unreal_uobject_push_name((uobject_t *)dialog->receiver_class, target_tmp.arena);
+          target_type = str_push_fmt(target_tmp.arena, "Object<%.*s>", STR_ARG(receiver_name));
+        }
+
         call_target_grid_begin(ctx, &grid, &dialog->target_grid, 26.0f);
         {
           nk_grid_row_begin(&grid);
           {
             call_grid_text(&grid, 0, target_type, CALL_C_TYPE_TEXT);
             nk_grid_push(&grid, 1, nk_vec2(0.0f, 24.0f));
-            call_draw_object_combo(tool, dialog, &dialog->target, dialog->receiver_class, false, false);
+            call_draw_object_combo(tool, dialog, &dialog->target, dialog->receiver_class, false, false, false);
           }
           nk_grid_row_end(&grid);
         }
@@ -1841,7 +1851,7 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
 
       if (call_has_input_params(dialog)) {
         for (call_value_t *node = dialog->first_param; node; node = node->next) {
-          if (node->role == CALL_PARAM_INPUT) {
+          if (node->role == UNREAL_FUNC_PARAM_INPUT) {
             call_draw_value_row(tool, dialog, &dialog->input_grid, node, 0);
           }
         }
@@ -1863,16 +1873,23 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
         }
       } else {
         nk_layout_row_dynamic(ctx, 22.0f, 1);
-        nk_label_colored(ctx,
-                         call_has_output_params(dialog) ? "Call the function to populate output values" : "No return/out parameters",
-                         NK_TEXT_CENTERED,
-                         UI_C_TEXT_MUTED);
+        const char *placeholder = "No return/out parameters";
+        if (call_has_output_params(dialog)) {
+          placeholder = "Call the function to populate output values";
+        }
+
+        nk_label_colored(ctx, placeholder, NK_TEXT_CENTERED, UI_C_TEXT_MUTED);
       }
       nk_group_end(ctx);
     }
 
     nk_layout_row_dynamic(ctx, status_h, 1);
-    nk_label_colored(ctx, dialog->status, NK_TEXT_CENTERED, dialog->status_is_error ? UI_C_RED : CALL_C_VALUE_TEXT);
+    struct nk_color status_color = CALL_C_VALUE_TEXT;
+    if (dialog->status_is_error) {
+      status_color = UI_C_RED;
+    }
+
+    nk_label_colored(ctx, dialog->status, NK_TEXT_CENTERED, status_color);
 
     nk_layout_row_dynamic(ctx, buttons_h, 2);
 
@@ -1909,6 +1926,7 @@ ufunc_call_draw(search_tool_t *tool, unsigned int vw, unsigned int vh)
     nk_spacer(ctx);
   }
   nk_end(ctx);
+  dialog->picker.active_last_frame = dialog->picker.active_this_frame;
   scratch_end(title_tmp);
 
   if (nk_window_is_closed(ctx, window_name)) {

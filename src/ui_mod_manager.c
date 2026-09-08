@@ -2,6 +2,7 @@
 #include "arena.h"
 #include "config.h"
 #include "globals.h"
+#include "lua_mod_runtime.h"
 #include "mod_manager.h"
 #include "scratch.h"
 #include "str.h"
@@ -428,11 +429,13 @@ form_console_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, ui_conso
   ui_console_cfg_t *cfg       = &console->cfg;
   ui_console_cfg_t *saved_cfg = &console->saved_cfg;
 
-  form_keybind(ctx, &grid_state, capture, STR_LIT("Console shortcut: "),  STR_LIT("Shortcut that opens or closes the console"), STR_LIT("console.toggle_keybind"), &saved_cfg->toggle_bind, &cfg->toggle_bind);
-  form_bool   (ctx, &grid_state,          STR_LIT("Auto-scroll: "),       STR_LIT("Scroll to the newest message when console output changes"),                     &saved_cfg->auto_scroll, &cfg->auto_scroll);
-  form_bool   (ctx, &grid_state,          STR_LIT("Wrap lines: "),        STR_LIT("Wrap long console output to the visible width"),                                &saved_cfg->wrap_lines,  &cfg->wrap_lines);
-  form_enum   (ctx, &grid_state,          STR_LIT("Position: "),          STR_LIT("Place the console at the top or bottom of the screen"),                         &saved_cfg->position,    &cfg->position,  ui_console_position_str_array());
-  form_enum   (ctx, &grid_state,          STR_LIT("Minimum log level: "), STR_LIT("Hide messages below the selected severity"),                                    &saved_cfg->min_level,   &cfg->min_level, ui_console_log_level_str_array());
+  form_keybind(ctx, &grid_state, capture, STR_LIT("Console shortcut: "),  STR_LIT("Shortcut that opens or closes the console"), STR_LIT("console.toggle_keybind"),   &saved_cfg->toggle_bind,    &cfg->toggle_bind);
+  form_bool   (ctx, &grid_state,          STR_LIT("Auto-scroll: "),       STR_LIT("Scroll to the newest message when console output changes"),                       &saved_cfg->auto_scroll,    &cfg->auto_scroll);
+  form_bool   (ctx, &grid_state,          STR_LIT("Wrap lines: "),        STR_LIT("Wrap long console output to the visible width"),                                  &saved_cfg->wrap_lines,     &cfg->wrap_lines);
+  form_bool   (ctx, &grid_state,          STR_LIT("Show timestamp: "),    STR_LIT("Show local date/time and the frame within the second (#000 is the first frame)"), &saved_cfg->show_timestamp, &cfg->show_timestamp);
+  form_bool   (ctx, &grid_state,          STR_LIT("Show log level: "),    STR_LIT("Prefix messages with [DBG], [INF], [WRN], or [ERR]"),                             &saved_cfg->show_log_level, &cfg->show_log_level);
+  form_enum   (ctx, &grid_state,          STR_LIT("Position: "),          STR_LIT("Place the console at the top or bottom of the screen"),                           &saved_cfg->position,       &cfg->position,  ui_console_position_str_array());
+  form_enum   (ctx, &grid_state,          STR_LIT("Minimum log level: "), STR_LIT("Hide messages below the selected severity"),                                      &saved_cfg->min_level,      &cfg->min_level, ui_console_log_level_str_array());
 
   return ui_console_cfg_is_dirty(console);
 }
@@ -506,6 +509,10 @@ mod_status_text(mod_t *m, arena_t *arena)
 
     if (m->has_code && m->dll.err_stage != MOD_DLL_ERROR_NONE) {
       str_list_push(tmp.arena, &parts, STR_LIT("Code"));
+    }
+
+    if (m->has_lua && m->lua.err_msg.len > 0) {
+      str_list_push(tmp.arena, &parts, STR_LIT("Lua"));
     }
 
     if (m->has_blueprints) {
@@ -720,15 +727,39 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
   scratch_end(tmp);
 }
 
+static bool
+draw_custom_config(struct nk_context *ctx, mod_t *m)
+{
+  bool drawn = false;
+  if (m->has_code && m->dll.funcs.draw_config) {
+    m->dll.funcs.draw_config(mod_handle_make(m), ctx);
+    drawn = true;
+  }
+
+  if (m->has_lua && m->lua.active && lua_mod_runtime_draw_config(m, ctx)) {
+    drawn = true;
+  }
+
+  return drawn;
+}
+
+static bool
+has_custom_config(mod_t *m)
+{
+  if (m->has_code && m->dll.funcs.draw_config) {
+    return true;
+  }
+
+  return m->has_lua && m->lua.active && lua_mod_runtime_has_draw_config(m);
+}
+
 static void
 draw_config_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
   static struct nk_grid_state option_grid_state = {0};
   tmp_arena_t tmp = scratch_begin(NULL);
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Config", &ui->inspector.options_open)) {
-    if (m->has_code && m->dll.funcs.draw_config) {
-      m->dll.funcs.draw_config(mod_handle_make(m), ctx);
-    } else {
+    if (!draw_custom_config(ctx, m)) {
       bool dirty = false;
 
       if (m->has_options) {
@@ -919,6 +950,32 @@ draw_assets_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
 }
 
 static void
+draw_lua_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_t *m)
+{
+  static struct nk_grid_state info_grid    = {0};
+  static struct nk_grid_state runtime_grid = {0};
+
+  if (nk_tree_state_push(ctx, NK_TREE_TAB, "Lua", &ui->inspector.lua_open)) {
+    if (nk_tree_state_push(ctx, NK_TREE_NODE, "Script info", &ui->inspector.lua_info_open)) {
+      draw_key_value(ctx, &info_grid, STR_LIT("Entry:"), m->manifest.lua.path, UI_C_TEXT, false);
+      draw_key_value(ctx, &info_grid, STR_LIT("Lua runtime:"), mod_lua_runtime_kind_to_str(m->manifest.lua.runtime_kind), UI_C_TEXT, false);
+      nk_tree_pop(ctx);
+    }
+
+    if (nk_tree_state_push(ctx, NK_TREE_NODE, "Runtime", &ui->inspector.lua_runtime_open)) {
+      draw_key_value(ctx, &runtime_grid, STR_LIT("Running:"), STR_BOOL(m->lua.active), m->lua.active ? UI_C_GREEN : UI_C_RED, false);
+      if (m->lua.err_msg.len > 0) {
+        draw_key_value(ctx, &runtime_grid, STR_LIT("Error:"), err_msg_as_str(m->lua.err_msg), UI_C_RED, false);
+      }
+      nk_tree_pop(ctx);
+    }
+
+    nk_tree_pop(ctx);
+    draw_spacer(ctx, 6.0f);
+  }
+}
+
+static void
 draw_blueprints_section(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager, mod_t *m)
 {
   static struct nk_grid_state info_grid    = {0};
@@ -1089,6 +1146,14 @@ dialog_close(ui_mod_manager_t *ui)
 }
 
 static void
+dialog_keep_above_manager(struct nk_context *ctx, const char *dialog_name)
+{
+  if (nk_window_is_active(ctx, "mod_manager")) {
+    nk_window_set_focus(ctx, dialog_name);
+  }
+}
+
+static void
 draw_config_dialog(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager)
 {
   if (ui->dialog.kind != UI_DIALOG_CONFIG) {
@@ -1100,6 +1165,8 @@ draw_config_dialog(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *
 
   const float min_w = 460.0f;
   const float min_h = 240.0f;
+
+  dialog_keep_above_manager(ctx, name);
 
   if (nk_begin(ctx, name, ui->dialog.config_win.bounds, flags)) {
     struct nk_rect content  = nk_window_get_content_region(ctx);
@@ -1254,6 +1321,8 @@ draw_reorder_dialog(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
   const float min_w = 420.0f;
   const float min_h = 320.0f;
 
+  dialog_keep_above_manager(ctx, name);
+
   if (nk_begin(ctx, name, ui->dialog.reorder_win.bounds, flags)) {
     ui_win_clamp_bounds(ctx, name, nk_vec2(min_w, min_h), nk_vec2((float)ui->vw, (float)ui->vh));
     draw_reorder_content(ui, ctx, manager);
@@ -1300,12 +1369,16 @@ draw_right_panel(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *ma
 
   draw_mod_header(ui, ctx, manager, m);
 
-  if (m->has_options || m->has_blueprints || (m->has_code && m->dll.funcs.draw_config)) {
+  if (m->has_options || m->has_blueprints || has_custom_config(m)) {
     draw_config_section(ui, ctx, manager, m);
   }
 
   if (m->has_code) {
     draw_code_section(ui, ctx, manager, m);
+  }
+
+  if (m->has_lua) {
+    draw_lua_section(ui, ctx, m);
   }
 
   if (m->has_assets) {
@@ -1320,7 +1393,11 @@ draw_right_panel(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *ma
     m->dll.funcs.draw_panel(mod_handle_make(m), ctx);
   }
 
-  if (!m->has_options && !m->has_code && !m->has_assets && !m->has_blueprints) {
+  if (m->has_lua && m->lua.active) {
+    lua_mod_runtime_draw_panel(m, ctx);
+  }
+
+  if (!m->has_options && !m->has_code && !m->has_lua && !m->has_assets && !m->has_blueprints) {
     nk_layout_row_dynamic(ctx, 20.0f, 1);
     nk_label(ctx, "This mod does not expose any settings or runtime controls", NK_TEXT_LEFT);
   }
@@ -1537,6 +1614,9 @@ ui_mod_manager_init(ui_mod_manager_t *ui, ui_keybind_capture_t *cap)
         .code_open               = NK_MAXIMIZED,
         .code_dll_info_open      = NK_MINIMIZED,
         .code_runtime_open       = NK_MAXIMIZED,
+        .lua_open                = NK_MAXIMIZED,
+        .lua_info_open           = NK_MINIMIZED,
+        .lua_runtime_open        = NK_MAXIMIZED,
         .blueprints_open         = NK_MAXIMIZED,
         .blueprints_info_open    = NK_MINIMIZED,
         .blueprints_runtime_open = NK_MAXIMIZED,

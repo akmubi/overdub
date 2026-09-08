@@ -8,18 +8,17 @@
 #include "types.h"
 #include "ui_nuklear.h"
 #include "unreal.h"
+#include "unreal_prop.h"
 
 #include "vendor_stb.h"
-
-#define DETAIL_MAX_CONTAINER_ELEMS (128)
 
 #define DETAIL_C_ROW_COLLAPSIBLE_BG     nk_rgba(34, 43, 48, 210)
 #define DETAIL_C_ROW_COLLAPSIBLE_HOVER  nk_rgba(95, 178, 145, 255)
 #define DETAIL_C_ROW_COLLAPSIBLE_ACTIVE nk_rgba(50, 65, 72, 245)
 
-#define DETAIL_C_PROP_TYPE_TEXT       nk_rgba(218, 156, 62, 255)
-#define DETAIL_C_PROP_VALUE_TEXT      nk_rgba(139, 191, 166, 255)
-#define DETAIL_C_PROP_LINK_VALUE_TEXT nk_rgba(122, 184, 232, 255)
+#define DETAIL_C_PROP_TYPE_TEXT       UI_C_PROP_TYPE_TEXT
+#define DETAIL_C_PROP_VALUE_TEXT      UI_C_PROP_VALUE_TEXT
+#define DETAIL_C_PROP_LINK_VALUE_TEXT UI_C_PROP_LINK_TEXT
 #define DETAIL_C_PROP_NAME_TEXT       UI_C_TEXT
 #define DETAIL_C_PROP_OFFSET_TEXT     UI_C_TEXT
 #define DETAIL_C_PROP_SIZE_TEXT       UI_C_TEXT
@@ -41,113 +40,8 @@
 #define DETAIL_ENUM_COL_TEXT_NAME  "NAME"
 #define DETAIL_ENUM_COL_TEXT_VALUE "VALUE"
 
-typedef struct detail_fvector2d_s detail_fvector2d_t;
-struct detail_fvector2d_s {
-  float x;
-  float y;
-};
-
-typedef struct detail_fvector4_s detail_fvector4_t;
-struct detail_fvector4_s {
-  float x;
-  float y;
-  float z;
-  float w;
-};
-
-typedef struct detail_flinear_color_s detail_flinear_color_t;
-struct detail_flinear_color_s {
-  float r;
-  float g;
-  float b;
-  float a;
-};
-
-typedef struct detail_fgameplay_tag_s detail_fgameplay_tag_t;
-struct detail_fgameplay_tag_s {
-  fname_t name;
-};
-
-typedef TARRAY(detail_fgameplay_tag_t) detail_fgameplay_tag_array_t;
-
-typedef struct detail_fgameplay_tag_container_s detail_fgameplay_tag_container_t;
-struct detail_fgameplay_tag_container_s {
-  detail_fgameplay_tag_array_t tags;
-  detail_fgameplay_tag_array_t parent_tags;
-};
-
-typedef struct detail_fint_point_s detail_fint_point_t;
-struct detail_fint_point_s {
-  int32_t x;
-  int32_t y;
-};
-
-typedef struct detail_fint_vector_s detail_fint_vector_t;
-struct detail_fint_vector_s {
-  int32_t x;
-  int32_t y;
-  int32_t z;
-};
-
-typedef TARRAY(void) detail_tarray_view_t;
-
-typedef struct detail_tsparse_view_s detail_tsparse_view_t;
-struct detail_tsparse_view_s {
-  detail_tarray_view_t data;
-  tbit_array_t         alloc_flags;
-  int32_t              first_free_idx;
-  int32_t              num_free_idx;
-};
-
-typedef struct detail_tset_view_s detail_tset_view_t;
-struct detail_tset_view_s {
-  detail_tsparse_view_t elems;
-  hash_allocator_t      hash;
-  int32_t               hash_size;
-};
-
-typedef struct detail_fweak_object_ptr_s detail_fweak_object_ptr_t;
-struct detail_fweak_object_ptr_s {
-  int32_t object_idx;
-  int32_t serial_num;
-};
-
-typedef struct detail_fguid_s detail_fguid_t;
-struct detail_fguid_s {
-  uint32_t a;
-  uint32_t b;
-  uint32_t c;
-  uint32_t d;
-};
-
-typedef struct detail_flazy_object_ptr_s detail_flazy_object_ptr_t;
-struct detail_flazy_object_ptr_s {
-  detail_fweak_object_ptr_t weak;
-  int32_t                   tag_at_last_test;
-  detail_fguid_t            object_id;
-};
-
-typedef struct detail_fscript_interface_s detail_fscript_interface_t;
-struct detail_fscript_interface_s {
-  uobject_t *object;
-  void      *iface;
-};
-
-typedef struct detail_fscript_delegate_s detail_fscript_delegate_t;
-struct detail_fscript_delegate_s {
-  detail_fweak_object_ptr_t object;
-  fname_t                   func_name;
-};
-
-typedef TARRAY(detail_fscript_delegate_t) detail_fscript_delegate_array_t;
-
-typedef struct detail_fsoft_object_ptr_s detail_fsoft_object_ptr_t;
-struct detail_fsoft_object_ptr_s {
-  detail_fweak_object_ptr_t weak;
-  int32_t                   tag_at_last_test;
-  int32_t                   pad0;
-  fsoft_object_path_t       path;
-};
+typedef fscript_delegate_t           detail_fscript_delegate_t;
+typedef fmulticast_script_delegate_t detail_fscript_delegate_array_t;
 
 static void
 detail_copy_text(struct nk_context *ctx, str_t text)
@@ -350,25 +244,12 @@ detail_prop_push_array_elem(search_tool_t *tool, detail_tab_t *tab, fprop_t *ele
 static detail_prop_t *
 detail_prop_push_set_elem(search_tool_t *tool, detail_tab_t *tab, fprop_t *elem, uint32_t elem_idx, uint8_t *elem_addr, int32_t elem_offset, uint32_t depth, bool permanent, bool runtime);
 static detail_prop_t *
-detail_prop_push_map_pair(search_tool_t *tool, detail_tab_t *tab, fprop_map_t *map, uint32_t pair_idx, uint8_t *pair_addr, int32_t pair_offset, uint32_t depth, bool permanent, bool runtime);
+detail_prop_push_map_pair(
+  search_tool_t *tool, detail_tab_t *tab, fprop_map_t *map, uint32_t pair_idx, uint8_t *key_addr, uint8_t *val_addr, int32_t pair_offset, uint32_t depth, bool permanent, bool runtime);
 static detail_func_t *
 detail_func_push(search_tool_t *tool, detail_tab_t *tab, record_t *func_record, int32_t index);
 static detail_enum_t *
 detail_enum_push(search_tool_t *tool, detail_tab_t *tab, record_t *enum_record);
-
-static inline bool
-fprop_struct_is(fprop_t *prop, fname_t name)
-{
-  ASSERT(prop != NULL);
-
-  fprop_struct_t *sp = (fprop_struct_t *)prop;
-  if (!sp->script_struct) {
-    return false;
-  }
-
-  uobject_t *obj = (uobject_t *)sp->script_struct;
-  return unreal_fname_equal(obj->name, name, false);
-}
 
 detail_prop_t *
 detail_prop_push_pseudo(search_tool_t *tool, detail_tab_t *tab, fprop_t *prop, str_t name, uint32_t depth, bool permanent, bool runtime)
@@ -417,42 +298,57 @@ detail_prop_expand_complex(search_tool_t *tool, detail_tab_t *tab, detail_prop_t
     return;
   }
 
-  if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-    fprop_struct_t *sp = (fprop_struct_t *)prop;
-    if (sp->script_struct) {
-      ustruct_t *st = (ustruct_t *)sp->script_struct;
-      for (ffield_t *f = st->child_props; f; f = f->next) {
-        fprop_t       *child_prop = (fprop_t *)f;
-        detail_prop_t *child_node = detail_prop_push(tool, tab, child_prop, false, depth + 1, permanent, runtime);
-        if (child_node) {
-          QUEUE_PUSH(node->first_child, node->last_child, child_node);
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_STRUCT: {
+      fprop_struct_t *sp = (fprop_struct_t *)prop;
+      if (sp->script_struct) {
+        ustruct_t *st = (ustruct_t *)sp->script_struct;
+        for (ffield_t *f = st->child_props; f; f = f->next) {
+          fprop_t       *child_prop = (fprop_t *)f;
+          detail_prop_t *child_node = detail_prop_push(tool, tab, child_prop, false, depth + 1, permanent, runtime);
+          if (child_node) {
+            QUEUE_PUSH(node->first_child, node->last_child, child_node);
+          }
         }
       }
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
-    fprop_array_t *ap         = (fprop_array_t *)prop;
-    detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, ap->inner, STR_LIT("Inner"), depth + 1, permanent, runtime);
-    if (child_node) {
-      QUEUE_PUSH(node->first_child, node->last_child, child_node);
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
-    fprop_set_t   *sp         = (fprop_set_t *)prop;
-    detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, sp->elem_prop, STR_LIT("Element"), depth + 1, permanent, runtime);
-    if (child_node) {
-      QUEUE_PUSH(node->first_child, node->last_child, child_node);
-    }
-  } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
-    fprop_map_t *mp = (fprop_map_t *)prop;
-
-    detail_prop_t *key_child_node = detail_prop_push_pseudo(tool, tab, mp->key_prop, STR_LIT("Key"), depth + 1, permanent, runtime);
-    if (key_child_node) {
-      QUEUE_PUSH(node->first_child, node->last_child, key_child_node);
+      break;
     }
 
-    detail_prop_t *val_child_node = detail_prop_push_pseudo(tool, tab, mp->val_prop, STR_LIT("Value"), depth + 1, permanent, runtime);
-    if (val_child_node) {
-      QUEUE_PUSH(node->first_child, node->last_child, val_child_node);
+    case UNREAL_PROP_KIND_ARRAY: {
+      fprop_array_t *ap         = (fprop_array_t *)prop;
+      detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, ap->inner, STR_LIT("Inner"), depth + 1, permanent, runtime);
+      if (child_node) {
+        QUEUE_PUSH(node->first_child, node->last_child, child_node);
+      }
+      break;
     }
+
+    case UNREAL_PROP_KIND_SET: {
+      fprop_set_t   *sp         = (fprop_set_t *)prop;
+      detail_prop_t *child_node = detail_prop_push_pseudo(tool, tab, sp->elem_prop, STR_LIT("Element"), depth + 1, permanent, runtime);
+      if (child_node) {
+        QUEUE_PUSH(node->first_child, node->last_child, child_node);
+      }
+      break;
+    }
+
+    case UNREAL_PROP_KIND_MAP: {
+      fprop_map_t *mp = (fprop_map_t *)prop;
+
+      detail_prop_t *key_child_node = detail_prop_push_pseudo(tool, tab, mp->key_prop, STR_LIT("Key"), depth + 1, permanent, runtime);
+      if (key_child_node) {
+        QUEUE_PUSH(node->first_child, node->last_child, key_child_node);
+      }
+
+      detail_prop_t *val_child_node = detail_prop_push_pseudo(tool, tab, mp->val_prop, STR_LIT("Value"), depth + 1, permanent, runtime);
+      if (val_child_node) {
+        QUEUE_PUSH(node->first_child, node->last_child, val_child_node);
+      }
+      break;
+    }
+
+    default:
+      break;
   }
 }
 
@@ -512,6 +408,7 @@ detail_prop_push_array_elem(
     node->array_dim      = elem->array_dim;
     node->has_value_addr = elem_addr != NULL;
     node->value_addr     = elem_addr;
+    node->live_slot_idx  = elem_idx;
     node->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)node->offset));
     node->size_text      = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)node->size));
 
@@ -554,7 +451,7 @@ detail_prop_push_set_elem(
 
 detail_prop_t *
 detail_prop_push_map_pair(
-  search_tool_t *tool, detail_tab_t *tab, fprop_map_t *map, uint32_t pair_idx, uint8_t *pair_addr, int32_t pair_offset, uint32_t depth, bool permanent, bool runtime)
+  search_tool_t *tool, detail_tab_t *tab, fprop_map_t *map, uint32_t pair_idx, uint8_t *key_addr, uint8_t *val_addr, int32_t pair_offset, uint32_t depth, bool permanent, bool runtime)
 {
   ASSERT(tool != NULL);
   ASSERT(tool->ctx != NULL);
@@ -597,8 +494,8 @@ detail_prop_push_map_pair(
   pair->type           = ui_text_span_make(tool->ctx, pair_type_name);
   pair->offset         = pair_offset;
   pair->size           = map->map_layout.set_layout.size;
-  pair->has_value_addr = true;
-  pair->value_addr     = pair_addr;
+  pair->has_value_addr = key_addr != NULL && val_addr != NULL;
+  pair->value_addr     = key_addr;
   pair->live_slot_idx  = pair_idx;
   pair->children_kind  = DETAIL_PROP_CHILDREN_SCHEMA;
   pair->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)pair->offset));
@@ -610,8 +507,8 @@ detail_prop_push_map_pair(
   key->offset         = 0;
   key->size           = map->key_prop->elem_size;
   key->array_dim      = map->key_prop->array_dim;
-  key->has_value_addr = true;
-  key->value_addr     = pair->value_addr;
+  key->has_value_addr = key_addr != NULL;
+  key->value_addr     = key_addr;
   key->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)key->offset));
   key->size_text      = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)key->size));
 
@@ -624,8 +521,8 @@ detail_prop_push_map_pair(
   val->offset         = map->map_layout.value_offset;
   val->size           = map->val_prop->elem_size;
   val->array_dim      = map->val_prop->array_dim;
-  val->has_value_addr = true;
-  val->value_addr     = pair->value_addr + val->offset;
+  val->has_value_addr = val_addr != NULL;
+  val->value_addr     = val_addr;
   val->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)val->offset));
   val->size_text      = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)val->size));
 
@@ -795,6 +692,9 @@ detail_tab_build(search_tool_t *tool, detail_tab_t *tab)
   }
 
   if (tab->record->kind == UOBJECT_KIND_PACKAGE) {
+    uint64_t state_size   = ((uint64_t)tool->cache.record_cap + 7) / 8;
+    tab->package_expanded = ARENA_PUSH_ARRAY_ZERO(tab->info_arena, uint8_t, state_size);
+    ASSERT(tab->package_expanded != NULL);
     return;
   }
 
@@ -1108,287 +1008,6 @@ details_clear_stale(search_tool_t *tool)
   }
 }
 
-static int64_t
-fprop_read_int_value(fprop_t *prop, void *addr)
-{
-  if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
-    return *(uint8_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.int8_prop)) {
-    return *(int8_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.int16_prop)) {
-    return *(int16_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.int_prop)) {
-    return *(int32_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.int64_prop)) {
-    return *(int64_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) {
-    return *(uint16_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
-    return *(uint32_t *)addr;
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
-    return (int64_t)*(uint64_t *)addr;
-  }
-
-  return 0;
-}
-
-static str_t
-detail_enum_value_name(arena_t *arena, uenum_t *uenum, int64_t value)
-{
-  if (!uenum) {
-    return STR_NULL;
-  }
-
-  for (int32_t i = 0; i < uenum->names.num; ++i) {
-    if (uenum->names.data[i].value == value) {
-      return unreal_fname_to_str(uenum->names.data[i].key, arena);
-    }
-  }
-
-  return STR_NULL;
-}
-
-static str_t
-fvector_push_summary(arena_t *arena, void *addr)
-{
-  ASSERT(addr != NULL);
-
-  float *v = (float *)addr;
-  return str_push_fmt(arena, "{X=%.3f Y=%.3f Z=%.3f}", v[0], v[1], v[2]);
-}
-
-static str_t
-frotator_push_summary(arena_t *arena, void *addr)
-{
-  ASSERT(addr != NULL);
-
-  float *r = (float *)addr;
-  return str_push_fmt(arena, "{Pitch=%.3f Yaw=%.3f Roll=%.3f}", r[0], r[1], r[2]);
-}
-
-static str_t
-fcolor_push_summary(arena_t *arena, void *addr)
-{
-  ASSERT(addr != NULL);
-
-  uint8_t *c = (uint8_t *)addr;
-
-  uint8_t b = c[0];
-  uint8_t g = c[1];
-  uint8_t r = c[2];
-  uint8_t a = c[3];
-
-  return str_push_fmt(arena, "{R=%u G=%u B=%u A=%u}", r, g, b, a);
-}
-
-static str_t
-fvector2d_push_summary(arena_t *arena, void *addr)
-{
-  detail_fvector2d_t *v = (detail_fvector2d_t *)addr;
-  return str_push_fmt(arena, "{X=%.3f Y=%.3f}", v->x, v->y);
-}
-
-static str_t
-fvector4_push_summary(arena_t *arena, void *addr)
-{
-  detail_fvector4_t *v = (detail_fvector4_t *)addr;
-  return str_push_fmt(arena, "{X=%.3f Y=%.3f Z=%.3f W=%.3f}", v->x, v->y, v->z, v->w);
-}
-
-static str_t
-flinear_color_push_summary(arena_t *arena, void *addr)
-{
-  detail_flinear_color_t *c = (detail_flinear_color_t *)addr;
-  return str_push_fmt(arena, "{R=%.3f G=%.3f B=%.3f A=%.3f}", c->r, c->g, c->b, c->a);
-}
-
-static str_t
-fquat_push_summary(arena_t *arena, void *addr)
-{
-  fquat_t *q = (fquat_t *)addr;
-  return str_push_fmt(arena, "{X=%.3f Y=%.3f Z=%.3f W=%.3f}", q->x, q->y, q->z, q->w);
-}
-
-static str_t
-fkey_push_summary(arena_t *arena, void *addr)
-{
-  fkey_t *key = (fkey_t *)addr;
-
-  if (!key) {
-    return STR_LIT("None");
-  }
-
-  str_t name = unreal_fname_to_str(key->name, arena);
-  if (str_is_empty(name)) {
-    return STR_LIT("None");
-  }
-
-  return str_push_fmt(arena, "%.*s", STR_ARG(name));
-}
-
-static str_t
-fgameplay_tag_push_summary(arena_t *arena, void *addr)
-{
-  detail_fgameplay_tag_t *tag = (detail_fgameplay_tag_t *)addr;
-
-  if (!tag) {
-    return STR_LIT("None");
-  }
-
-  str_t name = unreal_fname_to_str(tag->name, arena);
-  if (str_is_empty(name)) {
-    return STR_LIT("None");
-  }
-
-  return name;
-}
-
-static str_t
-fgameplay_tag_container_push_summary(arena_t *arena, void *addr)
-{
-  detail_fgameplay_tag_container_t *container = (detail_fgameplay_tag_container_t *)addr;
-
-  if (!container) {
-    return STR_LIT("[]");
-  }
-
-  detail_fgameplay_tag_array_t *tags = &container->tags;
-  if (!tags->data || tags->num <= 0 || tags->max <= 0) {
-    return STR_LIT("[]");
-  }
-
-  int32_t     count  = MIN_VAL(tags->num, 2);
-  str_t       result = STR_LIT("[]");
-  str_list_t  list   = {0};
-  tmp_arena_t tmp    = scratch_begin(arena);
-  {
-    for (int32_t i = 0; i < count; ++i) {
-      str_t name = unreal_fname_to_str(tags->data[i].name, tmp.arena);
-      if (str_is_empty(name)) {
-        name = STR_LIT("None");
-      }
-
-      str_list_push(tmp.arena, &list, name);
-    }
-
-    if (tags->num > count) {
-      str_t post = str_push_fmt(tmp.arena, "] +%d", tags->num - count);
-      result     = str_list_join(arena, list, STR_LIT("["), STR_LIT(", "), post);
-    } else {
-      result = str_list_join(arena, list, STR_LIT("["), STR_LIT(", "), STR_LIT("]"));
-    }
-  }
-  scratch_end(tmp);
-  return result;
-}
-
-static str_t
-fguid_push_summary(arena_t *arena, void *addr)
-{
-  fguid_t *g = (fguid_t *)addr;
-
-  return str_push_fmt(arena, "{%08X-%04X-%04X-%04X-%04X%08X}", g->a, (g->b >> 16) & 0xFFFF, g->b & 0xFFFF, (g->c >> 16) & 0xFFFF, g->c & 0xFFFF, g->d);
-}
-
-static str_t
-fint_point_push_summary(arena_t *arena, void *addr)
-{
-  detail_fint_point_t *p = (detail_fint_point_t *)addr;
-  return str_push_fmt(arena, "{X=%d Y=%d}", p->x, p->y);
-}
-
-static str_t
-fint_vector_push_summary(arena_t *arena, void *addr)
-{
-  detail_fint_vector_t *v = (detail_fint_vector_t *)addr;
-  return str_push_fmt(arena, "{X=%d Y=%d Z=%d}", v->x, v->y, v->z);
-}
-
-static str_t
-fstring_push_quoted(arena_t *arena, fstring_t *s)
-{
-  ASSERT(arena != NULL);
-
-  if (!s || !s->data || s->len <= 0 || s->len > 4096) {
-    return STR_LIT("\"\"");
-  }
-
-  str_t utf8 = str_from_str16(arena, str16_make(s->data, (uint64_t)s->len));
-  return str_push_fmt(arena, "\"%.*s\"", STR_ARG(utf8));
-}
-
-static str_t
-fstring_push_plain(arena_t *arena, fstring_t *s)
-{
-  ASSERT(arena != NULL);
-
-  if (!s || !s->data || s->len <= 0 || s->len > 4096) {
-    return STR_NULL;
-  }
-
-  return str_from_str16(arena, str16_make(s->data, (uint64_t)s->len));
-}
-
-static str_t
-ftext_push_summary(arena_t *arena, ftext_t *text)
-{
-  ASSERT(arena != NULL);
-
-  if (!text || !text->text_data.obj) {
-    return STR_LIT("null");
-  }
-
-  itext_data_t *data = text->text_data.obj;
-
-  str_t       result = STR_LIT("\"\"");
-  tmp_arena_t tmp    = scratch_begin(arena);
-  {
-    fstring_t *display_string = data->vtable->get_display_string(data);
-    str_t      display        = STR_NULL;
-
-    if (display_string) {
-      display = fstring_push_plain(tmp.arena, display_string);
-    }
-
-    result = str_push_fmt(arena, "\"%.*s\" Flags=0x%X", STR_ARG(display), (uint32_t)text->flags);
-  }
-  scratch_end(tmp);
-
-  return result;
-}
-
-static uobject_t *
-detail_weak_object_resolve(detail_fweak_object_ptr_t weak)
-{
-  if (weak.object_idx < 0 || weak.serial_num <= 0) {
-    return NULL;
-  }
-
-  fuobject_item_t *item = unreal_uobject_array_get_item(weak.object_idx);
-  if (!item || item->serial_num != weak.serial_num) {
-    return NULL;
-  }
-
-  if (!unreal_uobject_array_item_is_valid(item)) {
-    return NULL;
-  }
-
-  return item->obj;
-}
 
 static record_t *
 detail_record_from_uobject(search_tool_t *tool, uobject_t *obj)
@@ -1456,12 +1075,12 @@ detail_script_delegate_open_record(search_tool_t *tool, detail_fscript_delegate_
     return NULL;
   }
 
-  uobject_t *obj = detail_weak_object_resolve(delegate->object);
+  uobject_t *obj = unreal_fweak_object_resolve(delegate->object);
   if (!obj) {
     return NULL;
   }
 
-  record_t *func_record = detail_record_from_function_name(tool, obj, delegate->func_name);
+  record_t *func_record = detail_record_from_function_name(tool, obj, delegate->function_name);
   if (func_record) {
     return func_record;
   }
@@ -1469,335 +1088,6 @@ detail_script_delegate_open_record(search_tool_t *tool, detail_fscript_delegate_
   return detail_record_from_uobject(tool, obj);
 }
 
-static str_t
-weak_object_push_summary(arena_t *arena, detail_fweak_object_ptr_t weak)
-{
-  ASSERT(arena != NULL);
-
-  if (weak.object_idx < 0 || weak.serial_num <= 0) {
-    return STR_LIT("null");
-  }
-
-  uobject_t *obj = detail_weak_object_resolve(weak);
-  if (obj) {
-    return unreal_uobject_push_full_name(obj, arena);
-  }
-
-  return str_push_fmt(arena, "<stale Index=%d Serial=%d>", weak.object_idx, weak.serial_num);
-}
-
-static str_t
-object_ptr_push_summary(arena_t *arena, uobject_t *obj)
-{
-  ASSERT(arena != NULL);
-
-  if (!obj) {
-    return STR_LIT("null");
-  }
-
-  if (!unreal_uobject_is_valid(obj)) {
-    return str_push_fmt(arena, "<invalid %p>", obj);
-  }
-
-  return unreal_uobject_push_full_name(obj, arena);
-}
-
-static str_t
-soft_object_path_push_summary(arena_t *arena, fsoft_object_path_t *path)
-{
-  ASSERT(arena != NULL);
-
-  if (!path) {
-    return STR_LIT("null");
-  }
-
-  str_t asset = unreal_fname_to_str(path->asset_path_name, arena);
-  str_t sub   = fstring_push_plain(arena, &path->sub_path_string);
-
-  if (str_is_empty(asset) && str_is_empty(sub)) {
-    return STR_LIT("null");
-  }
-
-  if (str_is_empty(sub)) {
-    return str_push_fmt(arena, "\"%.*s\"", STR_ARG(asset));
-  }
-
-  return str_push_fmt(arena, "\"%.*s:%.*s\"", STR_ARG(asset), STR_ARG(sub));
-}
-
-static str_t
-soft_object_push_summary(arena_t *arena, detail_prop_t *node)
-{
-  ASSERT(arena != NULL);
-  ASSERT(node != NULL);
-
-  if (!node->value_addr) {
-    return STR_NULL;
-  }
-
-  if (node->size == sizeof(fsoft_object_path_t)) {
-    return soft_object_path_push_summary(arena, (fsoft_object_path_t *)node->value_addr);
-  }
-
-  if (node->size >= (int32_t)sizeof(detail_fsoft_object_ptr_t)) {
-    detail_fsoft_object_ptr_t *ptr = (detail_fsoft_object_ptr_t *)node->value_addr;
-    uobject_t                 *obj = detail_weak_object_resolve(ptr->weak);
-    if (obj) {
-      return unreal_uobject_push_full_name(obj, arena);
-    }
-
-    return soft_object_path_push_summary(arena, &ptr->path);
-  }
-
-  return STR_NULL;
-}
-
-static str_t
-lazy_object_push_summary(arena_t *arena, detail_flazy_object_ptr_t *ptr)
-{
-  ASSERT(arena != NULL);
-
-  if (!ptr) {
-    return STR_NULL;
-  }
-
-  uobject_t *obj = detail_weak_object_resolve(ptr->weak);
-  if (obj) {
-    return unreal_uobject_push_full_name(obj, arena);
-  }
-
-  detail_fguid_t *guid = &ptr->object_id;
-
-  if (guid->a == 0 && guid->b == 0 && guid->c == 0 && guid->d == 0) {
-    return STR_LIT("null");
-  }
-
-  return str_push_fmt(arena, "{%08X-%08X-%08X-%08X}", guid->a, guid->b, guid->c, guid->d);
-}
-
-static str_t
-interface_push_summary(arena_t *arena, detail_fscript_interface_t *iface)
-{
-  ASSERT(arena != NULL);
-
-  if (!iface) {
-    return STR_NULL;
-  }
-
-  str_t obj = object_ptr_push_summary(arena, iface->object);
-  return str_push_fmt(arena, "%.*s Interface=%p", STR_ARG(obj), iface->iface);
-}
-
-static str_t
-delegate_push_summary(arena_t *arena, detail_fscript_delegate_t *delegate)
-{
-  ASSERT(arena != NULL);
-
-  if (!delegate) {
-    return STR_NULL;
-  }
-
-  str_t func_name = unreal_fname_to_str(delegate->func_name, arena);
-  str_t obj_name  = weak_object_push_summary(arena, delegate->object);
-
-  if (str_is_empty(func_name)) {
-    return str_push_fmt(arena, "%.*s.<none>", STR_ARG(obj_name));
-  }
-
-  return str_push_fmt(arena, "%.*s.%.*s", STR_ARG(obj_name), STR_ARG(func_name));
-}
-
-static str_t
-mcast_delegate_push_summary(arena_t *arena, detail_tarray_view_t *list)
-{
-  ASSERT(arena != NULL);
-
-  if (!list) {
-    return STR_NULL;
-  }
-
-  return str_push_fmt(arena, "Num=%d Max=%d Data=%p", list->num, list->max, list->data);
-}
-
-static str_t
-prop_push_hex_summary(arena_t *arena, void *addr, int32_t size)
-{
-  ASSERT(arena != NULL);
-
-  if (!addr || size <= 0) {
-    return STR_NULL;
-  }
-
-  uint8_t *p = (uint8_t *)addr;
-
-  str_t       result = STR_NULL;
-  tmp_arena_t tmp    = scratch_begin(arena);
-  {
-    str_list_t list = {0};
-
-    for (int32_t i = 0; i < size; ++i) {
-      str_list_push(tmp.arena, &list, str_push_fmt(tmp.arena, "%02X", (uint32_t)p[i]));
-    }
-
-    str_t body = str_list_join(tmp.arena, list, STR_NULL, STR_LIT(" "), STR_NULL);
-    result     = str_push_fmt(arena, "raw bytes (%d): %.*s", size, STR_ARG(body));
-  }
-  scratch_end(tmp);
-  return result;
-}
-
-static str_t
-prop_push_value_summary(search_tool_t *tool, detail_prop_t *node, arena_t *arena)
-{
-  ASSERT(tool != NULL);
-  ASSERT(node != NULL);
-  ASSERT(arena != NULL);
-
-  if (!node) {
-    return STR_NULL;
-  }
-
-  ASSERT(node->prop != NULL);
-
-  fprop_t *prop = node->prop;
-  void    *addr = (node->has_value_addr) ? node->value_addr : NULL;
-  if (!addr) {
-    return STR_NULL;
-  }
-
-  str_t       result = STR_NULL;
-  tmp_arena_t tmp    = scratch_begin(arena);
-  {
-    if (unreal_fprop_class_is(prop, globals.unreal.bool_prop)) {
-      fprop_bool_t *bp   = (fprop_bool_t *)prop;
-      uint8_t       byte = *((uint8_t *)addr + bp->byte_offset);
-      bool          val  = (byte & bp->field_mask) != 0;
-
-      result = val ? STR_LIT("true") : STR_LIT("false");
-    } else if (unreal_fprop_class_is(prop, globals.unreal.byte_prop)) {
-      result = str_push_fmt(arena, "%u", (uint32_t)*(uint8_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.int8_prop)) {
-      result = str_push_fmt(arena, "%d", (int32_t)*(int8_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.int16_prop)) {
-      result = str_push_fmt(arena, "%d", (int32_t)*(int16_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.int_prop)) {
-      result = str_push_fmt(arena, "%d", *(int32_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.int32_prop)) {
-      result = str_push_fmt(arena, "%d", *(int32_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.int64_prop)) {
-      result = str_push_fmt(arena, "%lld", (long long)*(int64_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.uint16_prop)) {
-      result = str_push_fmt(arena, "%u", (uint32_t)*(uint16_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.uint32_prop)) {
-      result = str_push_fmt(arena, "%u", *(uint32_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.uint64_prop)) {
-      result = str_push_fmt(arena, "%llu", (unsigned long long)*(uint64_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.float_prop)) {
-      result = str_push_fmt(arena, "%.3f", *(float *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.double_prop)) {
-      result = str_push_fmt(arena, "%.3f", *(double *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.name_prop)) {
-      str_t name = unreal_fname_to_str(*(fname_t *)addr, tmp.arena);
-      result     = str_push_fmt(arena, "\"%.*s\"", STR_ARG(name));
-    } else if (unreal_fprop_class_is(prop, globals.unreal.str_prop)) {
-      result = fstring_push_quoted(arena, (fstring_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.text_prop)) {
-      result = ftext_push_summary(arena, (ftext_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-      result = object_ptr_push_summary(arena, *(uobject_t **)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) || unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-      result = soft_object_push_summary(arena, node);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
-      result = weak_object_push_summary(arena, *(detail_fweak_object_ptr_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
-      result = lazy_object_push_summary(arena, (detail_flazy_object_ptr_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
-      result = interface_push_summary(arena, (detail_fscript_interface_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
-      result = delegate_push_summary(arena, (detail_fscript_delegate_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_delegate_prop)) {
-      result = mcast_delegate_push_summary(arena, (detail_tarray_view_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_inline_delegate_prop)) {
-      result = mcast_delegate_push_summary(arena, (detail_tarray_view_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.mcast_sparse_delegate_prop)) {
-      result = str_push_fmt(arena, "SparseDelegate 0x%02X", (uint32_t)*(uint8_t *)addr);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-      uobject_t *obj = *(uobject_t **)addr;
-      if (!obj) {
-        result = STR_LIT("null");
-      } else if (!unreal_uobject_is_valid(obj)) {
-        result = STR_LIT("<invalid>");
-      } else {
-        result = unreal_uobject_push_full_name(obj, arena);
-      }
-    } else if (unreal_fprop_class_is(prop, globals.unreal.struct_prop)) {
-      fprop_struct_t *sp = (fprop_struct_t *)prop;
-
-      if (fprop_struct_is(prop, globals.unreal.vector) || fprop_struct_is(prop, globals.unreal.vector_net_quantize) ||
-          fprop_struct_is(prop, globals.unreal.vector_net_quantize10) || fprop_struct_is(prop, globals.unreal.vector_net_quantize100) ||
-          fprop_struct_is(prop, globals.unreal.vector_net_quantize_normal)) {
-        result = fvector_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.vector2d)) {
-        result = fvector2d_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.vector4)) {
-        result = fvector4_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.rotator)) {
-        result = frotator_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.quat)) {
-        result = fquat_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.color)) {
-        result = fcolor_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.linear_color)) {
-        result = flinear_color_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.key)) {
-        result = fkey_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.gameplay_tag)) {
-        result = fgameplay_tag_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.gameplay_tag_container)) {
-        result = fgameplay_tag_container_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.guid)) {
-        result = fguid_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.int_point)) {
-        result = fint_point_push_summary(arena, addr);
-      } else if (fprop_struct_is(prop, globals.unreal.int_vector)) {
-        result = fint_vector_push_summary(arena, addr);
-      } else if (sp && sp->script_struct && sp->script_struct->child_props != NULL) {
-        result = STR_LIT("{...}");
-      } else {
-        str_t hex = prop_push_hex_summary(arena, addr, node->size);
-        result    = str_push_fmt(arena, "<no reflected fields> %.*s", STR_ARG(hex));
-      }
-    } else if (unreal_fprop_class_is(prop, globals.unreal.array_prop)) {
-      detail_tarray_view_t *array = (detail_tarray_view_t *)addr;
-      result                      = str_push_fmt(arena, "Num=%d Max=%d Data=%p", array->num, array->max, array->data);
-    } else if (unreal_fprop_class_is(prop, globals.unreal.set_prop)) {
-      result = STR_LIT("Num=?");
-    } else if (unreal_fprop_class_is(prop, globals.unreal.map_prop)) {
-      result = STR_LIT("Num=?");
-    } else if (unreal_fprop_class_is(prop, globals.unreal.enum_prop)) {
-      fprop_enum_t *ep         = (fprop_enum_t *)prop;
-      fprop_t      *underlying = ep->underlying_prop ? &ep->underlying_prop->base : NULL;
-      if (!underlying) {
-        result = STR_LIT("<enum has no underlying property>");
-      } else {
-        int64_t value = fprop_read_int_value(underlying, addr);
-        str_t   name  = detail_enum_value_name(tmp.arena, ep->uenum, value);
-
-        if (!str_is_empty(name)) {
-          result = str_push_fmt(arena, "%.*s (%lld)", STR_ARG(name), (long long)value);
-        } else {
-          result = str_push_fmt(arena, "%lld", (long long)value);
-        }
-      }
-    }
-
-    if (str_is_empty(result)) {
-      result = prop_push_hex_summary(arena, addr, node->size);
-    }
-  }
-  scratch_end(tmp);
-  return result;
-}
 
 static bool
 tarray_children_match(detail_prop_t *node, int32_t num)
@@ -1806,29 +1096,55 @@ tarray_children_match(detail_prop_t *node, int32_t num)
     return false;
   }
 
-  int32_t count = MIN_VAL(num, DETAIL_MAX_CONTAINER_ELEMS);
-
-  return node->children_kind == DETAIL_PROP_CHILDREN_ARRAY_ELEMS &&
-         node->live_child_count == num &&
-         node->live_slot_count == count;
+  return node->children_kind == DETAIL_PROP_CHILDREN_ARRAY_ELEMS && node->live_child_count == num && node->live_slot_count == num;
 }
 
-static inline bool
-tset_children_match(detail_prop_t *node, int32_t live_count, int32_t slot_count)
+static bool
+tset_children_match(detail_prop_t *node, const void *set, fprop_set_t *prop, int32_t live_count, int32_t slot_count)
 {
-  return node &&
-         node->children_kind == DETAIL_PROP_CHILDREN_SET_ELEMS &&
-         node->live_child_count == live_count &&
-         node->live_slot_count == slot_count;
+  if (!node || node->children_kind != DETAIL_PROP_CHILDREN_SET_ELEMS ||
+      node->live_child_count != live_count || node->live_slot_count != slot_count) {
+    return false;
+  }
+
+  detail_prop_t *child = node->first_child;
+  for (int32_t idx = 0; idx < slot_count; ++idx) {
+    if (!unreal_set_is_valid_index(set, prop, idx)) {
+      continue;
+    }
+
+    if (!child || child->live_slot_idx != idx) {
+      return false;
+    }
+
+    child = child->next;
+  }
+
+  return child == NULL;
 }
 
-static inline bool
-tmap_children_match(detail_prop_t *node, int32_t live_count, int32_t slot_count)
+static bool
+tmap_children_match(detail_prop_t *node, const void *map, fprop_map_t *prop, int32_t live_count, int32_t slot_count)
 {
-  return node &&
-         node->children_kind == DETAIL_PROP_CHILDREN_MAP_PAIRS &&
-         node->live_child_count == live_count &&
-         node->live_slot_count == slot_count;
+  if (!node || node->children_kind != DETAIL_PROP_CHILDREN_MAP_PAIRS ||
+      node->live_child_count != live_count || node->live_slot_count != slot_count) {
+    return false;
+  }
+
+  detail_prop_t *child = node->first_child;
+  for (int32_t idx = 0; idx < slot_count; ++idx) {
+    if (!unreal_map_is_valid_index(map, prop, idx)) {
+      continue;
+    }
+
+    if (!child || child->live_slot_idx != idx) {
+      return false;
+    }
+
+    child = child->next;
+  }
+
+  return child == NULL;
 }
 
 static bool
@@ -1838,56 +1154,11 @@ mcast_delegate_children_match(detail_prop_t *node, int32_t num)
     return false;
   }
 
-  int32_t count = MIN_VAL(num, DETAIL_MAX_CONTAINER_ELEMS);
-
-  return node->children_kind == DETAIL_PROP_CHILDREN_MCAST_DELEGATE &&
-         node->live_child_count == num &&
-         node->live_slot_count == count;
-}
-
-static uint32_t *
-bit_array_words(tbit_array_t *bits)
-{
-  ASSERT(bits != NULL);
-  if (bits->max_bits <= (int32_t)(COUNTOF(bits->allocator.inline_data) * 32)) {
-    return bits->allocator.inline_data;
-  }
-  return (uint32_t *)bits->allocator.secondary_data;
-}
-
-static bool
-tsparse_is_allocated(detail_tsparse_view_t *sparse, int32_t idx)
-{
-  if (!sparse || idx < 0 || idx >= sparse->alloc_flags.num_bits) {
-    return false;
-  }
-
-  uint32_t *words = bit_array_words(&sparse->alloc_flags);
-  if (!words) {
-    return false;
-  }
-
-  uint32_t word = words[idx / 32];
-  uint32_t mask = 1U << (idx % 32);
-  return (word & mask) != 0;
-}
-
-static int32_t
-tsparse_live_count(detail_tsparse_view_t *sparse)
-{
-  if (!sparse) {
-    return 0;
-  }
-
-  if (sparse->data.num < 0 || sparse->num_free_idx < 0 || sparse->num_free_idx > sparse->data.num) {
-    return 0;
-  }
-
-  return sparse->data.num - sparse->num_free_idx;
+  return node->children_kind == DETAIL_PROP_CHILDREN_MCAST_DELEGATE && node->live_child_count == num && node->live_slot_count == num;
 }
 
 static void
-tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_array_t *array_prop, detail_tarray_view_t *array, int32_t depth)
+tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_array_t *array_prop, void *array, int32_t num, int32_t depth)
 {
   ASSERT(tool != NULL);
   ASSERT(tab != NULL);
@@ -1897,13 +1168,11 @@ tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *n
 
   detail_prop_clear_runtime_children(tab, node);
 
-  int count = MIN_VAL(array->num, DETAIL_MAX_CONTAINER_ELEMS);
-
   node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
-  node->live_child_count = array->num;
-  node->live_slot_count  = count;
+  node->live_child_count = num;
+  node->live_slot_count  = num;
 
-  if (!array->data || count <= 0) {
+  if (num <= 0) {
     return;
   }
 
@@ -1912,9 +1181,9 @@ tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *n
   int32_t elem_size = inner->elem_size;
   ASSERT(elem_size > 0);
 
-  for (int i = 0; i < count; ++i) {
+  for (int32_t i = 0; i < num; ++i) {
     int32_t  elem_offset = i * elem_size;
-    uint8_t *elem_addr   = (uint8_t *)array->data + elem_offset;
+    uint8_t *elem_addr   = (uint8_t *)unreal_array_get(array, array_prop, i);
 
     detail_prop_t *elem = detail_prop_push_array_elem(tool, tab, inner, i, elem_addr, elem_offset, depth + 1, false, true);
     if (elem) {
@@ -1925,78 +1194,67 @@ tarray_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *n
 
 static void
 tset_rebuild_children(
-  search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_set_t *set_prop, detail_tset_view_t *set, int32_t live_count, int32_t slot_count, int32_t depth)
+  search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_set_t *set_prop, void *set, int32_t live_count, int32_t slot_count, int32_t depth)
 {
   detail_prop_clear_runtime_children(tab, node);
   node->children_kind    = DETAIL_PROP_CHILDREN_SET_ELEMS;
   node->live_child_count = live_count;
   node->live_slot_count  = slot_count;
 
-  if (!set->elems.data.data || slot_count <= 0 || live_count <= 0) {
+  if (slot_count <= 0 || live_count <= 0) {
     return;
   }
 
   fprop_t *set_elem = set_prop->elem_prop;
 
-  int32_t elem_size = set_prop->set_layout.size;
-  ASSERT(elem_size > 0);
+  int32_t slot_size = set_prop->set_layout.sparse_array_layout.size;
+  ASSERT(slot_size > 0);
 
-  int32_t emitted = 0;
   for (int32_t i = 0; i < slot_count; ++i) {
-    if (!tsparse_is_allocated(&set->elems, i)) {
+    if (!unreal_set_is_valid_index(set, set_prop, i)) {
       continue;
     }
 
-    if (emitted >= DETAIL_MAX_CONTAINER_ELEMS) {
-      break;
-    }
-
-    int32_t  elem_offset = i * elem_size;
-    uint8_t *elem_addr   = (uint8_t *)set->elems.data.data + elem_offset;
+    int32_t  elem_offset = i * slot_size;
+    uint8_t *elem_addr   = (uint8_t *)unreal_set_get(set, set_prop, i);
 
     detail_prop_t *elem = detail_prop_push_set_elem(tool, tab, set_elem, i, elem_addr, elem_offset, depth + 1, false, true);
     if (elem) {
       elem->live_slot_idx = i;
       QUEUE_PUSH(node->first_child, node->last_child, elem);
-      emitted += 1;
     }
   }
 }
 
 static void
 tmap_rebuild_children(
-  search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_map_t *map_prop, detail_tset_view_t *set, int32_t live_count, int32_t slot_count, int32_t depth)
+  search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_map_t *map_prop, void *map, int32_t live_count, int32_t slot_count, int32_t depth)
 {
   detail_prop_clear_runtime_children(tab, node);
   node->children_kind    = DETAIL_PROP_CHILDREN_MAP_PAIRS;
   node->live_child_count = live_count;
   node->live_slot_count  = slot_count;
 
-  if (!set->elems.data.data || slot_count <= 0 || live_count <= 0) {
+  if (slot_count <= 0 || live_count <= 0) {
     return;
   }
 
-  int32_t pair_size = map_prop->map_layout.set_layout.size;
-  ASSERT(pair_size > 0);
+  int32_t slot_size = map_prop->map_layout.set_layout.sparse_array_layout.size;
+  ASSERT(slot_size > 0);
 
-  int32_t emitted = 0;
   for (int32_t i = 0; i < slot_count; ++i) {
-    if (!tsparse_is_allocated(&set->elems, i)) {
+    if (!unreal_map_is_valid_index(map, map_prop, i)) {
       continue;
     }
 
-    if (emitted >= DETAIL_MAX_CONTAINER_ELEMS) {
-      break;
-    }
+    int32_t  pair_offset = i * slot_size;
+    uint8_t *key_addr    = (uint8_t *)unreal_map_get_key(map, map_prop, i);
+    uint8_t *val_addr    = (uint8_t *)unreal_map_get_value(map, map_prop, i);
 
-    int32_t  pair_offset = i * pair_size;
-    uint8_t *pair_addr   = (uint8_t *)set->elems.data.data + pair_offset;
-
-    detail_prop_t *pair = detail_prop_push_map_pair(tool, tab, map_prop, i, pair_addr, pair_offset, depth + 1, false, true);
+    detail_prop_t *pair = detail_prop_push_map_pair(tool, tab, map_prop, i, key_addr, val_addr, pair_offset, depth + 1, false, true);
     if (pair) {
       pair->live_slot_idx = i;
       QUEUE_PUSH(node->first_child, node->last_child, pair);
-      emitted += 1;
     }
   }
 }
@@ -2011,13 +1269,11 @@ mcast_delegate_rebuild_children(search_tool_t *tool, detail_tab_t *tab, detail_p
 
   detail_prop_clear_runtime_children(tab, node);
 
-  int32_t count = MIN_VAL(list->num, DETAIL_MAX_CONTAINER_ELEMS);
-
   node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
   node->live_child_count = list->num;
-  node->live_slot_count  = count;
+  node->live_slot_count  = list->num;
 
-  for (int32_t i = 0; i < count; ++i) {
+  for (int32_t i = 0; i < list->num; ++i) {
     detail_prop_t *elem = detail_prop_alloc_runtime(tab);
     if (!elem) {
       break;
@@ -2048,38 +1304,29 @@ detail_prop_open_record(search_tool_t *tool, detail_prop_t *node)
   fprop_t *prop = node->prop;
   void    *addr = node->value_addr;
 
-  if (unreal_fprop_class_is(prop, globals.unreal.obj_prop) || unreal_fprop_class_is(prop, globals.unreal.class_prop)) {
-    return detail_record_from_uobject(tool, *(uobject_t **)addr);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.weak_obj_prop)) {
-    detail_fweak_object_ptr_t weak = *(detail_fweak_object_ptr_t *)addr;
-    return detail_record_from_uobject(tool, detail_weak_object_resolve(weak));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.lazy_obj_prop)) {
-    detail_flazy_object_ptr_t *ptr = (detail_flazy_object_ptr_t *)addr;
-    return detail_record_from_uobject(tool, detail_weak_object_resolve(ptr->weak));
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.interface_prop)) {
-    detail_fscript_interface_t *iface = (detail_fscript_interface_t *)addr;
-    return detail_record_from_uobject(tool, iface->object);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.delegate_prop)) {
-    return detail_script_delegate_open_record(tool, (detail_fscript_delegate_t *)addr);
-  }
-
-  if (unreal_fprop_class_is(prop, globals.unreal.soft_obj_prop) || unreal_fprop_class_is(prop, globals.unreal.soft_class_prop)) {
-    if (node->size >= (int32_t)sizeof(detail_fsoft_object_ptr_t)) {
-      detail_fsoft_object_ptr_t *ptr = (detail_fsoft_object_ptr_t *)addr;
-      return detail_record_from_uobject(tool, detail_weak_object_resolve(ptr->weak));
+  switch (unreal_fprop_get_kind(prop)) {
+    case UNREAL_PROP_KIND_OBJECT:
+    case UNREAL_PROP_KIND_CLASS:
+    case UNREAL_PROP_KIND_WEAK_OBJECT:
+    case UNREAL_PROP_KIND_LAZY_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_OBJECT:
+    case UNREAL_PROP_KIND_SOFT_CLASS:
+    case UNREAL_PROP_KIND_INTERFACE: {
+      return node->size >= prop->elem_size && prop->elem_size > 0
+             ? detail_record_from_uobject(tool, unreal_fprop_get_referenced_object(prop, addr))
+             : NULL;
     }
-    return NULL;
-  }
 
-  return NULL;
+    case UNREAL_PROP_KIND_DELEGATE: {
+      return node->size >= (int32_t)sizeof(detail_fscript_delegate_t)
+             ? detail_script_delegate_open_record(tool, (detail_fscript_delegate_t *)addr)
+             : NULL;
+    }
+
+    default: {
+      return NULL;
+    }
+  }
 }
 
 static void
@@ -2122,6 +1369,22 @@ detail_prop_refresh_runtime_text(search_tool_t *tool, detail_tab_t *tab, detail_
   node->size_text   = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)node->size));
 }
 
+static void
+detail_prop_invalidate_value_tree(detail_prop_t *node)
+{
+  if (!node) {
+    return;
+  }
+
+  node->has_value_addr = false;
+  node->value_addr     = NULL;
+  node->record_to_open = NULL;
+
+  for (detail_prop_t *child = node->first_child; child; child = child->next) {
+    detail_prop_invalidate_value_tree(child);
+  }
+}
+
 void
 detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, detail_prop_t *node, fprop_array_t *array_prop, int32_t depth)
 {
@@ -2139,18 +1402,11 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
   ASSERT(array_prop != NULL);
   ASSERT(array_prop->inner != NULL);
 
-  detail_tarray_view_t *array = (detail_tarray_view_t *)node->value_addr;
+  void   *array = node->value_addr;
+  int32_t num   = unreal_array_num(array, array_prop);
+  node->summary = ui_text_span_make(tool->ctx, unreal_fprop_push_value_summary(&array_prop->base, array, node->size, arena));
 
-  int32_t num = array->num;
-  int32_t max = array->max;
-
-  ASSERT(num >= 0);
-  ASSERT(max >= 0);
-  ASSERT(num <= max);
-
-  node->summary = ui_text_span_make(tool->ctx, str_push_fmt(arena, "Num=%d Max=%d Data=%p", num, max, array->data));
-
-  if (!array->data || num == 0 || max == 0) {
+  if (num < 0) {
     detail_prop_clear_runtime_children(tab, node);
     node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
     node->live_child_count = 0;
@@ -2159,12 +1415,23 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
     return;
   }
 
-  if (!tarray_children_match(node, num)) {
-    tarray_rebuild_children(tool, tab, node, array_prop, array, depth);
+  if (num == 0) {
+    detail_prop_clear_runtime_children(tab, node);
+    node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
+    node->live_child_count = 0;
+    node->live_slot_count  = 0;
+    node->maximized        = false;
+    return;
   }
 
   if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_ARRAY_ELEMS;
+    node->live_child_count = num;
     return;
+  }
+
+  if (!tarray_children_match(node, num)) {
+    tarray_rebuild_children(tool, tab, node, array_prop, array, num, depth);
   }
 
   int elem_size = array_prop->inner->elem_size;
@@ -2176,7 +1443,7 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
       continue;
     }
 
-    if (elem_idx >= num || elem_idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (elem_idx >= num) {
       break;
     }
 
@@ -2184,8 +1451,15 @@ detail_prop_fill_value_tarray_children(search_tool_t *tool, detail_tab_t *tab, d
 
     elem->offset         = elem_offset;
     elem->size           = elem_size;
-    elem->has_value_addr = true;
-    elem->value_addr     = (uint8_t *)array->data + elem_offset;
+    elem->value_addr     = unreal_array_get(array, array_prop, elem_idx);
+    elem->has_value_addr = elem->value_addr != NULL;
+
+    if (!elem->has_value_addr) {
+      detail_prop_invalidate_value_tree(elem);
+      elem->summary = ui_text_span_make(tool->ctx, STR_LIT("<stale>"));
+      elem_idx += 1;
+      continue;
+    }
 
     detail_prop_refresh_runtime_text(tool, tab, elem, str_push_fmt(tab->value_arena, "[%d]", elem_idx));
     detail_prop_fill_value_direct(tool, tab, elem, depth + 1);
@@ -2211,19 +1485,12 @@ detail_prop_fill_value_tset_children(search_tool_t *tool, detail_tab_t *tab, det
   ASSERT(set_prop != NULL);
   ASSERT(set_prop->elem_prop != NULL);
 
-  detail_tset_view_t *set = (detail_tset_view_t *)node->value_addr;
+  void   *set        = node->value_addr;
+  int32_t live_count = unreal_set_num(set, set_prop);
+  int32_t slot_count = unreal_set_max_index(set, set_prop);
+  node->summary      = ui_text_span_make(tool->ctx, unreal_fprop_push_value_summary(&set_prop->base, set, node->size, arena));
 
-  int live_count = tsparse_live_count(&set->elems);
-  int slot_count = set->elems.data.num;
-
-  ASSERT(set->elems.data.max >= 0);
-  ASSERT(slot_count >= 0);
-  ASSERT(live_count >= 0);
-  ASSERT(live_count <= slot_count);
-
-  node->summary = ui_text_span_make(tool->ctx, str_push_fmt(arena, "Num=%d Slots=%d Max=%d HashSize=%d", live_count, slot_count, set->elems.data.max, set->hash_size));
-
-  if (!set->elems.data.data || slot_count == 0 || live_count == 0) {
+  if (live_count < 0 || slot_count < 0) {
     detail_prop_clear_runtime_children(tab, node);
     node->children_kind    = DETAIL_PROP_CHILDREN_SET_ELEMS;
     node->live_child_count = 0;
@@ -2232,16 +1499,29 @@ detail_prop_fill_value_tset_children(search_tool_t *tool, detail_tab_t *tab, det
     return;
   }
 
-  if (!tset_children_match(node, live_count, slot_count)) {
-    tset_rebuild_children(tool, tab, node, set_prop, set, live_count, slot_count, depth);
-  }
-
-  if (!node->maximized && !tab->force_expand_values) {
+  if (slot_count == 0 || live_count == 0) {
+    detail_prop_clear_runtime_children(tab, node);
+    node->children_kind    = DETAIL_PROP_CHILDREN_SET_ELEMS;
+    node->live_child_count = 0;
+    node->live_slot_count  = 0;
+    node->maximized        = false;
     return;
   }
 
-  int elem_size = set_prop->set_layout.size;
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_SET_ELEMS;
+    node->live_child_count = live_count;
+    return;
+  }
+
+  if (!tset_children_match(node, set, set_prop, live_count, slot_count)) {
+    tset_rebuild_children(tool, tab, node, set_prop, set, live_count, slot_count, depth);
+  }
+
+  int elem_size = set_prop->elem_prop->elem_size;
+  int slot_size = set_prop->set_layout.sparse_array_layout.size;
   ASSERT(elem_size > 0);
+  ASSERT(slot_size > 0);
 
   for (detail_prop_t *elem = node->first_child; elem; elem = elem->next) {
     if (!elem->prop) {
@@ -2252,17 +1532,18 @@ detail_prop_fill_value_tset_children(search_tool_t *tool, detail_tab_t *tab, det
     ASSERT(slot_idx >= 0);
     ASSERT(slot_idx < slot_count);
 
-    if (!tsparse_is_allocated(&set->elems, slot_idx)) {
+    elem->value_addr     = (void *)unreal_set_get(set, set_prop, slot_idx);
+    elem->has_value_addr = elem->value_addr != NULL;
+    if (!elem->has_value_addr) {
+      detail_prop_invalidate_value_tree(elem);
       elem->summary = ui_text_span_make(tool->ctx, STR_LIT("<stale>"));
       continue;
     }
 
-    int elem_offset = slot_idx * elem_size;
+    int elem_offset = slot_idx * slot_size;
 
     elem->offset         = elem_offset;
     elem->size           = elem_size;
-    elem->has_value_addr = true;
-    elem->value_addr     = (uint8_t *)set->elems.data.data + elem_offset;
 
     detail_prop_refresh_runtime_text(tool, tab, elem, str_push_fmt(tab->value_arena, "[%d]", slot_idx));
     detail_prop_fill_value_direct(tool, tab, elem, depth + 1);
@@ -2285,19 +1566,12 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
   ASSERT(node->value_addr != NULL);
   ASSERT(map_prop != NULL);
 
-  detail_tset_view_t *set = (detail_tset_view_t *)node->value_addr;
+  void   *map        = node->value_addr;
+  int32_t live_count = unreal_map_num(map, map_prop);
+  int32_t slot_count = unreal_map_max_index(map, map_prop);
+  node->summary      = ui_text_span_make(tool->ctx, unreal_fprop_push_value_summary(&map_prop->base, map, node->size, arena));
 
-  int live_count = tsparse_live_count(&set->elems);
-  int slot_count = set->elems.data.num;
-
-  ASSERT(set->elems.data.max >= 0);
-  ASSERT(slot_count >= 0);
-  ASSERT(live_count >= 0);
-  ASSERT(live_count <= slot_count);
-
-  node->summary = ui_text_span_make(tool->ctx, str_push_fmt(arena, "Num=%d Slots=%d Max=%d HashSize=%d", live_count, slot_count, set->elems.data.max, set->hash_size));
-
-  if (!set->elems.data.data || slot_count == 0 || live_count == 0) {
+  if (live_count < 0 || slot_count < 0) {
     detail_prop_clear_runtime_children(tab, node);
     node->children_kind    = DETAIL_PROP_CHILDREN_MAP_PAIRS;
     node->live_child_count = 0;
@@ -2306,16 +1580,29 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
     return;
   }
 
-  if (!tmap_children_match(node, live_count, slot_count)) {
-    tmap_rebuild_children(tool, tab, node, map_prop, set, live_count, slot_count, depth);
-  }
-
-  if (!node->maximized && !tab->force_expand_values) {
+  if (slot_count == 0 || live_count == 0) {
+    detail_prop_clear_runtime_children(tab, node);
+    node->children_kind    = DETAIL_PROP_CHILDREN_MAP_PAIRS;
+    node->live_child_count = 0;
+    node->live_slot_count  = 0;
+    node->maximized        = false;
     return;
   }
 
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MAP_PAIRS;
+    node->live_child_count = live_count;
+    return;
+  }
+
+  if (!tmap_children_match(node, map, map_prop, live_count, slot_count)) {
+    tmap_rebuild_children(tool, tab, node, map_prop, map, live_count, slot_count, depth);
+  }
+
   int pair_size = map_prop->map_layout.set_layout.size;
+  int slot_size = map_prop->map_layout.set_layout.sparse_array_layout.size;
   ASSERT(pair_size > 0);
+  ASSERT(slot_size > 0);
 
   for (detail_prop_t *pair = node->first_child; pair; pair = pair->next) {
     if (!pair->first_child) {
@@ -2326,18 +1613,20 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
     ASSERT(slot_idx >= 0);
     ASSERT(slot_idx < slot_count);
 
-    if (!tsparse_is_allocated(&set->elems, slot_idx)) {
+    uint8_t *key_addr = (uint8_t *)unreal_map_get_key(map, map_prop, slot_idx);
+    uint8_t *val_addr = (uint8_t *)unreal_map_get_value(map, map_prop, slot_idx);
+    if (!key_addr || !val_addr) {
+      detail_prop_invalidate_value_tree(pair);
       pair->summary = ui_text_span_make(tool->ctx, STR_LIT("<stale>"));
       continue;
     }
 
-    int      pair_offset = slot_idx * pair_size;
-    uint8_t *pair_addr   = (uint8_t *)set->elems.data.data + pair_offset;
+    int pair_offset = slot_idx * slot_size;
 
     pair->offset         = pair_offset;
     pair->size           = pair_size;
     pair->has_value_addr = true;
-    pair->value_addr     = pair_addr;
+    pair->value_addr     = key_addr;
     pair->summary        = ui_text_span_make(tool->ctx, STR_LIT("{...}"));
 
     {
@@ -2357,7 +1646,7 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
       key->offset         = 0;
       key->size           = map_prop->key_prop->elem_size;
       key->has_value_addr = true;
-      key->value_addr     = pair_addr;
+      key->value_addr     = key_addr;
 
       detail_prop_refresh_runtime_text(tool, tab, key, STR_LIT("Key"));
       detail_prop_fill_value_direct(tool, tab, key, depth + 2);
@@ -2368,7 +1657,7 @@ detail_prop_fill_value_tmap_children(search_tool_t *tool, detail_tab_t *tab, det
         val->offset         = map_prop->map_layout.value_offset;
         val->size           = map_prop->val_prop->elem_size;
         val->has_value_addr = true;
-        val->value_addr     = pair_addr + map_prop->map_layout.value_offset;
+        val->value_addr     = val_addr;
 
         detail_prop_refresh_runtime_text(tool, tab, val, STR_LIT("Value"));
         detail_prop_fill_value_direct(tool, tab, val, depth + 2);
@@ -2410,18 +1699,20 @@ detail_prop_fill_value_mcast_delegate_children(search_tool_t *tool, detail_tab_t
     return;
   }
 
-  if (!mcast_delegate_children_match(node, num)) {
-    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
+    node->live_child_count = num;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!mcast_delegate_children_match(node, num)) {
+    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
   }
 
   for (detail_prop_t *elem = node->first_child; elem; elem = elem->next) {
     int32_t idx = elem->live_slot_idx;
 
-    if (idx < 0 || idx >= num || idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (idx < 0 || idx >= num) {
       continue;
     }
 
@@ -2436,7 +1727,7 @@ detail_prop_fill_value_mcast_delegate_children(search_tool_t *tool, detail_tab_t
     elem->type           = ui_text_span_make(tool->ctx, STR_LIT("DelegateBinding"));
     elem->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)elem->offset));
     elem->size_text      = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)elem->size));
-    elem->summary        = ui_text_span_make(tool->ctx, delegate_push_summary(arena, d));
+    elem->summary        = ui_text_span_make(tool->ctx, unreal_fscript_delegate_push_summary((fscript_delegate_t *)d, arena));
     elem->record_to_open = detail_script_delegate_open_record(tool, d);
   }
 
@@ -2487,18 +1778,20 @@ detail_prop_fill_value_sparse_mcast_delegate_children(search_tool_t *tool, detai
 
   node->summary = ui_text_span_make(tool->ctx, str_push_fmt(arena, "Num=%d Max=%d Data=%p", num, max, list->data));
 
-  if (!mcast_delegate_children_match(node, num)) {
-    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
+  if (!node->maximized && !tab->force_expand_values) {
+    node->children_kind    = DETAIL_PROP_CHILDREN_MCAST_DELEGATE;
+    node->live_child_count = num;
+    return;
   }
 
-  if (!node->maximized && !tab->force_expand_values) {
-    return;
+  if (!mcast_delegate_children_match(node, num)) {
+    mcast_delegate_rebuild_children(tool, tab, node, list, depth);
   }
 
   for (detail_prop_t *elem = node->first_child; elem; elem = elem->next) {
     int32_t idx = elem->live_slot_idx;
 
-    if (idx < 0 || idx >= num || idx >= DETAIL_MAX_CONTAINER_ELEMS) {
+    if (idx < 0 || idx >= num) {
       continue;
     }
 
@@ -2513,7 +1806,7 @@ detail_prop_fill_value_sparse_mcast_delegate_children(search_tool_t *tool, detai
     elem->type           = ui_text_span_make(tool->ctx, STR_LIT("DelegateBinding"));
     elem->offset_text    = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)elem->offset));
     elem->size_text      = ui_text_span_make(tool->ctx, str_push_fmt(arena, "0x%04X", (uint32_t)elem->size));
-    elem->summary        = ui_text_span_make(tool->ctx, delegate_push_summary(arena, d));
+    elem->summary        = ui_text_span_make(tool->ctx, unreal_fscript_delegate_push_summary((fscript_delegate_t *)d, arena));
     elem->record_to_open = detail_script_delegate_open_record(tool, d);
   }
 }
@@ -2532,24 +1825,41 @@ detail_prop_fill_value_direct(search_tool_t *tool, detail_tab_t *tab, detail_pro
   node->record_to_open = NULL;
   node->summary        = ui_text_span_make(tool->ctx, STR_NULL);
 
-  fprop_t *p = node->prop;
+  switch (unreal_fprop_get_kind(node->prop)) {
+    case UNREAL_PROP_KIND_ARRAY: {
+      detail_prop_fill_value_tarray_children(tool, tab, node, (fprop_array_t *)node->prop, depth);
+      break;
+    }
 
-  if (unreal_fprop_class_is(p, globals.unreal.array_prop)) {
-    detail_prop_fill_value_tarray_children(tool, tab, node, (fprop_array_t *)p, depth);
-  } else if (unreal_fprop_class_is(p, globals.unreal.set_prop)) {
-    detail_prop_fill_value_tset_children(tool, tab, node, (fprop_set_t *)p, depth);
-  } else if (unreal_fprop_class_is(p, globals.unreal.map_prop)) {
-    detail_prop_fill_value_tmap_children(tool, tab, node, (fprop_map_t *)p, depth);
-  } else if (unreal_fprop_class_is(p, globals.unreal.mcast_delegate_prop) || unreal_fprop_class_is(p, globals.unreal.mcast_inline_delegate_prop)) {
-    detail_prop_fill_value_mcast_delegate_children(tool, tab, node, depth);
-  } else if (unreal_fprop_class_is(p, globals.unreal.mcast_sparse_delegate_prop)) {
-    detail_prop_fill_value_sparse_mcast_delegate_children(tool, tab, node, depth);
-  } else {
-    node->summary        = ui_text_span_make(tool->ctx, prop_push_value_summary(tool, node, tab->value_arena));
-    node->record_to_open = detail_prop_open_record(tool, node);
+    case UNREAL_PROP_KIND_SET: {
+      detail_prop_fill_value_tset_children(tool, tab, node, (fprop_set_t *)node->prop, depth);
+      break;
+    }
 
-    if (node->first_child && (node->maximized || tab->force_expand_values)) {
-      detail_prop_fill_value_from_base(tool, tab, node->first_child, node->value_addr, depth + 1);
+    case UNREAL_PROP_KIND_MAP: {
+      detail_prop_fill_value_tmap_children(tool, tab, node, (fprop_map_t *)node->prop, depth);
+      break;
+    }
+
+    case UNREAL_PROP_KIND_MULTICAST_DELEGATE:
+    case UNREAL_PROP_KIND_MULTICAST_INLINE_DELEGATE: {
+      detail_prop_fill_value_mcast_delegate_children(tool, tab, node, depth);
+      break;
+    }
+
+    case UNREAL_PROP_KIND_MULTICAST_SPARSE_DELEGATE: {
+      detail_prop_fill_value_sparse_mcast_delegate_children(tool, tab, node, depth);
+      break;
+    }
+
+    default: {
+      node->summary        = ui_text_span_make(tool->ctx, unreal_fprop_push_value_summary(node->prop, node->value_addr, node->size, tab->value_arena));
+      node->record_to_open = detail_prop_open_record(tool, node);
+
+      if (node->first_child && (node->maximized || tab->force_expand_values)) {
+        detail_prop_fill_value_from_base(tool, tab, node->first_child, node->value_addr, depth + 1);
+      }
+      break;
     }
   }
 
@@ -2577,8 +1887,14 @@ detail_prop_fill_value_from_base(search_tool_t *tool, detail_tab_t *tab, detail_
       continue;
     }
 
-    prop->has_value_addr = true;
-    prop->value_addr     = base + prop->offset;
+    prop->value_addr     = unreal_fprop_value_in_container(prop->prop, base, 0);
+    prop->has_value_addr = prop->value_addr != NULL;
+
+    if (!prop->has_value_addr) {
+      detail_prop_invalidate_value_tree(prop);
+      prop->summary = ui_text_span_make(tool->ctx, STR_LIT("<invalid layout>"));
+      continue;
+    }
 
     if (prop->runtime_node) {
       detail_prop_refresh_runtime_text(tool, tab, prop, unreal_fname_to_str(prop->prop->name, tab->value_arena));
@@ -2607,6 +1923,15 @@ details_refresh_values(search_tool_t *tool, detail_tab_t *tab)
 
   arena_reset(tab->value_arena);
   details_fill_owner_values(tool, tab);
+}
+
+static void
+details_refresh_all_values(search_tool_t *tool, detail_tab_t *tab)
+{
+  bool old_force_expand    = tab->force_expand_values;
+  tab->force_expand_values = true;
+  details_refresh_values(tool, tab);
+  tab->force_expand_values = old_force_expand;
 }
 
 static void
@@ -2704,10 +2029,7 @@ detail_props_push_dump(search_tool_t *tool, detail_tab_t *tab, arena_t *arena)
   ASSERT(tab != NULL);
   ASSERT(arena != NULL);
 
-  bool old_force_expand    = tab->force_expand_values;
-  tab->force_expand_values = true;
-  details_refresh_values(tool, tab);
-  tab->force_expand_values = old_force_expand;
+  details_refresh_all_values(tool, tab);
 
   str_list_t lines = {0};
 
@@ -3317,6 +2639,147 @@ ui_detail_row(search_tool_t *tool, struct nk_grid_state *grid_state, ui_detail_r
   return expanded;
 }
 
+typedef struct detail_tree_state_s {
+  bool has_children;
+  bool has_collapsed;
+} detail_tree_state_t;
+
+static inline bool
+detail_prop_has_children(detail_prop_t *prop)
+{
+  switch (prop->children_kind) {
+    case DETAIL_PROP_CHILDREN_ARRAY_ELEMS:
+    case DETAIL_PROP_CHILDREN_SET_ELEMS:
+    case DETAIL_PROP_CHILDREN_MAP_PAIRS:
+    case DETAIL_PROP_CHILDREN_MCAST_DELEGATE: {
+      return prop->live_child_count > 0;
+    }
+
+    default: {
+      return prop->first_child != NULL;
+    }
+  }
+}
+
+static void
+detail_props_collect_tree_state(detail_prop_t *first, detail_tree_state_t *state)
+{
+  for (detail_prop_t *prop = first; prop; prop = prop->next) {
+    if (detail_prop_has_children(prop)) {
+      state->has_children = true;
+
+      if (!prop->maximized) {
+        state->has_collapsed = true;
+      }
+
+      detail_props_collect_tree_state(prop->first_child, state);
+    }
+  }
+}
+
+static void
+detail_props_set_expanded(detail_prop_t *first, bool expanded)
+{
+  for (detail_prop_t *prop = first; prop; prop = prop->next) {
+    prop->maximized = expanded && detail_prop_has_children(prop);
+    detail_props_set_expanded(prop->first_child, expanded);
+  }
+}
+
+static detail_tree_state_t
+detail_funcs_tree_state(detail_tab_t *tab)
+{
+  detail_tree_state_t state = {0};
+  for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+    for (detail_func_t *func = owner->first_func; func; func = func->next) {
+      state.has_children = true;
+
+      if (!func->maximized) {
+        state.has_collapsed = true;
+      }
+      detail_props_collect_tree_state(func->first_param, &state);
+    }
+  }
+  return state;
+}
+
+static void
+detail_funcs_set_expanded(detail_tab_t *tab, bool expanded)
+{
+  for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+    for (detail_func_t *func = owner->first_func; func; func = func->next) {
+      func->maximized = expanded;
+      detail_props_set_expanded(func->first_param, expanded);
+    }
+  }
+}
+
+static bool
+detail_tree_toggle_button(struct nk_context *ctx, detail_tree_state_t state)
+{
+  str_t label = STR_LIT("Expand");
+  if (state.has_children && !state.has_collapsed) {
+    label = STR_LIT("Collapse");
+  }
+
+  if (!state.has_children) {
+    nk_widget_disable_begin(ctx);
+  }
+
+  bool clicked = ui_button_str(ctx, label);
+
+  if (!state.has_children) {
+    nk_widget_disable_end(ctx);
+  }
+
+  return clicked;
+}
+
+static inline bool
+detail_package_is_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record)
+{
+  uint32_t slot = record_to_slot(tool, record);
+  return (tab->package_expanded[slot / 8] & (1u << (slot % 8))) != 0;
+}
+
+static inline void
+detail_package_set_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record, bool expanded)
+{
+  uint32_t slot = record_to_slot(tool, record);
+  uint8_t  mask = (uint8_t)(1u << (slot % 8));
+
+  if (expanded) {
+    tab->package_expanded[slot / 8] |= mask;
+  } else {
+    tab->package_expanded[slot / 8] &= (uint8_t)~mask;
+  }
+}
+
+static void
+detail_package_collect_tree_state(search_tool_t *tool, detail_tab_t *tab, record_t *record, detail_tree_state_t *state)
+{
+  for (record_t *child = record_from_slot(tool, record->first_child_slot); child; child = record_from_slot(tool, child->next_sibling_slot)) {
+    if (record_slot_valid(child->first_child_slot)) {
+      state->has_children = true;
+
+      if (!detail_package_is_expanded(tool, tab, child)) {
+        state->has_collapsed = true;
+      }
+
+      detail_package_collect_tree_state(tool, tab, child, state);
+    }
+  }
+}
+
+static void
+detail_package_set_children_expanded(search_tool_t *tool, detail_tab_t *tab, record_t *record, bool expanded)
+{
+  for (record_t *child = record_from_slot(tool, record->first_child_slot); child; child = record_from_slot(tool, child->next_sibling_slot)) {
+    detail_package_set_expanded(tool, tab, child, expanded);
+    detail_package_set_children_expanded(tool, tab, child, expanded);
+  }
+}
+
 static void
 package_draw_children(search_tool_t *tool, detail_tab_t *tab, record_t *record, int depth)
 {
@@ -3351,13 +2814,13 @@ package_draw_children(search_tool_t *tool, detail_tab_t *tab, record_t *record, 
       .record_to_open = child_record,
     };
 
-    bool maximized = record_has_flag(child_record, RECORD_FLAG_MAXIMIZED);
+    bool maximized = detail_package_is_expanded(tool, tab, child_record);
     if (ui_detail_row(tool, &tab->package_grid, row, &maximized)) {
       if (child_record->first_child_slot != RECORD_SLOT_INVALID) {
         package_draw_children(tool, tab, child_record, depth + 1);
       }
     }
-    record_set_flag(child_record, RECORD_FLAG_MAXIMIZED, maximized);
+    detail_package_set_expanded(tool, tab, child_record, maximized);
   }
 }
 
@@ -3370,10 +2833,17 @@ draw_package_section(search_tool_t *tool, detail_tab_t *tab)
   tmp_arena_t tmp = scratch_begin(NULL);
   {
     if (ui_tree_push(tool->ctx, NK_TREE_TAB, STR_LIT("Package Content"), true)) {
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_push_package_dump(tmp.arena, tool, tab);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = {0};
+      detail_package_collect_tree_state(tool, tab, tab->record, &state);
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_package_set_children_expanded(tool, tab, tab->record, state.has_collapsed);
       }
 
       if (tab->record->first_child_slot != RECORD_SLOT_INVALID) {
@@ -3474,7 +2944,7 @@ draw_detail_enum_section(search_tool_t *tool, detail_tab_t *tab)
 }
 
 static void
-draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_prop_t *prop, int depth)
+draw_detail_prop(search_tool_t *tool, detail_tab_t *tab, struct nk_grid_state *grid_state, detail_prop_t *prop, int depth)
 {
   ASSERT(tool != NULL);
   ASSERT(prop != NULL);
@@ -3495,22 +2965,7 @@ draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_p
     UI_TEXT_CELL(prop->summary, summary_color),
   };
 
-  bool has_children = false;
-  switch (prop->children_kind) {
-  case DETAIL_PROP_CHILDREN_ARRAY_ELEMS:
-  case DETAIL_PROP_CHILDREN_SET_ELEMS:
-  case DETAIL_PROP_CHILDREN_MAP_PAIRS: {
-    has_children = (prop->live_child_count > 0);
-    break;
-  }
-
-  case DETAIL_PROP_CHILDREN_SCHEMA:
-  case DETAIL_PROP_CHILDREN_NONE:
-  default: {
-    has_children = (prop->first_child != NULL);
-    break;
-  }
-  }
+  bool has_children = detail_prop_has_children(prop);
 
   ui_detail_row_t row = {
     .parts          = parts,
@@ -3521,9 +2976,14 @@ draw_detail_prop(search_tool_t *tool, struct nk_grid_state *grid_state, detail_p
     .record_to_open = prop->record_to_open,
   };
 
-  if (ui_detail_row(tool, grid_state, row, has_children ? &prop->maximized : NULL)) {
+  bool was_maximized = prop->maximized;
+  if (ui_detail_row(tool, grid_state, row, &prop->maximized)) {
+    if (!was_maximized && tab->value_base && prop->prop) {
+      detail_prop_fill_value_direct(tool, tab, prop, depth);
+    }
+
     for (detail_prop_t *child = prop->first_child; child; child = child->next) {
-      draw_detail_prop(tool, grid_state, child, depth + 1);
+      draw_detail_prop(tool, tab, grid_state, child, depth + 1);
     }
   }
 }
@@ -3589,10 +3049,13 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
   ASSERT(tool != NULL);
   ASSERT(tab != NULL);
 
-  ASSERT(tab != NULL);
-
   if (!tab->function) {
     return;
+  }
+
+  nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+  if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
+    ufunc_call_open(tool, tab->function->record, NULL);
   }
 
   tmp_arena_t tmp = scratch_begin(NULL);
@@ -3615,8 +3078,11 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         detail_copy_text(tool->ctx, dump);
       }
 
-      if (ui_button_str(tool->ctx, STR_LIT("Call..."))) {
-        ufunc_call_open(tool, f->record, NULL);
+      detail_tree_state_t state = {0};
+      detail_props_collect_tree_state(f->first_param, &state);
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_props_set_expanded(f->first_param, state.has_collapsed);
       }
 
       ui_text_cell_t header_parts[] = {
@@ -3651,7 +3117,7 @@ draw_detail_func_section(search_tool_t *tool, detail_tab_t *tab)
         ui_detail_row(tool, &tab->single_grid, header_row, NULL);
       } else {
         for (detail_prop_t *param = f->first_param; param; param = param->next) {
-          draw_detail_prop(tool, &tab->param_grid, param, 0);
+          draw_detail_prop(tool, tab, &tab->param_grid, param, 0);
         }
       }
 
@@ -3806,10 +3272,25 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
 
       details_refresh_values(tool, tab);
 
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_props_push_dump(tool, tab, tmp.arena);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = {0};
+      for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+        detail_props_collect_tree_state(owner->first_prop, &state);
+      }
+
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        if (state.has_collapsed) {
+          details_refresh_all_values(tool, tab);
+        }
+
+        for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
+          detail_props_set_expanded(owner->first_prop, state.has_collapsed);
+        }
       }
 
       float group_pad_y = tool->ctx->style.window.group_padding.y;
@@ -3874,7 +3355,7 @@ draw_detail_layout_section_props(search_tool_t *tool, detail_tab_t *tab)
             ui_detail_row(tool, &tab->single_grid, row, NULL);
           } else {
             for (detail_prop_t *prop = owner->first_prop; prop; prop = prop->next) {
-              draw_detail_prop(tool, &tab->prop_grid, prop, 1);
+              draw_detail_prop(tool, tab, &tab->prop_grid, prop, 1);
             }
           }
         }
@@ -3907,10 +3388,15 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
       nk_style_push_vec2(tool->ctx, &tool->ctx->style.tab.padding, nk_vec2(2.0f, 2.0f));
       nk_style_push_style_item(tool->ctx, &tool->ctx->style.window.fixed_background, UI_ITEM(UI_C_TRANSPARENT));
 
-      nk_layout_row_dynamic(tool->ctx, 22.0f, 1);
+      nk_layout_row_dynamic(tool->ctx, 22.0f, 2);
       if (ui_button_str(tool->ctx, STR_LIT("Copy"))) {
         str_t dump = detail_push_funcs_dump(tmp.arena, tab);
         detail_copy_text(tool->ctx, dump);
+      }
+
+      detail_tree_state_t state = detail_funcs_tree_state(tab);
+      if (detail_tree_toggle_button(tool->ctx, state)) {
+        detail_funcs_set_expanded(tab, state.has_collapsed);
       }
 
       for (detail_owner_t *owner = tab->first_owner; owner; owner = owner->next) {
@@ -3994,7 +3480,7 @@ draw_detail_layout_section_funcs(search_tool_t *tool, detail_tab_t *tab)
                 ui_detail_row(tool, &tab->single_grid, row, NULL);
               } else {
                 for (detail_prop_t *prop = func->first_param; prop; prop = prop->next) {
-                  draw_detail_prop(tool, &tab->param_grid, prop, 2);
+                  draw_detail_prop(tool, tab, &tab->param_grid, prop, 2);
                 }
               }
             }

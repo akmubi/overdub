@@ -458,6 +458,44 @@ is_any_window_interactive(struct nk_context *ctx)
   return is_any_window(ctx, 0, NK_WINDOW_CLOSED | NK_WINDOW_HIDDEN | NK_WINDOW_MINIMIZED | NK_WINDOW_NOT_INTERACTIVE);
 }
 
+static inline bool
+window_captures_keyboard(struct nk_window *win)
+{
+  if (!win) {
+    return false;
+  }
+
+  if (win->edit.active) {
+    return true;
+  }
+
+  bool popup_active = win->popup.active && win->popup.win;
+  if (!popup_active) {
+    return false;
+  }
+
+  if (win->popup.type == NK_PANEL_COMBO) {
+    return true;
+  }
+
+  return win->popup.win->edit.active;
+}
+
+static bool
+is_any_keyboard_capture_active(struct nk_context *ctx)
+{
+  ASSERT(ctx != NULL);
+
+  for (struct nk_window *win = ctx->begin; win; win = win->next) {
+    if (!(win->flags & (NK_WINDOW_CLOSED | NK_WINDOW_HIDDEN | (enum nk_window_flags)NK_WINDOW_NO_INPUT)) &&
+        window_captures_keyboard(win)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool
 ui_manager_should_show_cursor(ui_manager_t *manager)
 {
@@ -531,6 +569,10 @@ static bool
 ui_manager_should_consume_input_pre(ui_manager_t *manager, input_event_t *ev)
 {
   if (ui_keybind_capture_is_open(&manager->keybind_capture)) {
+    return true;
+  }
+
+  if (input_event_is_keyboard(ev) && is_any_keyboard_capture_active(manager->ctx)) {
     return true;
   }
 
@@ -792,6 +834,8 @@ ui_manager_on_input_event_post(ui_manager_t *manager, input_event_t *ev)
 void
 ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter)
 {
+  ui_console_on_frame_begin(&manager->console, frame_counter);
+
   if (!manager->inited || !manager->ctx) {
     return;
   }

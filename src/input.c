@@ -231,6 +231,12 @@ input_key_is_released(input_key_kind_t key)
   return key > INPUT_KEY_NONE && key < INPUT_KEY_MAX && globals.keys[key].released;
 }
 
+float
+input_key_get_analog_value(input_key_kind_t key)
+{
+  return key > INPUT_KEY_NONE && key < INPUT_KEY_MAX ? globals.analog_values[key] : 0.0f;
+}
+
 bool
 input_key_is_bindable(input_key_kind_t key)
 {

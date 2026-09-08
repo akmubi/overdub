@@ -95,10 +95,13 @@
 #define UI_C_BORDER_FOCUS   nk_rgba(218, 105,  88, 245)
 
 /* Text */
-#define UI_C_TEXT           nk_rgba(235, 238, 243, 255)
-#define UI_C_TEXT_MUTED     nk_rgba(177, 187, 199, 255)
-#define UI_C_TEXT_DIM       nk_rgba(130, 142, 156, 255)
-#define UI_C_TEXT_DISABLED  nk_rgba( 89,  99, 111, 255)
+#define UI_C_TEXT            nk_rgba(235, 238, 243, 255)
+#define UI_C_TEXT_MUTED      nk_rgba(177, 187, 199, 255)
+#define UI_C_TEXT_DIM        nk_rgba(130, 142, 156, 255)
+#define UI_C_TEXT_DISABLED   nk_rgba( 89,  99, 111, 255)
+#define UI_C_PROP_TYPE_TEXT  nk_rgba(218, 156,  62, 255)
+#define UI_C_PROP_VALUE_TEXT nk_rgba(139, 191, 166, 255)
+#define UI_C_PROP_LINK_TEXT  nk_rgba(122, 184, 232, 255)
 
 /* Generic controls */
 #define UI_C_CONTROL        nk_rgba( 31,  37,  45, 255)

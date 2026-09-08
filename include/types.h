@@ -8,6 +8,32 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+/* ----------------------------- public DLL ABI ----------------------------- */
+
+#define MOD_CALL __cdecl
+
+#if defined(OVERDUB_BUILD_DLL)
+#  define MOD_API __declspec(dllexport)
+#elif defined(OVERDUB_STATIC)
+#  define MOD_API
+#else
+#  define MOD_API __declspec(dllimport)
+#endif
+
+#define MOD_EXPORT __declspec(dllexport)
+
+#ifdef __cplusplus
+#  define MOD_EXTERN_C extern "C"
+#  define MOD_EXTERN_C_BEGIN extern "C" {
+#  define MOD_EXTERN_C_END }
+#else
+#  define MOD_EXTERN_C
+#  define MOD_EXTERN_C_BEGIN
+#  define MOD_EXTERN_C_END
+#endif
+
+MOD_EXTERN_C_BEGIN
+
 /* -------------------------------- compiler -------------------------------- */
 
 #if defined(_MSC_VER)
@@ -182,12 +208,12 @@
 #  define DEBUGBREAK() raise(SIGTRAP)
 #endif
 
-#if defined BUILD_DEBUG || defined BUILD_TEST_UI
-void
+MOD_API void
 my_assert_msg(const char *expr, const char *file, int line, const char *fmt, ...) ATTR_FORMAT(4, 5);
-void
+MOD_API void
 my_assert(const char *expr, const char *file, int line);
 
+#if defined BUILD_DEBUG
 #  define ASSERT(COND)                        \
     do {                                      \
       if (!(COND)) {                          \
@@ -345,8 +371,14 @@ mem_move(void *dst, void *src, uint64_t size)
   return dst;
 }
 
-uint64_t
+MOD_API uint64_t
 time_now_us(void);
+MOD_API uint32_t
+thread_current_id(void);
+MOD_API int32_t
+atomic_i32_increment(volatile int32_t *value);
+MOD_API int32_t
+atomic_i32_compare_exchange(volatile int32_t *value, int32_t exchange, int32_t comparand);
 
 static inline uint64_t
 time_snap_up(uint64_t t, uint32_t q)
@@ -360,9 +392,11 @@ time_us_to_ms(uint64_t us)
   return (us + 999) / 1000;
 }
 
-bool
+MOD_API bool
 float_equal(float a, float b, float min_val, float step);
 
 #include "config.h"
+
+MOD_EXTERN_C_END
 
 #endif /* TYPES_H */

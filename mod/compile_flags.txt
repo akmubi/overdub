@@ -1,0 +1,11 @@
+-Iinclude
+-Ivendor
+-I../include
+-I../vendor
+-xc
+-std=c11
+-fms-extensions
+-DWIN32_LEAN_AND_MEAN
+-DNOMINMAX
+-D_CRT_SECURE_NO_WARNINGS
+-DBUILD_DEBUG

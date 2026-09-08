@@ -47,6 +47,7 @@ struct globals_s {
   /* input */
   input_key_state_t keys[INPUT_KEY_MAX];
   bool              consumed_down[INPUT_KEY_MAX];
+  float             analog_values[INPUT_KEY_MAX];
   float             wheel_delta;
 
   /* mod manager */

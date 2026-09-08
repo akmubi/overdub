@@ -4,9 +4,16 @@
 #include "arena.h"
 #include "types.h"
 
+MOD_EXTERN_C_BEGIN
+
 #define STR_CLIT(lit) {.data = (uint8_t *)(ENSURE_STR_LIT(lit)), .len = (sizeof(lit) - 1)}
-#define STR_LIT(lit)  (str_t) STR_CLIT(ENSURE_STR_LIT(lit))
-#define STR_NULL      (str_t){0}
+#ifdef __cplusplus
+#  define STR_LIT(lit) str_t STR_CLIT(lit)
+#  define STR_NULL     str_t{}
+#else
+#  define STR_LIT(lit) (str_t) STR_CLIT(lit)
+#  define STR_NULL     (str_t){0}
+#endif
 
 #define STR_FMT      "%.*s"
 #define STR_ARG(str) (int)(str).len, (str).data
@@ -169,175 +176,177 @@ ascii_equal(uint8_t a, uint8_t b, str_cmp_flags_t flags)
 }
 
 /* length calculation */
-uint64_t
+MOD_API uint64_t
 calc_cstr_len(const char *cstr);
-uint64_t
+MOD_API uint64_t
 calc_cstr_len_with_cap(const char *s, uint64_t cap);
-uint64_t
+MOD_API uint64_t
 calc_wstr_len(const wchar_t *wstr);
-uint64_t
+MOD_API uint64_t
 calc_wstr_len_with_cap(const wchar_t *s, uint64_t cap);
 
 /* creation */
-str_t
+MOD_API str_t
 str_make(void *data, uint64_t size);
-str_t
+MOD_API str_t
 str_from_cstr(const char *cstr);
-str_t
+MOD_API str_t
 str_from_cstr_with_cap(const char *cstr, uint64_t cap);
-str16_t
+MOD_API str16_t
 str16_make(uint16_t *data, uint64_t size);
-str16_t
+MOD_API str16_t
 str16_from_wstr(const wchar_t *wstr);
-str16_t
+MOD_API str16_t
 str16_from_wstr_with_cap(const wchar_t *wstr, uint64_t cap);
-str_t
+MOD_API str_t
 str_slice(str_t str, uint64_t start_idx, uint64_t end_idx);
 
 /* comparison/search */
-bool
+MOD_API bool
 str_has_prefix(str_t s, str_t prefix, str_cmp_flags_t flags);
-bool
+MOD_API bool
 str_has_suffix(str_t s, str_t suffix, str_cmp_flags_t flags);
-int
+MOD_API int
 str_compare(str_t a, str_t b, str_cmp_flags_t flags);
-bool
+MOD_API bool
 str_equal(str_t a, str_t b, str_cmp_flags_t flags);
-bool
+MOD_API bool
 str_equal_icase(str_t a, str_t b);
-bool
+MOD_API bool
 str_find(str_t s, str_t sub, str_cmp_flags_t flags, uint64_t *idx);
-bool
+MOD_API bool
 str_rfind(str_t s, str_t sub, str_cmp_flags_t flags, uint64_t *idx);
-bool
+MOD_API bool
 str_find_any(str_t s, str_t charset, str_cmp_flags_t flags, uint64_t *idx);
-bool
+MOD_API bool
 str_rfind_any(str_t s, str_t charset, str_cmp_flags_t flags, uint64_t *idx);
-bool
+MOD_API bool
 str_has_char(str_t s, char c, str_cmp_flags_t flags);
 
 /* allocation */
-str_t
+MOD_API str_t
 str_push_copy(arena_t *arena, str_t str);
-uint64_t
+MOD_API uint64_t
 str_write_vfmt(void *buf, uint64_t cap, const char *fmt, va_list args);
-uint64_t
+MOD_API uint64_t
 str_write_fmt(void *buf, uint64_t cap, const char *fmt, ...) ATTR_FORMAT(3, 4);
-str_t
+MOD_API str_t
 str_push_vfmt(arena_t *arena, const char *fmt, va_list args);
-str_t
+MOD_API str_t
 str_push_fmt(arena_t *arena, const char *fmt, ...) ATTR_FORMAT(2, 3);
-str_t
+MOD_API str_t
 str_push_fill_byte(arena_t *arena, uint64_t size, uint8_t byte);
-str_t
+MOD_API str_t
 str_push_concat(arena_t *arena, str_t a, str_t b);
-str_t
+MOD_API str_t
 str_push_hex(arena_t *arena, void *data, uint64_t size);
 
 /* string list/array */
-str_list_t
+MOD_API str_list_t
 str_list_copy(arena_t *arena, str_list_t src);
-void
+MOD_API void
 str_list_push_node(str_list_t *list, str_node_t *n);
-void
+MOD_API void
 str_list_push_node_front(str_list_t *list, str_node_t *n);
-void
+MOD_API void
 str_list_push(arena_t *arena, str_list_t *list, str_t str);
-void
+MOD_API void
 str_list_push_copy(arena_t *arena, str_list_t *list, str_t str);
-void
+MOD_API void
 str_list_push_fmt(arena_t *arena, str_list_t *list, const char *fmt, ...) ATTR_FORMAT(3, 4);
-void
+MOD_API void
 str_list_push_front(arena_t *arena, str_list_t *list, str_t str);
-void
+MOD_API void
 str_list_push_front_fmt(arena_t *arena, str_list_t *list, const char *fmt, ...) ATTR_FORMAT(3, 4);
-bool
+MOD_API bool
 str_list_contains(str_list_t list, str_t s, str_cmp_flags_t flags);
-void
+MOD_API void
 str_list_concat_inplace(str_list_t *dst, str_list_t *src);
-str_list_t
+MOD_API str_list_t
 str_split(arena_t *arena, str_t str, uint64_t split_count, str_t *splits);
-str_list_t
+MOD_API str_list_t
 str_split_lines(arena_t *arena, str_t str);
-str_t
+MOD_API str_t
 str_list_join(arena_t *arena, str_list_t list, str_t pre, str_t sep, str_t post);
-str_t
+MOD_API str_t
 str_list_join_lines(arena_t *arena, str_list_t list);
-str_array_t
+MOD_API str_array_t
 str_array_make(str_t *items, int count);
-str_array_t
+MOD_API str_array_t
 str_array_copy(arena_t *arena, str_array_t a);
-str_array_t
+MOD_API str_array_t
 str_array_copy_from_list(arena_t *arena, str_list_t list);
-str_array_t
+MOD_API str_array_t
 str_array_from_list(arena_t *arena, str_list_t list);
-bool
+MOD_API bool
 str_array_contains(str_array_t array, str_t s, str_cmp_flags_t flags);
-bool
+MOD_API bool
 str_array_find(str_array_t array, str_t s, str_cmp_flags_t flags, uint64_t *idx);
 
 /* UTF-8 <-> UTF-16 conversions */
-str_t
+MOD_API str_t
 str_from_str16(arena_t *arena, str16_t in);
-str16_t
+MOD_API str16_t
 str16_from_str(arena_t *arena, str_t in);
 
-uint64_t
+MOD_API uint64_t
 str16_utf8_len(str16_t in);
-uint64_t
+MOD_API uint64_t
 str16_write_utf8(uint8_t *buf, uint64_t max_len, str16_t in);
 
 /* C-string conversion */
-char *
+MOD_API char *
 str_push_cstr(arena_t *arena, str_t s);
-wchar_t *
+MOD_API wchar_t *
 str16_push_wstr(arena_t *arena, str16_t s);
 
-uint64_t
+MOD_API uint64_t
 str_write_cstr(str_t s, char *buf, uint64_t cap);
-uint64_t
+MOD_API uint64_t
 str_write_data(str_t s, char *buf, uint64_t cap);
 
 /* mutations */
-str_t
+MOD_API str_t
 str_to_upper(arena_t *arena, str_t str);
-str_t
+MOD_API str_t
 str_to_lower(arena_t *arena, str_t str);
 
 /* trimming */
-str_t
+MOD_API str_t
 str_trim_leading(str_t str, str_t charset, str_cmp_flags_t flags);
-str_t
+MOD_API str_t
 str_trim_trailing(str_t str, str_t charset, str_cmp_flags_t flags);
-str_t
+MOD_API str_t
 str_trim(str_t str, str_t charset, str_cmp_flags_t flags);
-str_t
+MOD_API str_t
 str_trim_leading_space(str_t str);
-str_t
+MOD_API str_t
 str_trim_trailing_space(str_t str);
-str_t
+MOD_API str_t
 str_trim_space(str_t str);
-str_t
+MOD_API str_t
 str_trim_prefix(str_t str, str_t prefix, str_cmp_flags_t flags);
-str_t
+MOD_API str_t
 str_trim_suffix(str_t str, str_t suffix, str_cmp_flags_t flags);
-str_t
+MOD_API str_t
 str_trim_comment(str_t str, str_t charset, str_cmp_flags_t flags);
 
 /* parsing */
-bool
+MOD_API bool
 str_parse_s64(str_t str, int64_t *value);
-bool
+MOD_API bool
 str_parse_int(str_t str, int *value);
-bool
+MOD_API bool
 str_parse_u32(str_t str, uint32_t *value);
-bool
+MOD_API bool
 str_parse_u16(str_t str, uint16_t *value);
-bool
+MOD_API bool
 str_parse_u8(str_t str, uint8_t *value);
-bool
+MOD_API bool
 str_parse_float(str_t str, float *value);
-bool
+MOD_API bool
 str_parse_bool(str_t s, bool default_val);
+
+MOD_EXTERN_C_END
 
 #endif /* STR_H */

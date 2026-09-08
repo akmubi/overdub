@@ -3,6 +3,7 @@
 .code
 *.vscode*
 *.kdev4*
+*.code-workspace
 
 build
 tmp
@@ -12,6 +13,7 @@ tmp
 *.dll
 *.out
 *.txt
+!mod/compile_flags.txt
 *.o
 *.d
 *.obj
@@ -20,4 +22,3 @@ tmp
 
 tags
 cscope.out
-
