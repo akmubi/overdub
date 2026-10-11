@@ -499,6 +499,7 @@ tweaks_toggle_debug_widget(void)
 
   uobject_t *wheel = tweaks_find_debug_widget(cls, is_in_viewport);
   if (!wheel) {
+    LOG_WARN("debug wheel: the shortcut was pressed but there is no wheel to show (not in a level?)");
     return;
   }
 
@@ -508,6 +509,7 @@ tweaks_toggle_debug_widget(void)
 
   unreal_process_event(wheel, get_visibility, &visibility);
   unreal_process_event(wheel, visibility.result == 0 ? hide : show, NULL);
+  LOG_INFO("debug wheel: %s", visibility.result == 0 ? "closed" : "opened");
 }
 
 static void
