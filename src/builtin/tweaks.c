@@ -442,6 +442,74 @@ tweaks_ufunction_invoke_post(mod_handle_t h, ufunc_t *func, uobject_t *self, ffr
   }
 }
 
+/* Showing a wheel that is already open breaks its input, so the shortcut toggles it. */
+static uobject_t *
+tweaks_find_debug_widget(uclass_t *cls, ufunc_t *is_in_viewport)
+{
+  uobject_t *fallback = NULL;
+  int        count    = unreal_uobject_array_count();
+
+  for (int idx = 0; idx < count; ++idx) {
+    uobject_t *obj = unreal_uobject_array_get_obj(idx);
+    if (!obj || obj->cls != cls || (obj->obj_flags & RF_CLASS_DEFAULT_OBJECT) || !unreal_uobject_is_valid(obj)) {
+      continue;
+    }
+
+    // the live wheel is the one in the viewport
+    struct {
+      bool result;
+    } params = {0};
+
+    if (is_in_viewport) {
+      unreal_process_event(obj, is_in_viewport, &params);
+    }
+
+    if (params.result) {
+      return obj;
+    }
+
+    if (!fallback) {
+      fallback = obj;
+    }
+  }
+
+  return fallback;
+}
+
+static void
+tweaks_toggle_debug_widget(void)
+{
+  static uclass_t *cls            = NULL;
+  static ufunc_t  *show           = NULL;
+  static ufunc_t  *hide           = NULL;
+  static ufunc_t  *get_visibility = NULL;
+  static ufunc_t  *is_in_viewport = NULL;
+
+  if (!cls || !unreal_uobject_is_valid((uobject_t *)cls)) {
+    cls            = unreal_uclass_find(STR_LIT("DebugWidgetSelect_UI_C"), false, true);
+    show           = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("Show")) : NULL;
+    hide           = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("Hide")) : NULL;
+    get_visibility = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("GetVisibility")) : NULL;
+    is_in_viewport = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("IsInViewport")) : NULL;
+  }
+
+  if (!cls || !show || !hide || !get_visibility) {
+    return;
+  }
+
+  uobject_t *wheel = tweaks_find_debug_widget(cls, is_in_viewport);
+  if (!wheel) {
+    return;
+  }
+
+  struct {
+    uint8_t result; // ESlateVisibility, 0 is Visible
+  } visibility = {1};
+
+  unreal_process_event(wheel, get_visibility, &visibility);
+  unreal_process_event(wheel, visibility.result == 0 ? hide : show, NULL);
+}
+
 static void
 tweaks_tick(mod_handle_t h, float delta)
 {
@@ -499,23 +567,7 @@ tweaks_tick(mod_handle_t h, float delta)
   }
 
   if (keybind_is_pressed(mod_manager_cfg_get_keybind(&globals.mod_manager, tweaks->cfg.debug_widget_keybind_h))) {
-    static uclass_t *debug_cls  = NULL;
-    static ufunc_t  *debug_show = NULL;
-
-    if (!debug_cls || !unreal_uobject_is_valid((uobject_t *)debug_cls)) {
-      debug_cls = unreal_uclass_find(STR_LIT("DebugWidgetSelect_UI_C"), false, true);
-    }
-
-    if (!debug_show || !unreal_uobject_is_valid((uobject_t *)debug_show)) {
-      debug_show = (ufunc_t *)unreal_uobject_find_by_full_name(globals.unreal.core_func, STR_LIT("/Script/Hibiki.HbkDebugSelectWidget.Show"));
-    }
-
-    if (debug_cls && debug_show) {
-      uobject_t *debug = unreal_uobject_find_first_of(debug_cls);
-      if (debug) {
-        unreal_process_event(debug, debug_show, NULL);
-      }
-    }
+    tweaks_toggle_debug_widget();
   }
 }
 
