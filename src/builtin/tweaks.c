@@ -442,20 +442,24 @@ tweaks_ufunction_invoke_post(mod_handle_t h, ufunc_t *func, uobject_t *self, ffr
   }
 }
 
-/* Showing a wheel that is already open breaks its input, so the shortcut toggles it. */
+/* Showing a wheel that is already open breaks its input, so the shortcut toggles it.
+ * It is looked up by class name: after a level change the class is a new object. */
 static uobject_t *
-tweaks_find_debug_widget(uclass_t *cls, ufunc_t *is_in_viewport)
+tweaks_find_debug_widget(void)
 {
   uobject_t *fallback = NULL;
   int        count    = unreal_uobject_array_count();
 
   for (int idx = 0; idx < count; ++idx) {
     uobject_t *obj = unreal_uobject_array_get_obj(idx);
-    if (!obj || obj->cls != cls || (obj->obj_flags & RF_CLASS_DEFAULT_OBJECT) || !unreal_uobject_is_valid(obj)) {
+    if (!obj || !obj->cls || (obj->obj_flags & RF_CLASS_DEFAULT_OBJECT) ||
+        !unreal_fname_match_text(((uobject_t *)obj->cls)->name, STR_LIT("DebugWidgetSelect_UI_C"), false, true) ||
+        !unreal_uobject_is_valid(obj)) {
       continue;
     }
 
     // the live wheel is the one in the viewport
+    ufunc_t *is_in_viewport = unreal_ustruct_find_func((ustruct_t *)obj->cls, STR_LIT("IsInViewport"));
     struct {
       bool result;
     } params = {0};
@@ -479,27 +483,19 @@ tweaks_find_debug_widget(uclass_t *cls, ufunc_t *is_in_viewport)
 static void
 tweaks_toggle_debug_widget(void)
 {
-  static uclass_t *cls            = NULL;
-  static ufunc_t  *show           = NULL;
-  static ufunc_t  *hide           = NULL;
-  static ufunc_t  *get_visibility = NULL;
-  static ufunc_t  *is_in_viewport = NULL;
-
-  if (!cls || !unreal_uobject_is_valid((uobject_t *)cls)) {
-    cls            = unreal_uclass_find(STR_LIT("DebugWidgetSelect_UI_C"), false, true);
-    show           = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("Show")) : NULL;
-    hide           = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("Hide")) : NULL;
-    get_visibility = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("GetVisibility")) : NULL;
-    is_in_viewport = cls ? unreal_ustruct_find_func((ustruct_t *)cls, STR_LIT("IsInViewport")) : NULL;
-  }
-
-  if (!cls || !show || !hide || !get_visibility) {
+  uobject_t *wheel = tweaks_find_debug_widget();
+  if (!wheel) {
+    LOG_WARN("debug wheel: the shortcut was pressed but there is no wheel to show (not in a level?)");
     return;
   }
 
-  uobject_t *wheel = tweaks_find_debug_widget(cls, is_in_viewport);
-  if (!wheel) {
-    LOG_WARN("debug wheel: the shortcut was pressed but there is no wheel to show (not in a level?)");
+  ustruct_t *cls            = (ustruct_t *)wheel->cls;
+  ufunc_t   *show           = unreal_ustruct_find_func(cls, STR_LIT("Show"));
+  ufunc_t   *hide           = unreal_ustruct_find_func(cls, STR_LIT("Hide"));
+  ufunc_t   *get_visibility = unreal_ustruct_find_func(cls, STR_LIT("GetVisibility"));
+
+  if (!show || !hide || !get_visibility) {
+    LOG_WARN("debug wheel: the wheel has no Show / Hide to call");
     return;
   }
 
