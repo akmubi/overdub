@@ -166,6 +166,7 @@ struct tweaks_s {
   tweaks_jbox_t jbox;
   arena_t      *perm;
   bool          inited;
+  int           tutorial_close_ticks;
 };
 
 static tweaks_t g_tweaks = {0};
@@ -408,6 +409,10 @@ tweaks_process_event_post(mod_handle_t h, uobject_t *self, ufunc_t *func, void *
 
   tweaks_t *tweaks = &g_tweaks;
 
+  if (should_disable_tutorials(tweaks) && uobject_class_is(self, STR_LIT("DrawNewTutorial_UI_C")) && ufunc_is(func, STR_LIT("Construct"))) {
+    tweaks->tutorial_close_ticks = 2;
+  }
+
   if (should_restore_jbox_music(tweaks)) {
     if (uobject_class_is(self, STR_LIT("SM_Arcade_BP_C"))) {
       if (ufunc_is(func, STR_LIT("OnNotifyBegin_59884126489B8A771076CBBF9EB59637"))) {
@@ -508,6 +513,39 @@ tweaks_toggle_debug_widget(void)
   LOG_INFO("debug wheel: %s", visibility.result == 0 ? "closed" : "opened");
 }
 
+/* Some tutorials are started from the game's code, where Activate is not seen, but every
+ * pop-up builds a DrawNewTutorial_UI_C. Then the tasks showing a tutorial are ended a tick
+ * later, as if the player closed it. A task shows something while this byte is set. */
+#define TWEAKS_TUTORIAL_TASK_SHOWING_OFFSET 0xAC
+
+static void
+tweaks_close_shown_tutorials(void)
+{
+  int closed = 0;
+  int count  = unreal_uobject_array_count();
+
+  for (int idx = 0; idx < count; ++idx) {
+    uobject_t *obj = unreal_uobject_array_get_obj(idx);
+    if (!obj || !obj->cls || (obj->obj_flags & RF_CLASS_DEFAULT_OBJECT) || !uobject_class_is(obj, STR_LIT("HbkShowNewTutorialTask")) ||
+        !unreal_uobject_is_valid(obj)) {
+      continue;
+    }
+
+    if (((ustruct_t *)obj->cls)->props_size <= TWEAKS_TUTORIAL_TASK_SHOWING_OFFSET ||
+        ((const uint8_t *)obj)[TWEAKS_TUTORIAL_TASK_SHOWING_OFFSET] == 0) {
+      continue;
+    }
+
+    ufunc_t *end_task_func = unreal_ustruct_find_func((ustruct_t *)obj->cls, STR_LIT("OnDisplayEndClear"));
+    if (end_task_func) {
+      unreal_process_event(obj, end_task_func, NULL);
+      closed += 1;
+    }
+  }
+
+  LOG_INFO("tutorial pop-up: %d task(s) ended", closed);
+}
+
 static void
 tweaks_tick(mod_handle_t h, float delta)
 {
@@ -517,6 +555,10 @@ tweaks_tick(mod_handle_t h, float delta)
   tweaks_t *tweaks = &g_tweaks;
   if (!tweaks->inited) {
     return;
+  }
+
+  if (tweaks->tutorial_close_ticks > 0 && --tweaks->tutorial_close_ticks == 0 && should_disable_tutorials(tweaks)) {
+    tweaks_close_shown_tutorials();
   }
 
   if (should_restore_jbox_music(tweaks)) {
