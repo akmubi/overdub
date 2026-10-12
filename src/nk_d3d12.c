@@ -730,7 +730,19 @@ nk_d3d12_init(IDXGISwapChain *swap)
     {"seguisym.ttf", NK_RUNTIME_FONT_FALLBACK},
   };
 
-  struct nk_runtime_font_source font_sources[COUNTOF(system_fonts)];
+  /* Japanese, Korean and Chinese; Japanese comes first, so kanji use it */
+  static const struct {
+    const char *name;
+    bool        japanese; // only one of these is loaded
+  } script_fonts[] = {
+    {"YuGothM.ttc",  true },
+    {"meiryo.ttc",   true },
+    {"msgothic.ttc", true },
+    {"malgun.ttf",   false},
+    {"msyh.ttc",     false},
+  };
+
+  struct nk_runtime_font_source font_sources[COUNTOF(system_fonts) + COUNTOF(script_fonts)];
   int                           font_source_count = 0;
 
   for (int i = 0; i < COUNTOF(system_fonts); ++i) {
@@ -739,6 +751,19 @@ nk_d3d12_init(IDXGISwapChain *swap)
     } else if (i == 0) {
       LOG_ERROR("%d: failed to load the Consolas system font", __LINE__);
       return false;
+    }
+  }
+
+  bool has_japanese = false;
+
+  for (int i = 0; i < COUNTOF(script_fonts) && font_source_count < NK_RUNTIME_FONT_CAPACITY; ++i) {
+    if (script_fonts[i].japanese && has_japanese) {
+      continue;
+    }
+
+    if (nk_runtime_font_source_system_mapped(&font_sources[font_source_count], script_fonts[i].name, NK_RUNTIME_FONT_FALLBACK)) {
+      font_source_count += 1;
+      has_japanese       = has_japanese || script_fonts[i].japanese;
     }
   }
 

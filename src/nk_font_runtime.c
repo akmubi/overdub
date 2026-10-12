@@ -29,6 +29,46 @@ nk_runtime_font_source_system(struct nk_runtime_font_source *source,
 }
 
 bool
+nk_runtime_font_source_system_mapped(struct nk_runtime_font_source *source,
+                                     const char                    *name,
+                                     enum nk_runtime_font_style     style)
+{
+  char path[MAX_PATH];
+  int  len = GetWindowsDirectoryA(path, COUNTOF(path));
+  if (!len || len + 7 + (int)strlen(name) >= COUNTOF(path)) {
+    return false;
+  }
+
+  snprintf(path + len, COUNTOF(path) - len, "\\Fonts\\%s", name);
+
+  HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  void         *view = NULL;
+  LARGE_INTEGER size = {0};
+
+  if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart < 0x7FFFFFFF) {
+    /* copy-on-write: the font code may write to the data */
+    HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_WRITECOPY, 0, 0, NULL);
+    if (mapping) {
+      view = MapViewOfFile(mapping, FILE_MAP_COPY, 0, 0, 0);
+      CloseHandle(mapping);
+    }
+  }
+
+  CloseHandle(file);
+
+  if (!view) {
+    return false;
+  }
+
+  *source = (struct nk_runtime_font_source){view, (nk_size)size.QuadPart, style};
+  return true;
+}
+
+bool
 nk_runtime_fonts_init(struct nk_runtime_fonts             *fonts,
                       arena_t                             *perm,
                       const struct nk_runtime_font_source *sources,

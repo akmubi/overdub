@@ -39,6 +39,12 @@ nk_runtime_font_source_system(struct nk_runtime_font_source *source,
                               const char                    *name,
                               enum nk_runtime_font_style     style);
 
+/* maps the file instead of reading it, for large fonts */
+bool
+nk_runtime_font_source_system_mapped(struct nk_runtime_font_source *source,
+                                     const char                    *name,
+                                     enum nk_runtime_font_style     style);
+
 /* sources[0] is required, the others are optional */
 bool
 nk_runtime_fonts_init(struct nk_runtime_fonts             *fonts,
