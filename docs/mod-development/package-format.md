@@ -135,4 +135,34 @@ default_value = 255.128.32.255
 
 Integer and float options use `min_value`, `max_value`, and `step`. Enum choices are separated by `|`. Colors use decimal RGBA components.
 
+### Keybinds
+
+A keybind has a keyboard part and a gamepad part, separated by `|`. Either part may be empty, but one part cannot mix keyboard keys and gamepad buttons, so `Ctrl+ButtonA` is invalid.
+
+```ini
+[option.keybind]
+id            = toggle_player
+label         = Toggle player
+default_value = F8 | Select+RB
+```
+
+The player presses the first gamepad button first. A combination fires as soon as all of its buttons are down, and a single button fires after the gamepad hold time.
+
+Gamepad buttons are named:
+- `ButtonA`/`Cross`
+- `ButtonB`/`Circle`
+- `ButtonX`/`Square`
+- `ButtonY`/`Triangle`
+- `LB`/`L1`
+- `RB`/`R1`
+- `LT`/`L2`
+- `RT`/`R2`
+- `LS`/`L3`
+- `RS`/`R3`
+- `Select`/`Share`/`Back`
+- `Start`/`Options`
+- `DPadUp`/`DPadDown`/`DPadLeft`/`DPadRight`
+
+Keybind options are the shortcuts the player can change. When two of them use the same keys, both still work, and the mod manager marks the mods yellow so the player can fix it. Keys that a mod checks in its own code, for example inside its windows, are not options and are not checked.
+
 Lua mods may also read `config.ini` directly when they own custom sections. Native mods normally use the typed configuration handles described in [Native SDK](native-sdk.md).

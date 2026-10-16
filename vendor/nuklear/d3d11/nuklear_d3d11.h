@@ -15,7 +15,6 @@
 
 #include <windows.h>
 
-#include "nk_font_runtime.h"
 #include "vendor_nuklear.h"
 
 typedef struct ID3D11Device        ID3D11Device;
@@ -41,7 +40,12 @@ nk_d3d11_resize(ID3D11DeviceContext *context, int width, int height);
 NK_API void
 nk_d3d11_shutdown(void);
 
-NK_API void
-nk_d3d11_setup_fonts(struct nk_runtime_fonts *fonts);
+/* XInput gamepads to NK_KEY_NAV_* keys, between nk_input_begin and nk_input_end; true while a pad is connected */
+NK_API nk_bool
+nk_d3d11_poll_gamepad(void);
+
+/* the atlas must stay valid until shutdown */
+NK_API nk_bool
+nk_d3d11_setup_atlas(struct nk_glyph_atlas *atlas);
 
 #endif /* NK_D3D11_H_ */

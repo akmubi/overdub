@@ -32,23 +32,9 @@ static pfn_resize_buffers_t g_resize_buffers_real = NULL;
 #include "nk_d3d12_ps.h"
 #include "nk_d3d12_vs.h"
 
-#define NK_D3D12_GLYPH_TABLE_CAPACITY   (4096)
-#define NK_D3D12_DYNAMIC_GLYPH_CAPACITY (512)
-#define NK_D3D12_GLYPH_BITMAP_SIZE      (128)
-#define NK_D3D12_DYNAMIC_ATLAS_HEIGHT   (1024)
-
-struct nk_d3d12_glyph_slot {
-  nk_glyph_id                 id;
-  float                       height;
-  const struct nk_font_glyph *glyph;
-};
-
-struct nk_d3d12_font_data {
-  const void                 *ttf;
-  struct nk_d3d12_glyph_slot  table[NK_D3D12_GLYPH_TABLE_CAPACITY];
-  struct nk_font_glyph        dynamic_glyphs[NK_D3D12_DYNAMIC_GLYPH_CAPACITY];
-  unsigned int                dynamic_glyph_count;
-};
+/* glyph atlas */
+#define NK_D3D12_ATLAS_SIZE   (2048)
+#define NK_D3D12_ATLAS_GLYPHS (8192)
 
 typedef struct nk_d3d12_frame_s nk_d3d12_frame_t;
 struct nk_d3d12_frame_s {
@@ -103,12 +89,9 @@ struct nk_d3d12_state {
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT font_footprint;
   UINT                               font_num_rows;
   UINT64                             font_row_bytes;
-  nk_byte                           *font_pixels;
+  nk_byte                           *font_pixels; // copy of the atlas pixels for the render thread
   int                                font_atlas_width;
   int                                font_atlas_height;
-  int                                font_atlas_next_x;
-  int                                font_atlas_next_y;
-  int                                font_atlas_row_height;
   volatile LONG                      font_texture_dirty;
 
   /* nuklear */
@@ -116,9 +99,7 @@ struct nk_d3d12_state {
   struct nk_buffer          nk_cmds; // command buffer for nk_convert
   struct nk_runtime_fonts   fonts;
   struct nk_font           *font_faces[NK_RUNTIME_FONT_CAPACITY];
-  struct nk_d3d12_font_data font_data[NK_RUNTIME_FONT_CAPACITY];
   int                       font_count;
-  nk_byte                   glyph_alpha[NK_D3D12_GLYPH_BITMAP_SIZE * NK_D3D12_GLYPH_BITMAP_SIZE];
 
   kbts_shape_context         *kb_context;
   kbts_font                   kb_font_data[NK_RUNTIME_FONT_CAPACITY];
@@ -350,166 +331,43 @@ nk_d3d12_create_pso(DXGI_FORMAT rtv_format)
   return SUCCEEDED(hr);
 }
 
-static struct nk_d3d12_font_data *
-nk_d3d12_get_font_data(const struct nk_font *font)
-{
-  for (int i = 0; i < g_nk->font_count; ++i) {
-    if (font == g_nk->font_faces[i]) {
-      return &g_nk->font_data[i];
-    }
-  }
-  return NULL;
-}
-
-static struct nk_d3d12_glyph_slot *
-nk_d3d12_find_glyph_slot(struct nk_d3d12_font_data *font_data, nk_glyph_id id, float height)
-{
-  unsigned int idx = id * 2654435761u;
-  for (unsigned int i = 0; i < NK_D3D12_GLYPH_TABLE_CAPACITY; ++i) {
-    struct nk_d3d12_glyph_slot *slot = &font_data->table[(idx + i) & (NK_D3D12_GLYPH_TABLE_CAPACITY - 1)];
-    if (!slot->glyph || (slot->id == id && slot->height == height)) {
-      return slot;
-    }
-  }
-  return NULL;
-}
-
+/* game thread, after nk_convert */
 static void
-nk_d3d12_cache_glyphs(struct nk_d3d12_font_data *font_data, struct nk_font *font)
+nk_d3d12_sync_font_atlas(void)
 {
-  for (nk_rune i = 0; i < font->info.glyph_count; ++i) {
-    struct nk_d3d12_glyph_slot *slot = nk_d3d12_find_glyph_slot(font_data, font->glyphs[i].id, font->info.height);
-    if (slot && !slot->glyph) {
-      slot->id     = font->glyphs[i].id;
-      slot->height = font->info.height;
-      slot->glyph  = &font->glyphs[i];
-    }
-  }
-}
+  struct nk_glyph_atlas *atlas = &g_nk->fonts.atlas;
+  int                    x, y, w, h;
 
-static bool
-nk_d3d12_place_glyph(int width, int height, int *x, int *y)
-{
-  int packed_width  = width + 2;
-  int packed_height = height + 2;
-
-  if (g_nk->font_atlas_next_x + packed_width > g_nk->font_atlas_width) {
-    g_nk->font_atlas_next_x     = 0;
-    g_nk->font_atlas_next_y    += g_nk->font_atlas_row_height;
-    g_nk->font_atlas_row_height = 0;
-  }
-
-  if (g_nk->font_atlas_next_y + packed_height > g_nk->font_atlas_height) {
-    return false;
-  }
-
-  *x = g_nk->font_atlas_next_x + 1;
-  *y = g_nk->font_atlas_next_y + 1;
-
-  g_nk->font_atlas_next_x    += packed_width;
-  g_nk->font_atlas_row_height = NK_MAX(g_nk->font_atlas_row_height, packed_height);
-  return true;
-}
-
-static const struct nk_font_glyph *
-nk_d3d12_rasterize_glyph(struct nk_font *font, struct nk_d3d12_font_data *font_data, nk_glyph_id id, float height)
-{
-  (void)font;
-
-  if (font_data->dynamic_glyph_count == NK_D3D12_DYNAMIC_GLYPH_CAPACITY) {
-    return NULL;
-  }
-
-  struct nk_font_glyph *glyph = &font_data->dynamic_glyphs[font_data->dynamic_glyph_count];
-  if (!nk_runtime_font_rasterize(font_data->ttf,
-                                 height,
-                                 id,
-                                 g_nk->glyph_alpha,
-                                 NK_D3D12_GLYPH_BITMAP_SIZE,
-                                 glyph) ||
-      glyph->w > NK_D3D12_GLYPH_BITMAP_SIZE || glyph->h > NK_D3D12_GLYPH_BITMAP_SIZE) {
-    return NULL;
-  }
-
-  int atlas_x = 0;
-  int atlas_y = 0;
-  if ((glyph->w || glyph->h) && !nk_d3d12_place_glyph((int)glyph->w, (int)glyph->h, &atlas_x, &atlas_y)) {
-    return NULL;
-  }
-
-  if (glyph->w && glyph->h) {
-    AcquireSRWLockExclusive(&g_nk_font_lock);
-    for (int y = 0; y < (int)glyph->h; ++y) {
-      nk_byte *dst = g_nk->font_pixels + ((atlas_y + y) * g_nk->font_atlas_width + atlas_x) * 4;
-      nk_byte *src = g_nk->glyph_alpha + y * NK_D3D12_GLYPH_BITMAP_SIZE;
-      for (int x = 0; x < (int)glyph->w; ++x) {
-        dst[x * 4 + 0] = 255;
-        dst[x * 4 + 1] = 255;
-        dst[x * 4 + 2] = 255;
-        dst[x * 4 + 3] = src[x];
-      }
-    }
-    ReleaseSRWLockExclusive(&g_nk_font_lock);
-
-    glyph->u0 = (float)atlas_x / g_nk->font_atlas_width;
-    glyph->v0 = (float)atlas_y / g_nk->font_atlas_height;
-    glyph->u1 = (float)(atlas_x + glyph->w) / g_nk->font_atlas_width;
-    glyph->v1 = (float)(atlas_y + glyph->h) / g_nk->font_atlas_height;
-    InterlockedExchange(&g_nk->font_texture_dirty, 1);
-  }
-  font_data->dynamic_glyph_count += 1;
-  return glyph;
-}
-
-static void
-nk_d3d12_font_query_glyph(nk_handle handle, float height, struct nk_user_font_glyph *out, nk_glyph_id id)
-{
-  struct nk_font             *font      = handle.ptr;
-  struct nk_d3d12_font_data  *font_data = nk_d3d12_get_font_data(font);
-  struct nk_d3d12_glyph_slot *slot      = nk_d3d12_find_glyph_slot(font_data, id, height);
-  const struct nk_font_glyph *glyph;
-
-  PROF_SCOPE_BEGIN("text.glyph_query", glyph_query);
-  mem_zero(out, sizeof(*out));
-  if (!slot) {
-    PROF_SCOPE_END(glyph_query);
+  if (!g_nk->font_pixels || !nk_glyph_atlas_dirty(atlas, &x, &y, &w, &h)) {
     return;
   }
 
-  glyph = slot->glyph;
-  if (!glyph) {
-    PROF_SCOPE_BEGIN("text.glyph_rasterize", glyph_rasterize);
-    glyph = nk_d3d12_rasterize_glyph(font, font_data, id, height);
-    PROF_SCOPE_END(glyph_rasterize);
-    if (!glyph) {
-      PROF_SCOPE_END(glyph_query);
-      return;
-    }
-    slot->id     = id;
-    slot->height = height;
-    slot->glyph  = glyph;
+  AcquireSRWLockExclusive(&g_nk_font_lock);
+
+  for (int row = y; row < y + h; ++row) {
+    uint64_t offset = ((uint64_t)row * atlas->width + (uint64_t)x) * 4;
+
+    mem_copy(g_nk->font_pixels + offset, atlas->pixels + offset, (uint64_t)w * 4);
   }
 
-  out->width    = glyph->x1 - glyph->x0;
-  out->height   = glyph->y1 - glyph->y0;
-  out->offset   = nk_vec2(glyph->x0, glyph->y0);
-  out->xadvance = glyph->xadvance;
-  out->uv[0]    = nk_vec2(glyph->u0, glyph->v0);
-  out->uv[1]    = nk_vec2(glyph->u1, glyph->v1);
-  PROF_SCOPE_END(glyph_query);
+  ReleaseSRWLockExclusive(&g_nk_font_lock);
+
+  nk_glyph_atlas_clean(atlas);
+  InterlockedExchange(&g_nk->font_texture_dirty, 1);
 }
 
 static bool
-nk_d3d12_upload_font_atlas(const void *rgba_data, int atlas_w, int baked_h)
+nk_d3d12_upload_font_atlas(const void *rgba_data, int atlas_w, int atlas_h)
 {
   g_nk->font_atlas_width  = atlas_w;
-  g_nk->font_atlas_height = baked_h + NK_D3D12_DYNAMIC_ATLAS_HEIGHT;
-  g_nk->font_atlas_next_y = baked_h;
-  g_nk->font_pixels       = arena_push_zero_aligned(g_nk->perm, (uint64_t)atlas_w * g_nk->font_atlas_height * 4, 16);
+  g_nk->font_atlas_height = atlas_h;
+  g_nk->font_pixels       = arena_push_zero_aligned(g_nk->perm, (uint64_t)atlas_w * atlas_h * 4, 16);
+
   if (!g_nk->font_pixels) {
     return false;
   }
-  mem_copy(g_nk->font_pixels, (void *)rgba_data, (uint64_t)atlas_w * baked_h * 4);
+
+  mem_copy(g_nk->font_pixels, (void *)rgba_data, (uint64_t)atlas_w * atlas_h * 4);
 
   D3D12_HEAP_PROPERTIES default_heap = {
     .Type = D3D12_HEAP_TYPE_DEFAULT,
@@ -884,43 +742,24 @@ nk_d3d12_init(IDXGISwapChain *swap)
     }
   }
 
-  bool        ok       = false;
-  tmp_arena_t font_tmp = scratch_begin(NULL);
-  {
-    if (nk_runtime_fonts_bake(&g_nk->fonts, g_nk->perm, font_tmp.arena, font_sources, font_source_count, CONFIG_NK_FONT_SIZE)) {
-      int baked_height = g_nk->fonts.height;
-      if (nk_d3d12_upload_font_atlas(g_nk->fonts.pixels, g_nk->fonts.width, baked_height)) {
-        float atlas_scale = (float)baked_height / g_nk->font_atlas_height;
-        for (int face = 0; face < g_nk->fonts.face_count; ++face) {
-          struct nk_font *font = g_nk->fonts.faces[face].font;
-          for (nk_rune i = 0; i < font->info.glyph_count; ++i) {
-            font->glyphs[i].v0 *= atlas_scale;
-            font->glyphs[i].v1 *= atlas_scale;
-          }
-        }
-
-        g_nk->fonts.atlas.tex_height = g_nk->font_atlas_height;
-        nk_font_atlas_end(&g_nk->fonts.atlas, nk_handle_ptr(g_nk->font_texture), &g_nk->null_tex);
-        ok = true;
-      } else {
-        LOG_ERROR("%d: failed to upload font atlas", __LINE__);
-      }
-    } else {
-      LOG_ERROR("%d: failed to bake system fonts", __LINE__);
-    }
-  }
-  scratch_end(font_tmp);
-
-  if (!ok) {
+  if (!nk_runtime_fonts_init(&g_nk->fonts, g_nk->perm, font_sources, font_source_count, CONFIG_NK_FONT_SIZE,
+                             NK_D3D12_ATLAS_SIZE, NK_D3D12_ATLAS_SIZE, NK_D3D12_ATLAS_GLYPHS)) {
+    LOG_ERROR("%d: failed to load system fonts", __LINE__);
     return false;
   }
 
+  if (!nk_d3d12_upload_font_atlas(g_nk->fonts.atlas.pixels, g_nk->fonts.atlas.width, g_nk->fonts.atlas.height)) {
+    LOG_ERROR("%d: failed to upload font atlas", __LINE__);
+    return false;
+  }
+
+  nk_glyph_atlas_set_texture(&g_nk->fonts.atlas, nk_handle_ptr(g_nk->font_texture));
+  nk_glyph_atlas_clean(&g_nk->fonts.atlas);
+  g_nk->null_tex = g_nk->fonts.atlas.null;
+
   g_nk->font_count = g_nk->fonts.face_count;
   for (int i = 0; i < g_nk->font_count; ++i) {
-    g_nk->font_faces[i]                     = g_nk->fonts.faces[i].font;
-    g_nk->font_data[i].ttf                  = g_nk->fonts.faces[i].ttf;
-    g_nk->font_faces[i]->handle.query_glyph = nk_d3d12_font_query_glyph;
-    nk_d3d12_cache_glyphs(&g_nk->font_data[i], g_nk->font_faces[i]);
+    g_nk->font_faces[i] = &g_nk->fonts.faces[i].font;
   }
 
   /* Nuklear context */
@@ -939,7 +778,7 @@ nk_d3d12_init(IDXGISwapChain *swap)
   for (int i = 0; i < g_nk->font_count; ++i) {
     struct nk_runtime_font_face *face = &g_nk->fonts.faces[i];
     g_nk->kb_font_data[i]          = kbts_FontFromMemory(face->ttf, (int)face->ttf_size, 0, nk_d3d12_kb_allocator, g_nk->perm);
-    g_nk->kb_font_data[i].UserData = &face->font->handle;
+    g_nk->kb_font_data[i].UserData = &face->font.handle;
     g_nk->kb_fonts[i]              = &g_nk->kb_font_data[i];
   }
   if (!g_nk->kb_context) {
@@ -1095,6 +934,8 @@ nk_d3d12_commit(struct nk_context *ctx)
     PROF_SCOPE_END(commit);
     return;
   }
+
+  nk_d3d12_sync_font_atlas();
 
   snap->vertex_count = (uint32_t)(vbuf.allocated / sizeof(nk_d3d12_vertex_t));
   snap->index_count  = (uint32_t)(ibuf.allocated / sizeof(nk_draw_index));

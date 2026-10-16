@@ -17,13 +17,18 @@ typedef enum {
   UI_ITEM_NONE = 0,
   UI_ITEM_ACTIVE,
   UI_ITEM_ERROR,
+  UI_ITEM_ISSUES,
 } ui_item_state_t;
 
 static inline ui_item_state_t
-ui_mod_state(mod_t *m)
+ui_mod_state(mod_manager_t *manager, mod_handle_t h, mod_t *m)
 {
   if (mod_has_any_errors(m)) {
     return UI_ITEM_ERROR;
+  }
+
+  if (m->enabled && mod_has_keybind_issues(manager, &globals.actions, h)) {
+    return UI_ITEM_ISSUES;
   }
 
   if (mod_is_active(m)) {
@@ -417,6 +422,10 @@ form_manager_cfg(struct nk_context *ctx, ui_keybind_capture_t *capture, mod_mana
 
   form_string (ctx, &grid_state,          STR_LIT("Mod directory: "),        STR_LIT("Directory containing installed mods"),                                                  &saved_cfg->root_mod_dir,   &cfg->root_mod_dir);
   form_keybind(ctx, &grid_state, capture, STR_LIT("Mod manager shortcut: "), STR_LIT("Shortcut that opens or closes the mod manager"), STR_LIT("mod_manager.toggle_keybind"), &saved_cfg->overlay_toggle, &cfg->overlay_toggle);
+  form_int    (ctx, &grid_state,          STR_LIT("Gamepad hold time (ms): "), STR_LIT("Single-button gamepad shortcuts work when held this long; a shorter press goes to the game"),
+               &saved_cfg->gamepad_hold_ms, &cfg->gamepad_hold_ms, CONFIG_ACTIONS_MIN_HOLD_MS, CONFIG_ACTIONS_MAX_HOLD_MS, 50);
+  form_int    (ctx, &grid_state,          STR_LIT("Gamepad cancel time (ms): "), STR_LIT("Holding B this long cancels the shortcut dialog"),
+               &saved_cfg->gamepad_cancel_ms, &cfg->gamepad_cancel_ms, CONFIG_ACTIONS_MIN_CANCEL_MS, CONFIG_ACTIONS_MAX_CANCEL_MS, 100);
 
   return mod_manager_cfg_is_dirty(cfg, saved_cfg);
 }
@@ -627,8 +636,6 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
 {
   static struct nk_grid_state grid_state = {0};
 
-  (void)ui;
-
   tmp_arena_t tmp = scratch_begin(NULL);
   {
     struct nk_color badge_bg     = nk_rgba(0, 0, 0, 96);
@@ -640,8 +647,16 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     str_t           version_text = STR_NULL;
     str_t           status_text  = STR_NULL;
 
+    str_list_t issues = {0};
+
+    if (m->enabled) {
+      issues = mod_keybind_issues(manager, &globals.actions, ui->selected, tmp.arena);
+    }
+
     if (mod_has_any_errors(m)) {
       status_fg = nk_rgb(220, 80, 80);
+    } else if (issues.count > 0) {
+      status_fg = UI_C_GOLD;
     } else if (mod_is_active(m)) {
       status_fg = nk_rgb(80, 200, 120);
     }
@@ -655,6 +670,10 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
     author_text  = str_push_fmt(tmp.arena, "%.*s", STR_ARG(m->manifest.info.author));
     version_text = str_push_fmt(tmp.arena, "%d.%d.%d", VERSION_ARG(m->manifest.info.version));
     status_text  = mod_status_text(m, tmp.arena);
+
+    if (!mod_has_any_errors(m) && issues.count > 0) {
+      status_text = str_push_fmt(tmp.arena, "%.*s (keybind issues)", STR_ARG(status_text));
+    }
 
     struct nk_text_options wrapped_text = {
       .alignment = NK_TEXT_LEFT,
@@ -678,6 +697,11 @@ draw_mod_header(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *man
 
     draw_spacer(ctx, 2.0f);
     draw_key_value(ctx, &grid_state, STR_LIT("State:"), status_text, status_fg, false);
+
+    for (str_node_t *node = issues.first; node; node = node->next) {
+      draw_key_value(ctx, &grid_state, STR_LIT("Keybind:"), node->str, UI_C_GOLD, false);
+    }
+
     draw_spacer(ctx, 2.0f);
 
     str_list_t lines = str_split_lines(tmp.arena, m->manifest.info.description);
@@ -1343,6 +1367,8 @@ draw_mod_list_row(struct nk_context *ctx, str_t name, ui_item_state_t st, bool i
     dot_color = nk_rgb(80, 200, 120);
   } else if (st == UI_ITEM_ERROR) {
     dot_color = nk_rgb(220, 80, 80);
+  } else if (st == UI_ITEM_ISSUES) {
+    dot_color = UI_C_GOLD;
   }
 
   ui_nk_select_row_opts_t opts = {
@@ -1457,7 +1483,7 @@ draw_body(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t *manager)
         }
 
         bool            is_selected = (h == ui->selected);
-        ui_item_state_t st          = ui_mod_state(m);
+        ui_item_state_t st          = ui_mod_state(manager, h, m);
 
         if (draw_mod_list_row(ctx, m->manifest.info.name, st, is_selected)) {
           ui->selected = h;

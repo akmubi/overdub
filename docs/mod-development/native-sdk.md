@@ -147,6 +147,8 @@ example_input(mod_handle_t mod, input_event_t *event)
 
 Manifest keybind options are often easier to poll from tick. Get the option once during `init`, then use `mod_cfg_get_keybind` and the input helpers.
 
+The helpers are true when either part of the bind is. A gamepad part is true for one frame when it fires, and the input callback also gets a key down event for which `keybind_activated_by_event` is true, so the example above works for both parts. `keybind_keyboard_part` and `keybind_gamepad_part` split a bind.
+
 ## Configuration
 
 `mod_get_cfg_by_id` finds an option declared in `mod.ini`. The handle remains owned by Overdub.

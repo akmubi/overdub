@@ -1,4 +1,6 @@
 #include "input.h"
+
+#include "actions.h"
 #include "unreal.h"
 
 #include "arena.h"
@@ -290,26 +292,16 @@ str_t
 input_event_kind_to_str(input_event_kind_t kind)
 {
   switch (kind) {
-  case INPUT_EVENT_KEY_DOWN:
-    return STR_LIT("key down");
-  case INPUT_EVENT_KEY_UP:
-    return STR_LIT("key up");
-  case INPUT_EVENT_KEY_CHAR:
-    return STR_LIT("key character");
-  case INPUT_EVENT_MOUSE_DOWN:
-    return STR_LIT("mouse down");
-  case INPUT_EVENT_MOUSE_UP:
-    return STR_LIT("mouse up");
-  case INPUT_EVENT_MOUSE_DBLCLICK:
-    return STR_LIT("mouse double click");
-  case INPUT_EVENT_MOUSE_MOVE:
-    return STR_LIT("mouse move");
-  case INPUT_EVENT_MOUSE_WHEEL:
-    return STR_LIT("mouse wheel");
-  case INPUT_EVENT_ANALOG:
-    return STR_LIT("analog");
-  case INPUT_EVENT_APP_ACTIVATION:
-    return STR_LIT("app activation");
+    case INPUT_EVENT_KEY_DOWN:       return STR_LIT("key down");
+    case INPUT_EVENT_KEY_UP:         return STR_LIT("key up");
+    case INPUT_EVENT_KEY_CHAR:       return STR_LIT("key character");
+    case INPUT_EVENT_MOUSE_DOWN:     return STR_LIT("mouse down");
+    case INPUT_EVENT_MOUSE_UP:       return STR_LIT("mouse up");
+    case INPUT_EVENT_MOUSE_DBLCLICK: return STR_LIT("mouse double click");
+    case INPUT_EVENT_MOUSE_MOVE:     return STR_LIT("mouse move");
+    case INPUT_EVENT_MOUSE_WHEEL:    return STR_LIT("mouse wheel");
+    case INPUT_EVENT_ANALOG:         return STR_LIT("analog");
+    case INPUT_EVENT_APP_ACTIVATION: return STR_LIT("app activation");
   }
   return (str_t){0};
 }
@@ -420,13 +412,13 @@ bool
 input_event_is_mouse(input_event_t *ev)
 {
   switch (ev->kind) {
-  case INPUT_EVENT_MOUSE_DOWN:
-  case INPUT_EVENT_MOUSE_UP:
-  case INPUT_EVENT_MOUSE_DBLCLICK:
-  case INPUT_EVENT_MOUSE_MOVE:
-  case INPUT_EVENT_MOUSE_WHEEL: {
-    return true;
-  }
+    case INPUT_EVENT_MOUSE_DOWN:
+    case INPUT_EVENT_MOUSE_UP:
+    case INPUT_EVENT_MOUSE_DBLCLICK:
+    case INPUT_EVENT_MOUSE_MOVE:
+    case INPUT_EVENT_MOUSE_WHEEL: {
+      return true;
+    }
   }
   return false;
 }
@@ -435,11 +427,11 @@ bool
 input_event_is_keyboard(input_event_t *ev)
 {
   switch (ev->kind) {
-  case INPUT_EVENT_KEY_DOWN:
-  case INPUT_EVENT_KEY_UP:
-  case INPUT_EVENT_KEY_CHAR: {
-    return true;
-  }
+    case INPUT_EVENT_KEY_DOWN:
+    case INPUT_EVENT_KEY_UP:
+    case INPUT_EVENT_KEY_CHAR: {
+      return true;
+    }
   }
   return false;
 }
@@ -448,33 +440,39 @@ bool
 input_event_is_gamepad(input_event_t *ev)
 {
   switch (ev->key) {
-  case INPUT_KEY_GAMEPAD_FACE_BOTTOM:
-  case INPUT_KEY_GAMEPAD_FACE_RIGHT:
-  case INPUT_KEY_GAMEPAD_FACE_LEFT:
-  case INPUT_KEY_GAMEPAD_FACE_TOP:
-  case INPUT_KEY_GAMEPAD_LB:
-  case INPUT_KEY_GAMEPAD_RB:
-  case INPUT_KEY_GAMEPAD_LT:
-  case INPUT_KEY_GAMEPAD_RT:
-  case INPUT_KEY_GAMEPAD_L3:
-  case INPUT_KEY_GAMEPAD_R3:
-  case INPUT_KEY_GAMEPAD_SPECIAL_LEFT:
-  case INPUT_KEY_GAMEPAD_SPECIAL_RIGHT:
-  case INPUT_KEY_GAMEPAD_DPAD_UP:
-  case INPUT_KEY_GAMEPAD_DPAD_DOWN:
-  case INPUT_KEY_GAMEPAD_DPAD_LEFT:
-  case INPUT_KEY_GAMEPAD_DPAD_RIGHT:
-  case INPUT_KEY_GAMEPAD_LEFT_X:
-  case INPUT_KEY_GAMEPAD_LEFT_Y:
-  case INPUT_KEY_GAMEPAD_RIGHT_X:
-  case INPUT_KEY_GAMEPAD_RIGHT_Y:
-  case INPUT_KEY_GAMEPAD_LT_AXIS:
-  case INPUT_KEY_GAMEPAD_RT_AXIS: {
-    return true;
-  }
+    case INPUT_KEY_GAMEPAD_FACE_BOTTOM:
+    case INPUT_KEY_GAMEPAD_FACE_RIGHT:
+    case INPUT_KEY_GAMEPAD_FACE_LEFT:
+    case INPUT_KEY_GAMEPAD_FACE_TOP:
+    case INPUT_KEY_GAMEPAD_LB:
+    case INPUT_KEY_GAMEPAD_RB:
+    case INPUT_KEY_GAMEPAD_LT:
+    case INPUT_KEY_GAMEPAD_RT:
+    case INPUT_KEY_GAMEPAD_L3:
+    case INPUT_KEY_GAMEPAD_R3:
+    case INPUT_KEY_GAMEPAD_SPECIAL_LEFT:
+    case INPUT_KEY_GAMEPAD_SPECIAL_RIGHT:
+    case INPUT_KEY_GAMEPAD_DPAD_UP:
+    case INPUT_KEY_GAMEPAD_DPAD_DOWN:
+    case INPUT_KEY_GAMEPAD_DPAD_LEFT:
+    case INPUT_KEY_GAMEPAD_DPAD_RIGHT:
+    case INPUT_KEY_GAMEPAD_LEFT_X:
+    case INPUT_KEY_GAMEPAD_LEFT_Y:
+    case INPUT_KEY_GAMEPAD_RIGHT_X:
+    case INPUT_KEY_GAMEPAD_RIGHT_Y:
+    case INPUT_KEY_GAMEPAD_LT_AXIS:
+    case INPUT_KEY_GAMEPAD_RT_AXIS: {
+      return true;
+    }
   }
 
   return false;
+}
+
+bool
+input_key_is_gamepad(input_key_kind_t key)
+{
+  return key >= INPUT_KEY_GAMEPAD_FACE_BOTTOM && key <= INPUT_KEY_GAMEPAD_RT_AXIS;
 }
 
 /* ================================================= KEYBIND PARSER ================================================= */
@@ -765,11 +763,17 @@ keybind_parse(str_t str, keybind_t default_val)
     return KEYBIND_NULL;
   }
 
+  /* "keyboard | gamepad": a part never mixes keyboard and gamepad keys */
+  bool split         = false;
+  bool keyboard_seen = false;
+  bool gamepad_seen  = false;
+
   uint64_t pos = 0;
   while (pos < str.len) {
-    /* find next '+' or end */
+    /* find next '+', '|' or end */
     uint64_t end = pos;
-    while (end < str.len && str.data[end] != '+') {
+
+    while (end < str.len && str.data[end] != '+' && str.data[end] != '|') {
       end += 1;
     }
 
@@ -810,6 +814,24 @@ keybind_parse(str_t str, keybind_t default_val)
       }
     }
 
+    if (!input_key_is_gamepad(key)) {
+      keyboard_seen = true;
+    } else {
+      gamepad_seen = true;
+    }
+
+    if ((split && !input_key_is_gamepad(key)) || (!split && keyboard_seen && gamepad_seen)) {
+      return default_val;
+    }
+
+    if (end < str.len && str.data[end] == '|') {
+      if (split || gamepad_seen) {
+        return default_val;
+      }
+
+      split = true;
+    }
+
     result.keys[result.count++] = key;
     pos                         = end + 1;
   }
@@ -833,16 +855,38 @@ keybind_key_canonical_name(input_key_kind_t key)
   return STR_NULL;
 }
 
+static int
+keybind_written_order(keybind_t bind, input_key_kind_t out[KEYBIND_MAX_KEYS], int *keyboard_count)
+{
+  int n = 0;
+
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int i = 0; i < bind.count && i < KEYBIND_MAX_KEYS; ++i) {
+      if (input_key_is_gamepad(bind.keys[i]) == (pass == 1)) {
+        out[n++] = bind.keys[i];
+      }
+    }
+
+    if (pass == 0) {
+      *keyboard_count = n;
+    }
+  }
+  return n;
+}
+
 uint64_t
 keybind_utf8_len(keybind_t bind)
 {
-  uint64_t len = 0;
+  input_key_kind_t keys[KEYBIND_MAX_KEYS];
+  int              keyboard = 0;
+  int              n        = keybind_written_order(bind, keys, &keyboard);
+  uint64_t         len      = 0;
 
-  for (int i = 0; i < bind.count; i++) {
-    str_t name = keybind_key_canonical_name(bind.keys[i]);
+  for (int i = 0; i < n; i++) {
+    str_t name = keybind_key_canonical_name(keys[i]);
 
     if (i > 0) {
-      len += 1; // '+'
+      len += (i == keyboard) ? 3 : 1; // " | " or '+'
     }
 
     if (str_is_empty(name)) {
@@ -858,14 +902,22 @@ keybind_utf8_len(keybind_t bind)
 uint64_t
 keybind_utf8_write(keybind_t bind, void *buf, uint64_t cap)
 {
-  uint8_t *dst    = (uint8_t *)buf;
-  uint64_t total_len = 0;
+  input_key_kind_t keys[KEYBIND_MAX_KEYS];
+  int              keyboard  = 0;
+  int              n         = keybind_written_order(bind, keys, &keyboard);
+  uint8_t         *dst       = (uint8_t *)buf;
+  uint64_t         total_len = 0;
 
-  for (int i = 0; i < bind.count && total_len < cap; i++) {
-    str_t name = keybind_key_canonical_name(bind.keys[i]);
+  for (int i = 0; i < n && total_len < cap; i++) {
+    str_t name = keybind_key_canonical_name(keys[i]);
 
-    if (i > 0 && total_len < cap) {
-      dst[total_len++] = '+';
+    if (i > 0) {
+      const char *sep     = (i == keyboard) ? " | " : "+";
+      uint64_t    sep_len = (i == keyboard) ? 3 : 1;
+
+      for (uint64_t j = 0; j < sep_len && total_len < cap; ++j) {
+        dst[total_len++] = (uint8_t)sep[j];
+      }
     }
 
     if (total_len >= cap) {
@@ -956,53 +1008,143 @@ keybind_clear(keybind_t *bind)
   }
 }
 
-bool
-keybind_is_down(keybind_t bind)
+keybind_t
+keybind_keyboard_part(keybind_t bind)
 {
-  if (bind.count == 0) {
+  keybind_t part = KEYBIND_NULL;
+
+  for (int i = 0; i < bind.count && i < KEYBIND_MAX_KEYS; ++i) {
+    if (!input_key_is_gamepad(bind.keys[i])) {
+      part.keys[part.count++] = bind.keys[i];
+    }
+  }
+  return part;
+}
+
+keybind_t
+keybind_gamepad_part(keybind_t bind)
+{
+  keybind_t part = KEYBIND_NULL;
+
+  for (int i = 0; i < bind.count && i < KEYBIND_MAX_KEYS; ++i) {
+    if (input_key_is_gamepad(bind.keys[i])) {
+      part.keys[part.count++] = bind.keys[i];
+    }
+  }
+  return part;
+}
+
+keybind_t
+keybind_merge(keybind_t keyboard, keybind_t gamepad)
+{
+  keybind_t result = KEYBIND_NULL;
+
+  for (int i = 0; i < keyboard.count && result.count < KEYBIND_MAX_KEYS; ++i) {
+    if (!input_key_is_gamepad(keyboard.keys[i])) {
+      result.keys[result.count++] = keyboard.keys[i];
+    }
+  }
+
+  for (int i = 0; i < gamepad.count && result.count < KEYBIND_MAX_KEYS; ++i) {
+    if (input_key_is_gamepad(gamepad.keys[i])) {
+      result.keys[result.count++] = gamepad.keys[i];
+    }
+  }
+
+  return result;
+}
+
+static bool
+keybind_part_is_down(keybind_t part)
+{
+  if (part.count == 0) {
     return false;
   }
 
   bool all_down = true;
-  for (int i = 0; i < bind.count; ++i) {
-    all_down = all_down && input_key_is_down(bind.keys[i]);
+
+  for (int i = 0; i < part.count; ++i) {
+    all_down = all_down && input_key_is_down(part.keys[i]);
   }
   return all_down;
 }
 
-bool
-keybind_is_pressed(keybind_t bind)
+static bool
+keybind_part_is_pressed(keybind_t part)
 {
-  if (!keybind_is_down(bind)) {
+  if (!keybind_part_is_down(part)) {
     return false;
   }
 
-  for (int i = 0; i < bind.count; ++i) {
-    if (input_key_is_pressed(bind.keys[i])) {
+  for (int i = 0; i < part.count; ++i) {
+    if (input_key_is_pressed(part.keys[i])) {
       return true;
     }
   }
   return false;
 }
 
-bool
-keybind_is_released(keybind_t bind)
+static bool
+keybind_part_is_released(keybind_t part)
 {
-  if (bind.count == 0) {
+  if (part.count == 0) {
     return false;
   }
 
   bool all_down_or_released = true;
   bool any_released         = false;
 
-  for (int i = 0; i < bind.count; ++i) {
-    bool released = input_key_is_released(bind.keys[i]);
+  for (int i = 0; i < part.count; ++i) {
+    bool released = input_key_is_released(part.keys[i]);
 
-    all_down_or_released = all_down_or_released && (input_key_is_down(bind.keys[i]) || released);
+    all_down_or_released = all_down_or_released && (input_key_is_down(part.keys[i]) || released);
     any_released         = any_released || released;
   }
 
   return all_down_or_released && any_released;
+}
+
+typedef struct gamepad_state_s gamepad_state_t;
+
+struct gamepad_state_s {
+  bool down;
+  bool pressed;
+  bool released;
+};
+
+/* a registered gamepad part has its own state */
+static gamepad_state_t
+keybind_gamepad_state(keybind_t part)
+{
+  gamepad_state_t state = {0};
+
+  if (part.count > 0 && !actions_gamepad_state(&globals.actions, part, &state.down, &state.pressed, &state.released)) {
+    state.down     = keybind_part_is_down(part);
+    state.pressed  = keybind_part_is_pressed(part);
+    state.released = keybind_part_is_released(part);
+  }
+  return state;
+}
+
+bool
+keybind_is_down(keybind_t bind)
+{
+  gamepad_state_t state = keybind_gamepad_state(keybind_gamepad_part(bind));
+  return keybind_part_is_down(keybind_keyboard_part(bind)) || state.down;
+}
+
+bool
+keybind_is_pressed(keybind_t bind)
+{
+  gamepad_state_t state = keybind_gamepad_state(keybind_gamepad_part(bind));
+  return keybind_part_is_pressed(keybind_keyboard_part(bind)) || state.pressed;
+}
+
+bool
+keybind_is_released(keybind_t bind)
+{
+  gamepad_state_t state = keybind_gamepad_state(keybind_gamepad_part(bind));
+  return keybind_part_is_released(keybind_keyboard_part(bind)) || state.released;
 }
 
 static bool
@@ -1029,14 +1171,21 @@ keybind_activated_by_event(keybind_t bind, input_event_t *ev)
     return false;
   }
 
+  keybind_t part = input_key_is_gamepad(ev->key) ? keybind_gamepad_part(bind) : keybind_keyboard_part(bind);
+
+  if (input_key_is_gamepad(ev->key) && actions_is_registered_gamepad(&globals.actions, part)) {
+    return actions_gamepad_firing(&globals.actions, part);
+  }
+
   bool involved = false;
-  for (int i = 0; i < bind.count; ++i) {
-    if (keybind_key_matches_event(bind.keys[i], ev->key)) {
+
+  for (int i = 0; i < part.count; ++i) {
+    if (keybind_key_matches_event(part.keys[i], ev->key)) {
       involved = true;
       break;
     }
   }
 
-  return involved && keybind_is_down(bind);
+  return involved && keybind_part_is_down(part);
 }
 

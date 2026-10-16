@@ -62,6 +62,101 @@ lua_overdub_input_released(lua_State *state)
   return 1;
 }
 
+static keybind_t
+lua_overdub_input_check_bind(lua_State *state, int idx, bool optional)
+{
+  if (optional && lua_isnoneornil(state, idx)) {
+    return KEYBIND_NULL;
+  }
+
+  size_t      len  = 0;
+  const char *data = luaL_checklstring(state, idx, &len);
+
+  if (optional && len == 0) {
+    return KEYBIND_NULL;
+  }
+
+  keybind_t bind = keybind_parse(str_make((void *)data, (uint64_t)len), KEYBIND_NULL);
+
+  if (!keybind_is_valid(bind)) {
+    luaL_error(state, "invalid keybind '%s'", data);
+  }
+  return bind;
+}
+
+static void
+lua_overdub_input_push_bind(lua_State *state, keybind_t bind)
+{
+  char     buf[256];
+  uint64_t len = bind.count > 0 ? keybind_utf8_write(bind, buf, sizeof(buf)) : 0;
+
+  if (len == 0) {
+    lua_pushnil(state);
+  } else {
+    lua_pushlstring(state, buf, (size_t)len);
+  }
+}
+
+static int
+lua_overdub_input_keybind_down(lua_State *state)
+{
+  lua_overdub_context_check(state);
+  lua_pushboolean(state, keybind_is_down(lua_overdub_input_check_bind(state, 1, false)));
+  return 1;
+}
+
+static int
+lua_overdub_input_keybind_pressed(lua_State *state)
+{
+  lua_overdub_context_check(state);
+  lua_pushboolean(state, keybind_is_pressed(lua_overdub_input_check_bind(state, 1, false)));
+  return 1;
+}
+
+static int
+lua_overdub_input_keybind_released(lua_State *state)
+{
+  lua_overdub_context_check(state);
+  lua_pushboolean(state, keybind_is_released(lua_overdub_input_check_bind(state, 1, false)));
+  return 1;
+}
+
+static int
+lua_overdub_input_keybind_activated(lua_State *state)
+{
+  lua_overdub_context_check(state);
+
+  keybind_t                  bind  = lua_overdub_input_check_bind(state, 1, false);
+  lua_overdub_input_event_t *event = luaL_checkudata(state, 2, LUA_OVERDUB_INPUT_EVENT_META);
+
+  lua_pushboolean(state, keybind_activated_by_event(bind, &event->value));
+  return 1;
+}
+
+static int
+lua_overdub_input_keybind_parts(lua_State *state)
+{
+  lua_overdub_context_check(state);
+
+  keybind_t bind = lua_overdub_input_check_bind(state, 1, true);
+
+  lua_overdub_input_push_bind(state, keybind_keyboard_part(bind));
+  lua_overdub_input_push_bind(state, keybind_gamepad_part(bind));
+  return 2;
+}
+
+static int
+lua_overdub_input_keybind_merge(lua_State *state)
+{
+  lua_overdub_context_check(state);
+
+  keybind_t keyboard = lua_overdub_input_check_bind(state, 1, true);
+  keybind_t gamepad  = lua_overdub_input_check_bind(state, 2, true);
+
+  lua_overdub_input_push_bind(state, keybind_merge(keybind_keyboard_part(keyboard), keybind_gamepad_part(gamepad)));
+  return 1;
+}
+
 static int
 lua_overdub_input_analog(lua_State *state)
 {
@@ -175,13 +270,19 @@ luaopen_overdub_input(lua_State *state)
 {
   lua_overdub_context_check(state);
   static const luaL_Reg functions[] = {
-    {"Down",          lua_overdub_input_down          },
-    {"Pressed",       lua_overdub_input_pressed       },
-    {"Released",      lua_overdub_input_released      },
-    {"Analog",        lua_overdub_input_analog        },
-    {"WheelDelta",    lua_overdub_input_wheel_delta   },
-    {"MousePosition", lua_overdub_input_mouse_position},
-    {NULL,            NULL                            },
+    {"Down",             lua_overdub_input_down             },
+    {"Pressed",          lua_overdub_input_pressed          },
+    {"Released",         lua_overdub_input_released         },
+    {"Analog",           lua_overdub_input_analog           },
+    {"WheelDelta",       lua_overdub_input_wheel_delta      },
+    {"MousePosition",    lua_overdub_input_mouse_position   },
+    {"KeybindDown",      lua_overdub_input_keybind_down     },
+    {"KeybindPressed",   lua_overdub_input_keybind_pressed  },
+    {"KeybindReleased",  lua_overdub_input_keybind_released },
+    {"KeybindActivated", lua_overdub_input_keybind_activated},
+    {"KeybindParts",     lua_overdub_input_keybind_parts    },
+    {"KeybindMerge",     lua_overdub_input_keybind_merge    },
+    {NULL,               NULL                               },
   };
   luaL_newlib(state, functions);
   return 1;

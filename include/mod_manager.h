@@ -1,6 +1,7 @@
 #ifndef MOD_MANAGER_H
 #define MOD_MANAGER_H
 
+#include "actions.h"
 #include "arena.h"
 #include "hook_chain.h"
 #include "ini.h"
@@ -417,6 +418,8 @@ typedef struct mod_manager_cfg_s mod_manager_cfg_t;
 struct mod_manager_cfg_s {
   mod_cfg_string_t root_mod_dir;
   keybind_t        overlay_toggle;
+  int              gamepad_hold_ms;
+  int              gamepad_cancel_ms;
 };
 
 typedef struct mod_manager_s mod_manager_t;
@@ -627,6 +630,14 @@ void
 mod_manager_apply_order_from_config(mod_manager_t *manager, str_array_t mod_order_ids);
 bool
 mod_has_any_errors(mod_t *m);
+
+action_t *
+mod_keybind_find_conflict(mod_manager_t *manager, actions_t *registry, keybind_t candidate, keybind_t *exclude);
+str_list_t
+mod_keybind_issues(mod_manager_t *manager, actions_t *registry, mod_handle_t h, arena_t *arena);
+bool
+mod_has_keybind_issues(mod_manager_t *manager, actions_t *registry, mod_handle_t h);
+
 bool
 mod_is_active(mod_t *m);
 

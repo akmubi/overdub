@@ -42,6 +42,35 @@ function input.Released(key) end
 ---@return number
 function input.Analog(key) end
 
+---Keybinds are strings such as "F8", "Ctrl+F8" or "F8 | Select+RB" (keyboard part | gamepad part).
+---@param bind string
+---@return boolean
+function input.KeybindDown(bind) end
+
+---@param bind string
+---@return boolean
+function input.KeybindPressed(bind) end
+
+---@param bind string
+---@return boolean
+function input.KeybindReleased(bind) end
+
+---True when the event is the press of the bind.
+---@param bind string
+---@param event OverdubInputEvent
+---@return boolean
+function input.KeybindActivated(bind, event) end
+
+---@param bind? string
+---@return string? keyboard
+---@return string? gamepad
+function input.KeybindParts(bind) end
+
+---@param keyboard? string
+---@param gamepad? string
+---@return string? bind
+function input.KeybindMerge(keyboard, gamepad) end
+
 ---@return number
 function input.WheelDelta() end
 

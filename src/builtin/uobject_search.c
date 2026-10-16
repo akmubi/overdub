@@ -771,3 +771,4 @@ register_builtin_uobject_search(mod_manager_t *manager)
   mod_t *m = mod_handle_resolve(&globals.mod_manager, h);
   ASSERT(m != NULL);
 }
+

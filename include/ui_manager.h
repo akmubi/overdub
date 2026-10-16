@@ -1,6 +1,7 @@
 #ifndef UI_MANAGER_H
 #define UI_MANAGER_H
 
+#include "actions.h"
 #include "input.h"
 #include "mod_manager.h"
 #include "ui_console.h"
@@ -23,6 +24,11 @@ struct ui_manager_s {
   bool     block_keyboard_when_open;
   bool     block_gamepad_when_open;
 
+  bool  gamepad_input; // last input was from a gamepad
+  bool  input_fed;
+  float right_x;
+  float right_y;
+
   unsigned int vw;
   unsigned int vh;
 
@@ -34,6 +40,8 @@ struct ui_manager_s {
 
 void
 ui_manager_preinit(ui_manager_t *manager, mod_manager_t *mod_manager, arena_t *arena);
+void
+ui_manager_register_actions(ui_manager_t *manager, actions_t *registry);
 void
 ui_manager_init(ui_manager_t *manager, struct nk_context *ctx, struct nk_font *font, unsigned int vw, unsigned int vh);
 void
@@ -65,7 +73,7 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
 bool
 ui_manager_on_input_event_post(ui_manager_t *manager, input_event_t *ev);
 void
-ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter);
+ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter, float delta);
 void
 ui_manager_on_frame_end(ui_manager_t *manager, unsigned int viewport_width, unsigned int viewport_height);
 
