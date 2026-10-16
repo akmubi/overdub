@@ -373,12 +373,15 @@ actions_tick(actions_t *registry)
 {
   registry->frame += 1;
 
-  if (!registry->active || registry->fired || registry->match < 0) {
+  if (!registry->active || registry->fired || time_now_us() - registry->match_since_us < (uint64_t)registry->hold_ms * 1000) {
     return;
   }
 
-  if (time_now_us() - registry->match_since_us >= (uint64_t)registry->hold_ms * 1000) {
+  /* held for the hold time: a single-button bind fires, otherwise no combo followed and the buttons go on to the game */
+  if (registry->match >= 0) {
     actions_fire(registry, registry->frame);
+  } else {
+    actions_gesture_abort(registry);
   }
 }
 
