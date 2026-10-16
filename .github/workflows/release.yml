@@ -3,6 +3,12 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and upload, e.g. v2.0.0
+        required:    true
+        type:        string
 
 permissions:
   contents: write
@@ -12,9 +18,14 @@ jobs:
     name:    Build and package
     runs-on: windows-latest
 
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
@@ -31,7 +42,7 @@ jobs:
       - name:  Get version
         shell: pwsh
         run: |
-          $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          $version = $env:RELEASE_TAG -replace '^v', ''
 
           if ([string]::IsNullOrWhiteSpace($version)) {
               throw "Could not determine release version"
@@ -137,7 +148,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" `
+          gh release upload "$env:RELEASE_TAG" `
             "overdub-$env:VERSION.steam.zip" `
             "overdub-$env:VERSION.epic.zip" `
             "overdub-$env:VERSION.xbox.zip" `
