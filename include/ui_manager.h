@@ -27,6 +27,8 @@ struct ui_manager_s {
   bool     block_gamepad_when_open;
 
   bool  gamepad_input; // last input was from a gamepad
+  float device_mouse_x;
+  float device_mouse_y;
   bool  input_fed;
   bool  nav_down[INPUT_KEY_MAX];
   float right_x;
