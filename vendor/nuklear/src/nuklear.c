@@ -11721,17 +11721,26 @@ nk_nav_update(struct nk_context *ctx)
   }
 
   if (key && focus >= 0 && (stops[focus].flags & NK_NAV_STOP_HIDDEN)) {
-    /* the focus was scrolled away: start again from what is visible */
-    int j, pass, pick = -1;
+    /* the focus was scrolled away: start again from the visible stop nearest to it, in its own scroll area first */
+    const struct nk_nav_stop *from = &stops[focus];
+    int                       j, pass, pick = -1;
+    float                     best = 0;
 
-    for (pass = 0; pass < 2 && pick < 0; ++pass) {
+    for (pass = 0; pass < 4 && pick < 0; ++pass) {
       for (j = 0; j < count; ++j) {
         const struct nk_rect b = stops[j].bounds, c = stops[j].clip;
         nk_bool whole          = b.y >= c.y && b.y + b.h <= c.y + c.h;
+        nk_bool same           = !from->scroll_y || stops[j].scroll_y == from->scroll_y;
+        float   dx             = (b.x + b.w * 0.5f) - (from->bounds.x + from->bounds.w * 0.5f);
+        float   dy             = (b.y + b.h * 0.5f) - (from->bounds.y + from->bounds.h * 0.5f);
 
-        if (stops[j].window == stops[focus].window && !(stops[j].flags & NK_NAV_STOP_HIDDEN) && (pass || whole) &&
-            (pick < 0 || key == NK_KEY_NAV_UP || key == NK_KEY_NAV_LEFT)) {
+        if (stops[j].window != from->window || (stops[j].flags & NK_NAV_STOP_HIDDEN) || (!whole && !(pass & 1)) || (!same && pass < 2)) {
+          continue;
+        }
+
+        if (pick < 0 || dx * dx + dy * dy < best) {
           pick = j;
+          best = dx * dx + dy * dy;
         }
       }
     }

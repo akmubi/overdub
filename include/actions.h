@@ -11,10 +11,10 @@ MOD_EXTERN_C_BEGIN
 /* Keybind registry: the keybinds a user can change (Overdub's and the mods' manifest keybinds).
  * Binds may be shared; the mod manager shows the conflicts.
  *
- * The game uses every gamepad button, so the first button of a gamepad part (the leader) and the
- * buttons that follow it are held back from the game. A part of two or more buttons fires once all
- * of them are down, unless a longer part starts with it. Others fire after the hold time. A press
- * that turns out not to be a bind is sent on to the game. */
+ * The buttons of a gamepad part are held back from the game while a part may follow, except the ones
+ * the game needs at once. A part of two or more buttons fires once all of them are down, in any order,
+ * unless a longer part has them all. Others fire after the hold time. A press that turns out not to be
+ * a bind is sent on to the game. */
 
 typedef void (*action_fire_fn_t)(void *user);
 
@@ -63,7 +63,7 @@ struct actions_s {
   /* gamepad gesture */
   bool      active;
   bool      fired;
-  keybind_t held;   // leader first
+  keybind_t held;   // in the order pressed
   keybind_t passed; // of those, the ones the game got at once
   int       held_events;
   int       match;
