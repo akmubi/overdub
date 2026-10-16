@@ -187,6 +187,9 @@ on_engine_tick_pre(float delta)
 }
 
 static void
+send_deferred_key_ups(void);
+
+static void
 on_engine_tick_post(void)
 {
   if (globals.ui_manager.inited && globals.ui_manager.ctx) {
@@ -197,6 +200,7 @@ on_engine_tick_post(void)
     nk_d3d12_commit(globals.ui_manager.ctx);
   }
   ui_force_os_cursor_visible_tick();
+  send_deferred_key_ups();
 
   scratch_reset();
 
@@ -281,6 +285,18 @@ static held_key_event_t g_held_events[CONFIG_ACTIONS_MAX_HELD_EVENTS];
 static int              g_held_first;
 static int              g_held_count;
 
+/* a press sent on by its own release: the game gets the release a frame later, or it never sees the button down */
+typedef struct deferred_key_up_s deferred_key_up_t;
+
+struct deferred_key_up_s {
+  void        *self;
+  fkey_event_t key_event;
+};
+
+static uint64_t          g_replayed_frame[INPUT_KEY_MAX];
+static deferred_key_up_t g_deferred_ups[CONFIG_ACTIONS_MAX_HELD_EVENTS];
+static int               g_deferred_up_count;
+
 static void         *g_current_self;
 static fkey_event_t *g_current_key_event;
 
@@ -318,7 +334,18 @@ on_held_event_send_on(bool replay)
 
   if (!consumed) {
     process_key_down_event_real(held.self, held.key_event);
+    g_replayed_frame[held.input.key] = globals.frame_counter + 1;
   }
+}
+
+static void
+send_deferred_key_ups(void)
+{
+  for (int i = 0; i < g_deferred_up_count; ++i) {
+    process_key_up_event_real(g_deferred_ups[i].self, g_deferred_ups[i].key_event);
+  }
+
+  g_deferred_up_count = 0;
 }
 
 static void
@@ -811,6 +838,14 @@ process_key_up_event_hook(void *self, fkey_event_t key_event)
   if (on_input_event(&input_event)) {
     return true;
   }
+
+  bool replayed_now = input_event.key != INPUT_KEY_NONE && g_replayed_frame[input_event.key] == globals.frame_counter + 1;
+
+  if (replayed_now && g_deferred_up_count < CONFIG_ACTIONS_MAX_HELD_EVENTS) {
+    g_deferred_ups[g_deferred_up_count++] = (deferred_key_up_t){self, key_event};
+    return true;
+  }
+
   return process_key_up_event_real(self, key_event);
 }
 

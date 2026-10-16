@@ -10858,7 +10858,7 @@ nk_nav_stop_keyed(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags,
   win    = ctx->current;
   layout = win->layout;
 
-  if (win->widgets_disabled || (win->flags & NK_WINDOW_NO_INPUT)) {
+  if (win->widgets_disabled || (win->flags & (NK_WINDOW_NO_INPUT | NK_WINDOW_NO_NAV)) || (win->parent && (win->parent->flags & NK_WINDOW_NO_NAV))) {
     return nk_false;
   }
 

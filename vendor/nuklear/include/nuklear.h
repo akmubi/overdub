@@ -1505,6 +1505,7 @@ nk__draw_next(const struct nk_draw_command *, const struct nk_buffer *, const st
  * NK_WINDOW_NO_HORIZONTAL_SCROLLBAR | Disables horizontal scrolling and horizontal scrollbar
  * NK_WINDOW_NO_SCROLLBAR            | Disables both vertical and horizontal scrolling
  * NK_WINDOW_CLOSE_BUTTON_HIDES      | Header close button hides the window instead of closing/destroying it
+ * NK_WINDOW_NO_NAV                  | Keyboard/gamepad navigation skips the window: it handles those keys itself
  *
  * # nk_collapse_states
  * State           | Description
@@ -1528,6 +1529,7 @@ enum nk_panel_flags {
   NK_WINDOW_SCALE_LEFT         = NK_FLAG(11),
   NK_WINDOW_NO_INPUT           = NK_FLAG(12),
   NK_WINDOW_CLOSE_BUTTON_HIDES = NK_FLAG(13),
+  NK_WINDOW_NO_NAV             = NK_FLAG(14),
   NK_WINDOW_NO_SCROLLBAR       = NK_WINDOW_NO_SCROLLBAR_V | NK_WINDOW_NO_SCROLLBAR_H,
 };
 
@@ -6805,15 +6807,15 @@ struct nk_panel {
 struct nk_table;
 
 enum nk_window_flags {
-  NK_WINDOW_PRIVATE         = NK_FLAG(14),
+  NK_WINDOW_PRIVATE         = NK_FLAG(15),
   NK_WINDOW_DYNAMIC         = NK_WINDOW_PRIVATE,         /**< special window type growing up in height while being filled to a certain maximum height */
-  NK_WINDOW_ROM             = NK_FLAG(15),               /**< sets window widgets into a read only mode and does not allow input changes */
-  NK_WINDOW_NOT_INTERACTIVE = NK_FLAG(15) | NK_FLAG(12), /**< prevents all interaction caused by input to either window or widgets inside */
-  NK_WINDOW_HIDDEN          = NK_FLAG(16),               /**< Hides window and stops any window interaction and drawing */
-  NK_WINDOW_CLOSED          = NK_FLAG(17),               /**< Directly closes and frees the window at the end of the frame */
-  NK_WINDOW_MINIMIZED       = NK_FLAG(18),               /**< marks the window as minimized */
-  NK_WINDOW_MAXIMIZED       = NK_FLAG(19),               /**< marks the window as maximized */
-  NK_WINDOW_REMOVE_ROM      = NK_FLAG(20),               /**< Removes read only mode at the end of the window */
+  NK_WINDOW_ROM             = NK_FLAG(16),               /**< sets window widgets into a read only mode and does not allow input changes */
+  NK_WINDOW_NOT_INTERACTIVE = NK_FLAG(16) | NK_FLAG(12), /**< prevents all interaction caused by input to either window or widgets inside */
+  NK_WINDOW_HIDDEN          = NK_FLAG(17),               /**< Hides window and stops any window interaction and drawing */
+  NK_WINDOW_CLOSED          = NK_FLAG(18),               /**< Directly closes and frees the window at the end of the frame */
+  NK_WINDOW_MINIMIZED       = NK_FLAG(19),               /**< marks the window as minimized */
+  NK_WINDOW_MAXIMIZED       = NK_FLAG(20),               /**< marks the window as maximized */
+  NK_WINDOW_REMOVE_ROM      = NK_FLAG(21),               /**< Removes read only mode at the end of the window */
 };
 
 struct nk_popup_state {
