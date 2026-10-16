@@ -44,6 +44,7 @@ enum {
 
 /* sends the oldest held-back key down event on to the game, or drops it */
 typedef void (*actions_replay_fn_t)(bool replay);
+typedef bool (*actions_can_hold_fn_t)(input_key_kind_t key);
 
 /* gives the mods the key down event of a fired gamepad part */
 typedef void (*actions_dispatch_fn_t)(input_event_t *ev);
@@ -55,13 +56,15 @@ struct actions_s {
   int                   count;
   actions_replay_fn_t   replay;
   actions_dispatch_fn_t dispatch;
+  actions_can_hold_fn_t can_hold;
   uint32_t              hold_ms;
   uint64_t              frame;
 
   /* gamepad gesture */
   bool      active;
   bool      fired;
-  keybind_t held; // leader first
+  keybind_t held;   // leader first
+  keybind_t passed; // of those, the ones the game got at once
   int       held_events;
   int       match;
   keybind_t fired_part;
@@ -69,8 +72,9 @@ struct actions_s {
   uint64_t  match_since_us;
 };
 
+/* can_hold: whether a press may wait to see if it starts a combo; NULL: always */
 void
-actions_init(actions_t *registry, actions_replay_fn_t replay, actions_dispatch_fn_t dispatch);
+actions_init(actions_t *registry, actions_replay_fn_t replay, actions_dispatch_fn_t dispatch, actions_can_hold_fn_t can_hold);
 void
 actions_set_hold_ms(actions_t *registry, uint32_t ms);
 uint32_t

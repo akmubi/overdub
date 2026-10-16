@@ -198,7 +198,9 @@ ui_console_update_line_prefix(ui_console_line_t *line, uint8_t flags)
 
   uint64_t prefix_len = (uint64_t)(line->text.data - start);
   line->display_text = (str_t){.data = start, .len = prefix_len + line->text.len};
-  line->row_w = 0.0f;
+  line->row_w  = 0.0f;
+  line->wrap_w = 0.0f;
+  line->wrap_h = 0.0f;
 }
 
 static void
@@ -668,6 +670,31 @@ ui_console_execute(ui_console_t *console, mod_manager_t *mod_manager, str_t inpu
   CONSOLE_ERROR("Unknown Overdub command ':%.*s'. Type ':help' to list available commands.", STR_ARG(cmd_name));
 }
 
+static int
+ui_console_codepoints(str_t text)
+{
+  int count = 0;
+
+  for (uint64_t i = 0; i < text.len; ++i) {
+    count += (text.data[i] & 0xC0) != 0x80;
+  }
+  return count;
+}
+
+/* stands in for rows that are not drawn */
+static void
+ui_console_skip_rows(struct nk_context *ctx, float height, float width)
+{
+  float row_h = height - ctx->style.window.spacing.y;
+
+  /* an empty row: nk_spacing on a full row would add another one */
+  if (row_h > 0.0f) {
+    nk_layout_row_static(ctx, row_h, (int)NK_MAX(1.0f, width), 1);
+  }
+}
+
+/* Only the rows in view are drawn: shaping every line each frame cost most of the frame with a full log.
+ * A row's height is kept from when it was drawn; before that it is guessed from its length (the font is monospace). */
 static void
 ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
 {
@@ -677,40 +704,83 @@ ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
 
   ui_console_update_prefixes(console);
 
-  int total   = console->line_count;
-  int visible = MIN_VAL(total, console->max_lines);
-  int start   = MAX_VAL(0, total - visible);
-  int shown   = 0;
+  bool           wrap      = console->cfg.wrap_lines;
+  struct nk_rect view      = nk_window_get_content_region(ctx);
+  float          spacing   = ctx->style.window.spacing.y;
+  struct nk_vec2 padding   = ctx->style.text.padding;
+  float          line_h    = ctx->style.font_size + 2.0f * padding.y;
+  float          single_h  = wrap ? line_h + 2.0f * padding.y : CONFIG_NK_CONSOLE_LINE_HEIGHT;
+  float          wrap_w    = NK_MAX(1.0f, nk_layout_row_calculate_usable_space(&ctx->style, ctx->current->layout->type, ctx->current->layout->bounds.w, 1) - 2.0f * padding.x);
+  float          char_w    = NK_MAX(1.0f, ui_text_width(ctx, STR_LIT("M")));
+  float          view_top  = (float)console->scroll.y - single_h;
+  float          view_end  = (float)console->scroll.y + view.h + single_h;
+  float          y         = 0.0f;
+  float          skipped   = 0.0f;
+  float          widest    = view.w;
+  int            total     = console->line_count;
+  int            visible   = MIN_VAL(total, console->max_lines);
+  int            start     = MAX_VAL(0, total - visible);
+  int            shown     = 0;
 
   for (int i = 0; i < visible; ++i) {
-    int                slot_idx = (start + i) % console->max_lines;
-    ui_console_line_t *line     = &console->lines[slot_idx];
+    ui_console_line_t *line = &console->lines[(start + i) % console->max_lines];
 
     if (line->level < console->cfg.min_level) {
       continue;
     }
 
     str_t text = line->display_text;
-    struct nk_color level_color = ui_console_level_color(line->level);
+    float h    = single_h;
+
+    if (wrap && line->wrap_w == wrap_w && line->wrap_h > 0.0f) {
+      h = line->wrap_h;
+    } else if (wrap) {
+      float rows = NK_MAX(1.0f, (float)(int)((float)ui_console_codepoints(text) * char_w / wrap_w + 0.999f));
+      h          = line_h * rows + 2.0f * padding.y;
+    } else {
+      widest = NK_MAX(widest, line->row_w);
+    }
+
+    shown += 1;
+
+    if (y + h + spacing < view_top || y > view_end) {
+      skipped += h + spacing;
+      y       += h + spacing;
+      continue;
+    }
+
+    ui_console_skip_rows(ctx, skipped, widest);
+    skipped = 0.0f;
+
     struct nk_text_options options = {
       .alignment = NK_TEXT_LEFT,
       .flags     = NK_TEXT_OPTION_SELECTABLE,
-      .color     = level_color,
+      .color     = ui_console_level_color(line->level),
     };
 
-    if (console->cfg.wrap_lines) {
+    if (wrap) {
       options.flags |= NK_TEXT_OPTION_WRAP | NK_TEXT_OPTION_AUTO_HEIGHT;
     } else {
       if (line->row_w == 0.0f) {
         line->row_w = ui_text_width(ctx, text);
       }
 
+      widest = NK_MAX(widest, line->row_w);
       nk_layout_row_static(ctx, CONFIG_NK_CONSOLE_LINE_HEIGHT, (int)line->row_w, 1);
     }
 
     ui_str_ex(ctx, text, &options);
-    shown += 1;
+
+    if (wrap) {
+      line->wrap_w = wrap_w;
+      line->wrap_h = ctx->current->layout->row.height - spacing;
+      h            = line->wrap_h;
+    }
+
+    y += h + spacing;
   }
+
+  ui_console_skip_rows(ctx, skipped, widest);
 
   if (shown == 0) {
     nk_layout_row_static(ctx, CONFIG_NK_CONSOLE_LINE_HEIGHT, 1, 1);

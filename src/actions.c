@@ -10,12 +10,13 @@ static void actions_send_on_held(actions_t *registry, bool replay);
 static void actions_fire(actions_t *registry, uint64_t pressed_frame);
 
 void
-actions_init(actions_t *registry, actions_replay_fn_t replay, actions_dispatch_fn_t dispatch)
+actions_init(actions_t *registry, actions_replay_fn_t replay, actions_dispatch_fn_t dispatch, actions_can_hold_fn_t can_hold)
 {
   *registry = (actions_t){
     .items        = ARENA_PUSH_ARRAY_ZERO(&globals.perm, action_t, CONFIG_ACTIONS_MAX),
     .replay       = replay,
     .dispatch     = dispatch,
+    .can_hold     = can_hold,
     .hold_ms      = CONFIG_ACTIONS_DEFAULT_HOLD_MS,
     .match        = -1,
   };
@@ -62,6 +63,7 @@ actions_gesture_reset(actions_t *registry)
   registry->active      = false;
   registry->fired       = false;
   registry->held        = KEYBIND_NULL;
+  registry->passed      = KEYBIND_NULL;
   registry->held_events = 0;
   registry->match       = -1;
   registry->fired_part  = KEYBIND_NULL;
@@ -238,7 +240,8 @@ static actions_event_result_t
 actions_on_key_down(actions_t *registry, input_event_t *ev)
 {
   if (ev->is_repeat) {
-    return (registry->active && held_contains(registry->held, ev->key)) ? ACTIONS_EVENT_CONSUME : ACTIONS_EVENT_PASS;
+    bool hidden = registry->active && held_contains(registry->held, ev->key) && !held_contains(registry->passed, ev->key);
+    return hidden ? ACTIONS_EVENT_CONSUME : ACTIONS_EVENT_PASS;
   }
 
   if (registry->fired) {
@@ -277,6 +280,12 @@ actions_on_key_down(actions_t *registry, input_event_t *ev)
     return ACTIONS_EVENT_CONSUME;
   }
 
+  /* a press the game needs on the beat is not held back; the combo still completes */
+  if (registry->can_hold && !registry->can_hold(ev->key)) {
+    registry->passed.keys[registry->passed.count++] = ev->key;
+    return ACTIONS_EVENT_PASS;
+  }
+
   registry->held_events += 1;
   return ACTIONS_EVENT_HOLD;
 }
@@ -293,8 +302,9 @@ actions_on_key_up(actions_t *registry, input_event_t *ev)
     return ACTIONS_EVENT_PASS;
   }
 
-  /* the buttons of a fired part stay hidden until all are up */
-  keybind_t rest = KEYBIND_NULL;
+  /* the buttons of a fired part stay hidden until all are up, except the ones the game got */
+  bool      passed = held_contains(registry->passed, ev->key);
+  keybind_t rest   = KEYBIND_NULL;
 
   for (int i = 0; i < registry->held.count; ++i) {
     if (registry->held.keys[i] != ev->key) {
@@ -307,7 +317,7 @@ actions_on_key_up(actions_t *registry, input_event_t *ev)
   if (rest.count == 0) {
     actions_fired_release(registry);
   }
-  return ACTIONS_EVENT_CONSUME;
+  return passed ? ACTIONS_EVENT_PASS : ACTIONS_EVENT_CONSUME;
 }
 
 actions_event_result_t

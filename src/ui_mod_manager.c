@@ -1569,6 +1569,11 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
   if (nk_begin_titled(ctx, name, title, ui->bounds, flags)) {
     ui->bounds = nk_window_get_bounds(ctx);
 
+    if (ui->focus_on_open) {
+      nk_window_set_focus(ctx, name);
+      ui->focus_on_open = false;
+    }
+
     draw_body(ui, ctx, manager);
   }
   nk_end(ctx);
@@ -1590,7 +1595,8 @@ void
 ui_mod_manager_toggle(ui_mod_manager_t *ui)
 {
   if (ui) {
-    ui->closed = !ui->closed;
+    ui->closed        = !ui->closed;
+    ui->focus_on_open = !ui->closed;
   }
 }
 
@@ -1598,7 +1604,8 @@ void
 ui_mod_manager_open(ui_mod_manager_t *ui)
 {
   if (ui) {
-    ui->closed = false;
+    ui->closed        = false;
+    ui->focus_on_open = true;
   }
 }
 

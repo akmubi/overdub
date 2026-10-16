@@ -73,6 +73,7 @@ struct ui_mod_manager_s {
   struct nk_rect         bounds;
   bool                   inited;
   bool                   closed;
+  bool                   focus_on_open;
   unsigned int           vw;
   unsigned int           vh;
 };
