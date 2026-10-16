@@ -423,6 +423,12 @@ struct mod_manager_cfg_s {
 };
 
 typedef struct mod_manager_s mod_manager_t;
+typedef struct mod_pending_action_s mod_pending_action_t;
+struct mod_pending_action_s {
+  mod_handle_t target;
+  mod_action_t action;
+};
+
 struct mod_manager_s {
   arena_t                 perm;
   str_t                   game_dir;
@@ -433,6 +439,8 @@ struct mod_manager_s {
   mod_manager_cfg_t       saved_cfg;
   mod_t                  *mods;
   int                     mod_count;
+  mod_pending_action_t    pending_actions[CONFIG_MOD_MAX_PENDING_ACTIONS];
+  int                     pending_action_count;
 };
 
 void
@@ -461,6 +469,8 @@ mod_manager_save_cfg(mod_manager_t *manager);
 
 mod_handle_t
 mod_manager_find_mod(mod_manager_t *manager, str_t mod_id);
+bool
+mod_manager_request_action(mod_manager_t *manager, mod_handle_t h, mod_action_t action);
 
 bool
 mod_get_info(mod_manager_t *manager, mod_handle_t h, mod_info_t *info);

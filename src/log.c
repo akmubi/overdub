@@ -73,6 +73,19 @@ struct logger_s {
   bool              console_opened;
 };
 
+typedef struct log_listener_s log_listener_t;
+struct log_listener_s {
+  uint64_t          owner;
+  log_listener_fn_t fn;
+  void             *user;
+};
+
+static struct {
+  SRWLOCK        lock;
+  log_listener_t items[CONFIG_LOG_MAX_LISTENERS];
+  volatile LONG  count;
+} g_log_listeners = {.lock = SRWLOCK_INIT};
+
 static logger_t g_logger = {
   .level         = LOG_LEVEL_INFO,
   .default_sinks = LOG_SINK_DEFAULT,
@@ -290,6 +303,18 @@ log_submit(log_level_t level, log_sink_flags_t sinks, str_t text)
     },
   };
   log_capture_time(&message);
+
+  if (InterlockedCompareExchange(&g_log_listeners.count, 0, 0) > 0) {
+    AcquireSRWLockShared(&g_log_listeners.lock);
+
+    for (int i = 0; i < g_log_listeners.count; ++i) {
+      log_listener_t *listener = &g_log_listeners.items[i];
+      listener->fn(listener->owner, message.level, message.frame, message.text, listener->user);
+    }
+
+    ReleaseSRWLockShared(&g_log_listeners.lock);
+  }
+
   log_reservation_t reservation = log_reserve(sinks, true);
 
   for (int i = 0; i < LOG_QUEUE_COUNT; ++i) {
@@ -301,6 +326,45 @@ log_submit(log_level_t level, log_sink_flags_t sinks, str_t text)
   if (reservation.reserved[LOG_QUEUE_FILE] && reservation.positions[LOG_QUEUE_FILE] == log_atomic_read(&g_logger.queues[LOG_QUEUE_FILE].read_position)) {
     SetEvent(g_logger.wake);
   }
+}
+
+bool
+log_listener_add(uint64_t owner, log_listener_fn_t fn, void *user)
+{
+  if (!fn) {
+    return false;
+  }
+
+  bool added = false;
+  AcquireSRWLockExclusive(&g_log_listeners.lock);
+
+  if (g_log_listeners.count < CONFIG_LOG_MAX_LISTENERS) {
+    g_log_listeners.items[g_log_listeners.count] = (log_listener_t){owner, fn, user};
+    InterlockedIncrement(&g_log_listeners.count);
+    added = true;
+  }
+
+  ReleaseSRWLockExclusive(&g_log_listeners.lock);
+  return added;
+}
+
+void
+log_listener_remove(uint64_t owner, log_listener_fn_t fn, void *user)
+{
+  AcquireSRWLockExclusive(&g_log_listeners.lock);
+
+  for (int i = 0; i < g_log_listeners.count;) {
+    log_listener_t *listener = &g_log_listeners.items[i];
+
+    if (listener->owner == owner && (!fn || (listener->fn == fn && listener->user == user))) {
+      *listener = g_log_listeners.items[g_log_listeners.count - 1];
+      InterlockedDecrement(&g_log_listeners.count);
+    } else {
+      i += 1;
+    }
+  }
+
+  ReleaseSRWLockExclusive(&g_log_listeners.lock);
 }
 
 void

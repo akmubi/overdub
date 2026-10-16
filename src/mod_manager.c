@@ -2478,6 +2478,7 @@ mod_cleanup_dll_runtime(mod_t *m)
 
   mod_cleanup_dll_runtime_hooks(m);
   mod_cleanup_dll_runtime_listeners(m);
+  log_listener_remove(mod_handle_make(m), NULL, NULL);
   mod_cleanup_dll_runtime_arenas(m);
 
   arena_pop_to(&m->dll.perm, 0); // decommit everything
@@ -3415,6 +3416,88 @@ mod_manager_dispatch_uobject_deleted(mod_manager_t *manager, uobject_t *object, 
   lua_mod_runtime_notify_uobject_deleted(manager, object, idx);
 }
 
+bool
+mod_manager_request_action(mod_manager_t *manager, mod_handle_t h, mod_action_t action)
+{
+  if (!manager || action >= MOD_ACTION_MAX || !mod_handle_resolve(manager, h) ||
+      manager->pending_action_count == CONFIG_MOD_MAX_PENDING_ACTIONS) {
+    return false;
+  }
+
+  manager->pending_actions[manager->pending_action_count++] = (mod_pending_action_t){h, action};
+  return true;
+}
+
+static void
+mod_manager_run_action(mod_manager_t *manager, mod_handle_t h, mod_action_t action)
+{
+  switch (action) {
+    case MOD_ACTION_RELOAD: {
+      mod_dll_reload(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_RESTART: {
+      mod_dll_restart(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_START: {
+      mod_dll_start(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_STOP: {
+      mod_dll_stop(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_LOAD: {
+      mod_dll_load(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_UNLOAD: {
+      mod_dll_stop(manager, h);
+      mod_dll_unload(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_LUA_START: {
+      mod_lua_start(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_LUA_STOP: {
+      mod_lua_stop(manager, h);
+      break;
+    }
+
+    case MOD_ACTION_ENABLE:
+    case MOD_ACTION_DISABLE: {
+      mod_manager_mod_set_enabled(manager, h, action == MOD_ACTION_ENABLE);
+      break;
+    }
+  }
+}
+
+/* after the ticks: a mod may ask for its own reload */
+static void
+mod_manager_run_pending_actions(mod_manager_t *manager)
+{
+  int                  count = manager->pending_action_count;
+  mod_pending_action_t actions[CONFIG_MOD_MAX_PENDING_ACTIONS];
+
+  memcpy(actions, manager->pending_actions, sizeof(actions[0]) * (size_t)count);
+  manager->pending_action_count = 0;
+
+  for (int i = 0; i < count; ++i) {
+    if (mod_handle_resolve(manager, actions[i].target)) {
+      mod_manager_run_action(manager, actions[i].target, actions[i].action);
+    }
+  }
+}
+
 void
 mod_manager_dispatch_tick(mod_manager_t *manager, float delta)
 {
@@ -3448,6 +3531,8 @@ mod_manager_dispatch_tick(mod_manager_t *manager, float delta)
       mod_blueprint_tick(manager, h, delta);
     }
   }
+
+  mod_manager_run_pending_actions(manager);
 }
 
 bool

@@ -112,6 +112,8 @@
 #define CONFIG_MOD_CODE_ARENA_SIZE           (1 * GB)
 #define CONFIG_MOD_MAX_HOOKS                 (256)
 #define CONFIG_MOD_MAX_LISTENERS             (8)
+#define CONFIG_LOG_MAX_LISTENERS             (16)
+#define CONFIG_MOD_MAX_PENDING_ACTIONS       (32)
 #define CONFIG_MOD_MAX_ARENAS                (256)
 #define CONFIG_MOD_MAX_COMMANDS              (1024)
 #define CONFIG_MOD_MANAGER_CONFIG_PATH       STR_LIT("overdub-config.ini")

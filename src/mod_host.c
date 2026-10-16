@@ -266,3 +266,92 @@ mod_hook_remove(mod_handle_t mod, void *target)
 {
   return mod_dll_hook_remove(&globals.mod_manager, mod, target);
 }
+
+bool MOD_CALL
+mod_register_log_listener(mod_handle_t mod, mod_log_fn_t fn, void *user)
+{
+  if (!mod_handle_resolve(&globals.mod_manager, mod)) {
+    return false;
+  }
+
+  return log_listener_add(mod, (log_listener_fn_t)fn, user);
+}
+
+void MOD_CALL
+mod_deregister_log_listener(mod_handle_t mod, mod_log_fn_t fn, void *user)
+{
+  if (fn) {
+    log_listener_remove(mod, (log_listener_fn_t)fn, user);
+  }
+}
+
+int MOD_CALL
+mod_list_count(void)
+{
+  return globals.mod_manager.mod_count;
+}
+
+mod_handle_t MOD_CALL
+mod_list_get(int index)
+{
+  if (index < 0 || index >= globals.mod_manager.mod_count) {
+    return MOD_HANDLE_INVALID;
+  }
+
+  return mod_handle_make(&globals.mod_manager.mods[index]);
+}
+
+mod_handle_t MOD_CALL
+mod_find(str_t id)
+{
+  return mod_manager_find_mod(&globals.mod_manager, id);
+}
+
+bool MOD_CALL
+mod_get_status(mod_handle_t target, mod_status_t *status)
+{
+  mod_t *m = mod_handle_resolve(&globals.mod_manager, target);
+  if (!m || !status) {
+    return false;
+  }
+
+  *status = (mod_status_t){
+    .id         = m->manifest.info.id,
+    .name       = m->manifest.info.name,
+    .dir        = m->mod_dir,
+    .dll_path   = m->manifest.dll.path,
+    .dll_state  = mod_dll_state_to_str(m->dll.state),
+    .dll_error  = str_make(m->dll.err_msg.msg, MAX_VAL(m->dll.err_msg.len, 0)),
+    .enabled    = m->enabled,
+    .has_code   = m->has_code,
+    .has_lua    = m->has_lua,
+    .builtin    = m->dll.is_builtin,
+    .dll_active = m->dll.active,
+    .lua_active = m->lua.active,
+  };
+  return true;
+}
+
+bool MOD_CALL
+mod_request_action(mod_handle_t target, mod_action_t action)
+{
+  return mod_manager_request_action(&globals.mod_manager, target, action);
+}
+
+bool MOD_CALL
+mod_run_cmd(str_t name, str_t args)
+{
+  return mod_manager_dispatch_command(&globals.mod_manager, name, args);
+}
+
+str_t MOD_CALL
+mod_get_game_dir(void)
+{
+  return globals.game_dir;
+}
+
+void *MOD_CALL
+mod_get_game_window(void)
+{
+  return (void *)(uintptr_t)globals.hwnd;
+}
