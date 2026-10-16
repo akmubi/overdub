@@ -7108,6 +7108,8 @@ struct nk_osk_state {
   int                       shift; /**!< 0 off, 1 next letter, 2 locked */
   float                     shift_hold;
   nk_bool                   shift_held;
+  int                       repeat_key; /**!< the held pad shortcut */
+  float                     repeat_time;
   const struct nk_osk_page *pages; /**!< NULL: built-in */
   int                       page_count;
   nk_rune                   text[32];
@@ -7152,6 +7154,7 @@ struct nk_nav {
   int                window_mode;
   nk_hash            mode_window;
   nk_hash            close_window;
+  nk_hash            focus_request; /**!< set by nk_window_set_focus */
   float              repeat_time;
   nk_bool            suppress;
   int                current;
@@ -7580,6 +7583,9 @@ struct nk_text_shape;
 /* true when it has the navigation focus */
 NK_LIB nk_bool
 nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags);
+/* for a widget that moves while focused */
+NK_LIB nk_bool
+nk_nav_stop_keyed(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags, nk_hash key);
 NK_LIB enum nk_widget_layout_states
 nk_widget_nav(struct nk_rect *bounds, struct nk_context *ctx);
 NK_LIB void

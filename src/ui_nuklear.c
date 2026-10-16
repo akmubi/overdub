@@ -50,12 +50,17 @@ ui_nk_item_begin(struct nk_context *ctx, ui_nk_item_t *item)
   }
 
   item->bounds       = nk_rect(0, 0, 0, 0);
-  item->layout_state = nk_widget(&item->bounds, ctx);
+  item->layout_state = item->nav ? nk_widget_nav(&item->bounds, ctx) : nk_widget(&item->bounds, ctx);
   item->in           = NULL;
   item->widget_state = 0;
 
   if (item->layout_state == NK_WIDGET_INVALID) {
     return false;
+  }
+
+  /* also when the window takes no input, like nuklear's buttons */
+  if (item->nav && item->layout_state != NK_WIDGET_DISABLED) {
+    nk_nav_stop(ctx, item->bounds, 0);
   }
 
   // if (item->layout_state != NK_WIDGET_ROM && item->layout_state != NK_WIDGET_DISABLED &&
@@ -273,7 +278,7 @@ ui_text_draw(struct nk_context *ctx, struct nk_command_buffer *out, struct nk_re
 bool
 ui_select_row(struct nk_context *ctx, ui_nk_select_row_opts_t *opts)
 {
-  ui_nk_item_t item = {0};
+  ui_nk_item_t item = {.nav = true};
 
   if (!ctx || !opts) {
     return false;
@@ -283,11 +288,16 @@ ui_select_row(struct nk_context *ctx, ui_nk_select_row_opts_t *opts)
     return false;
   }
 
-  bool clicked = ui_nk_item_behavior(ctx, &item);
+  ui_nk_item_behavior(ctx, &item);
+
+  /* select on press, not on release like buttons */
+  bool pressed  = item.in && item.in->mouse.buttons[NK_BUTTON_LEFT].clicked &&
+                 nk_input_has_mouse_click_down_in_rect(item.in, NK_BUTTON_LEFT, item.bounds, nk_true);
+  bool selected = opts->selected || pressed;
 
   struct nk_command_buffer *out = nk_window_get_canvas(ctx);
-  struct nk_color           bg  = ui_nk_select_bg(ctx, item.widget_state, opts->selected);
-  struct nk_color           fg  = ui_nk_select_fg(ctx, item.widget_state, opts->selected);
+  struct nk_color           bg  = ui_nk_select_bg(ctx, item.widget_state, selected);
+  struct nk_color           fg  = ui_nk_select_fg(ctx, item.widget_state, selected);
 
   float pad_x = opts->pad_x > 0.0f ? opts->pad_x : 8.0f;
   float dot_d = opts->dot_d > 0.0f ? opts->dot_d : 8.0f;
@@ -315,7 +325,7 @@ ui_select_row(struct nk_context *ctx, ui_nk_select_row_opts_t *opts)
     ui_text_draw(ctx, out, nk_rect(x, item.bounds.y, text_w, item.bounds.h), opts->text, text_opts);
   }
 
-  return clicked;
+  return pressed;
 }
 
 bool
@@ -348,6 +358,18 @@ ui_splitter(struct nk_context *ctx, ui_nk_splitter_state_t *state, ui_nk_splitte
   }
 
   ui_nk_item_behavior(ctx, &item);
+
+  /* keyed: its place changes while it moves */
+  nk_hash key = nk_murmur_hash(&state, (int)sizeof(state), NK_FLAG(30));
+
+  if (!opts->disabled && nk_nav_stop_keyed(ctx, item.bounds, NK_NAV_STOP_ADJUST | NK_NAV_STOP_NO_CLICK, key) && ctx->nav.adjust) {
+    float track_size = ui_nk_rect_size(opts->track, opts->axis);
+    float step       = 8.0f * (float)ctx->nav.adjust / NK_MAX(track_size, 1.0f);
+
+    /* adjust is positive for right and up */
+    state->ratio += opts->axis == UI_NK_AXIS_X ? step : -step;
+    changed       = true;
+  }
 
   state->hovering = (item.widget_state & NK_WIDGET_STATE_HOVER) != 0;
   if (!state->dragging && in) {

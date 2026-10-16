@@ -14,38 +14,9 @@
 static void
 set_style(ui_manager_t *manager, struct nk_context *ctx)
 {
-  nk_style_default(ctx);
+  (void)manager;
 
-  manager->color_table[NK_COLOR_TEXT]                    = UI_C_TEXT;
-  manager->color_table[NK_COLOR_WINDOW]                  = UI_C_BG_WINDOW;
-  manager->color_table[NK_COLOR_HEADER]                  = UI_C_HEADER;
-  manager->color_table[NK_COLOR_BORDER]                  = UI_C_BORDER;
-  manager->color_table[NK_COLOR_BUTTON]                  = UI_C_CONTROL;
-  manager->color_table[NK_COLOR_BUTTON_HOVER]            = UI_C_CONTROL_HOVER;
-  manager->color_table[NK_COLOR_BUTTON_ACTIVE]           = UI_C_CONTROL_ACTIVE;
-  manager->color_table[NK_COLOR_TOGGLE]                  = UI_C_CONTROL;
-  manager->color_table[NK_COLOR_TOGGLE_HOVER]            = UI_C_CONTROL_HOVER;
-  manager->color_table[NK_COLOR_TOGGLE_CURSOR]           = UI_C_CONTROL_ACTIVE;
-  manager->color_table[NK_COLOR_SELECT]                  = UI_C_TRANSPARENT;
-  manager->color_table[NK_COLOR_SELECT_ACTIVE]           = UI_C_SELECT;
-  manager->color_table[NK_COLOR_SLIDER]                  = UI_C_CONTROL;
-  manager->color_table[NK_COLOR_SLIDER_CURSOR]           = UI_C_ACCENT;
-  manager->color_table[NK_COLOR_SLIDER_CURSOR_HOVER]     = UI_C_ACCENT_HOVER;
-  manager->color_table[NK_COLOR_SLIDER_CURSOR_ACTIVE]    = UI_C_ACCENT_ACTIVE;
-  manager->color_table[NK_COLOR_PROPERTY]                = UI_C_CONTROL;
-  manager->color_table[NK_COLOR_EDIT]                    = UI_C_EDIT;
-  manager->color_table[NK_COLOR_EDIT_CURSOR]             = UI_C_ACCENT;
-  manager->color_table[NK_COLOR_COMBO]                   = UI_C_CONTROL;
-  manager->color_table[NK_COLOR_CHART]                   = UI_C_BG_PANEL;
-  manager->color_table[NK_COLOR_CHART_COLOR]             = UI_C_ACCENT;
-  manager->color_table[NK_COLOR_CHART_COLOR_HIGHLIGHT]   = UI_C_ACCENT_ACTIVE;
-  manager->color_table[NK_COLOR_SCROLLBAR]               = UI_C_SCROLLBAR;
-  manager->color_table[NK_COLOR_SCROLLBAR_CURSOR]        = UI_C_SCROLLBAR_CURSOR;
-  manager->color_table[NK_COLOR_SCROLLBAR_CURSOR_HOVER]  = UI_C_SCROLLBAR_CURSOR_HOVER;
-  manager->color_table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = UI_C_SCROLLBAR_ACTIVE;
-  manager->color_table[NK_COLOR_TAB_HEADER]              = UI_C_BG_PANEL;
-
-  nk_style_from_table(ctx, manager->color_table);
+  nk_style_from_theme(ctx, NK_THEME_DARK_BLUE);
 
   ctx->style.button.rounding          = 4.0f;
   ctx->style.selectable.rounding      = 4.0f;
@@ -59,165 +30,34 @@ set_style(ui_manager_t *manager, struct nk_context *ctx)
   ctx->style.tab.rounding             = 4.0f;
 
   /* Window */
-  ctx->style.window.group_border_color   = UI_C_BORDER_SOFT;
-  ctx->style.window.tooltip_border_color = UI_C_BORDER_FOCUS;
-  ctx->style.window.group_border         = 0.0f;
-  ctx->style.window.border               = 1.0f;
-  ctx->style.window.scrollbar_size       = nk_vec2(14.0f, 14.0f);
-
-  /* Window header */
-  ctx->style.window.header.normal = UI_ITEM(UI_C_HEADER);
-  ctx->style.window.header.hover  = UI_ITEM(UI_C_HEADER_HOVER);
-  ctx->style.window.header.active = UI_ITEM(UI_C_HEADER_ACTIVE);
-
-  ctx->style.window.header.minimize_button.normal = UI_ITEM(UI_C_HEADER);
-  ctx->style.window.header.close_button.normal    = UI_ITEM(UI_C_HEADER);
-
-  /* Selectable */
-  ctx->style.selectable.normal         = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.selectable.hover          = UI_ITEM(UI_C_BG_HOVER);
-  ctx->style.selectable.pressed        = UI_ITEM(UI_C_SELECT);
-  ctx->style.selectable.normal_active  = UI_ITEM(UI_C_SELECT);
-  ctx->style.selectable.hover_active   = UI_ITEM(UI_C_SELECT_HOVER);
-  ctx->style.selectable.pressed_active = UI_ITEM(UI_C_SELECT_ACTIVE);
-
-  /* Edit */
-  ctx->style.edit.normal             = UI_ITEM(UI_C_EDIT);
-  ctx->style.edit.hover              = UI_ITEM(UI_C_EDIT_HOVER);
-  ctx->style.edit.active             = UI_ITEM(UI_C_EDIT_ACTIVE);
-  ctx->style.edit.border_color       = UI_C_BORDER_SOFT;
-  ctx->style.edit.cursor_normal      = UI_C_ACCENT;
-  ctx->style.edit.cursor_hover       = UI_C_ACCENT_HOVER;
-  ctx->style.edit.cursor_text_normal = UI_C_BG_WINDOW;
-  ctx->style.edit.cursor_text_hover  = UI_C_BG_WINDOW;
-  ctx->style.edit.selected_normal    = UI_C_SELECT_ACTIVE;
-  ctx->style.edit.selected_hover     = UI_C_ACCENT_ACTIVE;
-
-  /* Button */
-#if 0
-  ctx->style.button.normal          = UI_ITEM(UI_C_ACCENT);
-  ctx->style.button.hover           = UI_ITEM(UI_C_ACCENT_HOVER);
-  ctx->style.button.active          = UI_ITEM(UI_C_ACCENT_ACTIVE);
-  ctx->style.button.border_color    = UI_C_BORDER_FOCUS;
-  ctx->style.button.text_background = UI_C_TRANSPARENT;
-#endif
-  ctx->style.button.normal          = UI_ITEM(UI_C_CONTROL);
-  ctx->style.button.hover           = UI_ITEM(UI_C_CONTROL_HOVER);
-  ctx->style.button.active          = UI_ITEM(UI_C_CONTROL_ACTIVE);
-  ctx->style.button.border_color    = UI_C_BORDER_SOFT;
-  ctx->style.button.text_normal     = UI_C_TEXT;
-  ctx->style.button.text_hover      = UI_C_TEXT;
-  ctx->style.button.text_active     = UI_C_TEXT;
-  ctx->style.button.text_background = UI_C_TRANSPARENT;
-
-  /* Tab/Node button */
-  ctx->style.tab.tab_maximize_button.normal        = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.tab.tab_maximize_button.border_color  = UI_C_BORDER_SOFT;
-  ctx->style.tab.tab_minimize_button.normal        = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.tab.tab_minimize_button.border_color  = UI_C_BORDER_SOFT;
-  ctx->style.tab.node_maximize_button.normal       = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.tab.node_maximize_button.border_color = UI_C_BORDER_SOFT;
-  ctx->style.tab.node_minimize_button.normal       = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.tab.node_minimize_button.border_color = UI_C_BORDER_SOFT;
+  ctx->style.window.group_border   = 0.0f;
+  ctx->style.window.border         = 1.0f;
+  ctx->style.window.scrollbar_size = nk_vec2(14.0f, 14.0f);
 
   /* Tab / tree */
-  ctx->style.tab.background   = UI_ITEM(UI_C_BG_PANEL);
-  ctx->style.tab.border_color = UI_C_BORDER_SOFT;
-  ctx->style.tab.indent       = 12.0f;
-
-  /* Chart */
-  ctx->style.chart.background     = UI_ITEM(UI_C_BG_PANEL);
-  ctx->style.chart.border_color   = UI_C_BORDER_SOFT;
-  ctx->style.chart.selected_color = UI_C_ACCENT_ACTIVE;
-  ctx->style.chart.color          = UI_C_ACCENT;
+  ctx->style.tab.indent = 12.0f;
 
   /* Checkbox / option */
-  ctx->style.checkbox.normal          = UI_ITEM(UI_C_CONTROL);
-  ctx->style.checkbox.hover           = UI_ITEM(UI_C_CONTROL_HOVER);
-  ctx->style.checkbox.active          = UI_ITEM(UI_C_CONTROL_ACTIVE);
-  ctx->style.checkbox.cursor_normal   = UI_ITEM(UI_C_ACCENT);
-  ctx->style.checkbox.cursor_hover    = UI_ITEM(UI_C_ACCENT_HOVER);
-  ctx->style.checkbox.border_color    = UI_C_BORDER_SOFT;
-  ctx->style.checkbox.text_background = UI_C_TRANSPARENT;
-  ctx->style.checkbox.padding         = nk_vec2(2.0f, 2.0f);
-  ctx->style.checkbox.border          = 1.0f;
+  ctx->style.checkbox.padding = nk_vec2(2.0f, 2.0f);
+  ctx->style.checkbox.border  = 1.0f;
 
   ctx->style.option = ctx->style.checkbox;
 
   /* Slider */
-  ctx->style.slider.normal        = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.slider.hover         = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.slider.active        = UI_ITEM(UI_C_TRANSPARENT);
-  ctx->style.slider.bar_normal    = UI_C_BG_PANEL_ALT;
-  ctx->style.slider.bar_hover     = UI_C_BG_HOVER;
-  ctx->style.slider.bar_active    = UI_C_BG_ACTIVE;
-  ctx->style.slider.bar_filled    = UI_C_ACCENT;
-  ctx->style.slider.cursor_normal = UI_ITEM(UI_C_ACCENT);
-  ctx->style.slider.cursor_hover  = UI_ITEM(UI_C_ACCENT_HOVER);
-  ctx->style.slider.cursor_active = UI_ITEM(UI_C_ACCENT_ACTIVE);
-  ctx->style.slider.bar_height    = 6.0f;
+  ctx->style.slider.bar_height = 6.0f;
 
   /* Progress */
-  ctx->style.progress.normal              = UI_ITEM(UI_C_CONTROL);
-  ctx->style.progress.hover               = UI_ITEM(UI_C_CONTROL);
-  ctx->style.progress.active              = UI_ITEM(UI_C_CONTROL);
-  ctx->style.progress.cursor_normal       = UI_ITEM(UI_C_ACCENT);
-  ctx->style.progress.cursor_hover        = UI_ITEM(UI_C_ACCENT_HOVER);
-  ctx->style.progress.cursor_active       = UI_ITEM(UI_C_ACCENT_ACTIVE);
-  ctx->style.progress.border_color        = UI_C_BORDER_SOFT;
-  ctx->style.progress.cursor_border_color = UI_C_ACCENT_ACTIVE;
-  ctx->style.progress.padding             = nk_vec2(2.0f, 2.0f);
-  ctx->style.progress.border              = 1.0f;
+  ctx->style.progress.padding = nk_vec2(2.0f, 2.0f);
+  ctx->style.progress.border  = 1.0f;
 
-#if 0
   /* Scrollbar */
-  ctx->style.scrollh.normal              = UI_ITEM(nk_rgba(22, 27, 34, 140));
-  ctx->style.scrollh.hover               = UI_ITEM(nk_rgba(30, 37, 46, 190));
-  ctx->style.scrollh.active              = UI_ITEM(nk_rgba(35, 43, 53, 220));
-  ctx->style.scrollh.cursor_normal       = UI_ITEM(nk_rgba(83, 100, 117, 220));
-  ctx->style.scrollh.cursor_hover        = UI_ITEM(nk_rgba(98, 119, 138, 235));
-  ctx->style.scrollh.cursor_active       = UI_ITEM(UI_C_ACCENT_ACTIVE);
-#endif
-  ctx->style.scrollh.normal              = UI_ITEM(UI_C_SCROLLBAR);
-  ctx->style.scrollh.hover               = UI_ITEM(UI_C_SCROLLBAR_HOVER);
-  ctx->style.scrollh.active              = UI_ITEM(UI_C_SCROLLBAR_ACTIVE);
-  ctx->style.scrollh.cursor_normal       = UI_ITEM(UI_C_SCROLLBAR_CURSOR);
-  ctx->style.scrollh.cursor_hover        = UI_ITEM(UI_C_SCROLLBAR_CURSOR_HOVER);
-  ctx->style.scrollh.cursor_active       = UI_ITEM(UI_C_ACCENT_ACTIVE);
-  ctx->style.scrollh.border_color        = UI_C_TRANSPARENT;
-  ctx->style.scrollh.cursor_border_color = UI_C_BORDER_SOFT;
-  ctx->style.scrollh.padding             = nk_vec2(1.0f, 1.0f);
-  ctx->style.scrollh.cursor_min_size     = ctx->style.window.scrollbar_size.x;
+  ctx->style.scrollh.padding         = nk_vec2(1.0f, 1.0f);
+  ctx->style.scrollh.cursor_min_size = ctx->style.window.scrollbar_size.x;
 
   ctx->style.scrollv = ctx->style.scrollh;
 
   /* Edit */
-  ctx->style.edit.normal               = UI_ITEM(UI_C_EDIT);
-  ctx->style.edit.hover                = UI_ITEM(UI_C_EDIT_HOVER);
-  ctx->style.edit.active               = UI_ITEM(UI_C_EDIT_ACTIVE);
-  ctx->style.edit.border_color         = UI_C_BORDER_SOFT;
-  ctx->style.edit.cursor_normal        = UI_C_ACCENT;
-  ctx->style.edit.cursor_hover         = UI_C_ACCENT_HOVER;
-  ctx->style.edit.text_normal          = UI_C_TEXT;
-  ctx->style.edit.text_hover           = UI_C_TEXT;
-  ctx->style.edit.text_active          = UI_C_TEXT;
-  ctx->style.edit.selected_normal      = UI_C_SELECT_ACTIVE;
-  ctx->style.edit.selected_hover       = UI_C_ACCENT_ACTIVE;
-  ctx->style.edit.selected_text_normal = UI_C_TEXT;
-  ctx->style.edit.selected_text_hover  = UI_C_TEXT;
-  ctx->style.edit.cursor_size          = 1.0f;
-
-  /* Property */
-  ctx->style.property.normal       = UI_ITEM(UI_C_CONTROL);
-  ctx->style.property.hover        = UI_ITEM(UI_C_CONTROL_HOVER);
-  ctx->style.property.active       = UI_ITEM(UI_C_CONTROL_ACTIVE);
-  ctx->style.property.border_color = UI_C_BORDER_SOFT;
-
-  /* Combo */
-  ctx->style.combo.normal       = UI_ITEM(UI_C_CONTROL);
-  ctx->style.combo.hover        = UI_ITEM(UI_C_CONTROL_HOVER);
-  ctx->style.combo.active       = UI_ITEM(UI_C_CONTROL_ACTIVE);
-  ctx->style.combo.border_color = UI_C_BORDER_SOFT;
+  ctx->style.edit.cursor_size = 1.0f;
 }
 
 static void
@@ -481,7 +321,8 @@ is_any_window_open(struct nk_context *ctx)
 static inline bool
 is_any_window_interactive(struct nk_context *ctx)
 {
-  return is_any_window(ctx, 0, NK_WINDOW_CLOSED | NK_WINDOW_HIDDEN | NK_WINDOW_MINIMIZED | NK_WINDOW_NOT_INTERACTIVE);
+  /* not NK_WINDOW_ROM: nuklear sets it on every window but the top one */
+  return is_any_window(ctx, 0, NK_WINDOW_CLOSED | NK_WINDOW_HIDDEN | NK_WINDOW_MINIMIZED | (enum nk_window_flags)NK_WINDOW_NO_INPUT);
 }
 
 static inline bool
@@ -681,7 +522,15 @@ feed_nav(ui_manager_t *manager, struct nk_context *ctx, input_event_t *ev)
     return;
   }
 
-  int  down  = ev->kind == INPUT_EVENT_KEY_DOWN;
+  int down = ev->kind == INPUT_EVENT_KEY_DOWN;
+
+  /* nuklear repeats held keys itself */
+  if (down && (ev->is_repeat || manager->nav_down[ev->key])) {
+    return;
+  }
+
+  manager->nav_down[ev->key] = down;
+
   bool ctrl  = (ev->modifiers & INPUT_MOD_CTRL)  != 0;
   bool shift = (ev->modifiers & INPUT_MOD_SHIFT) != 0;
   bool alt   = (ev->modifiers & INPUT_MOD_ALT)   != 0;
@@ -865,7 +714,13 @@ feed_input(ui_manager_t *manager, input_event_t *ev)
   }
 
   case INPUT_EVENT_MOUSE_MOVE: {
-    nk_input_motion(ctx, x, y);
+    /* the engine also reports moves that did not move; they would end navigation */
+    if (!manager->mouse_seen || x != manager->mouse_x || y != manager->mouse_y) {
+      manager->mouse_seen = true;
+      manager->mouse_x    = x;
+      manager->mouse_y    = y;
+      nk_input_motion(ctx, x, y);
+    }
     break;
   }
 
@@ -985,12 +840,21 @@ feed_input(ui_manager_t *manager, input_event_t *ev)
   case INPUT_EVENT_APP_ACTIVATION: {
     if (!ev->app_activated) {
       manager->mouse_button_mask = 0;
+      mem_zero(manager->nav_down, sizeof(manager->nav_down));
     }
     break;
   }
 
   default:
     break;
+  }
+}
+
+void
+ui_manager_note_input_device(ui_manager_t *manager, input_event_t *ev)
+{
+  if (ev->kind == INPUT_EVENT_KEY_DOWN || ev->kind == INPUT_EVENT_MOUSE_DOWN) {
+    manager->gamepad_input = input_key_is_gamepad(ev->key);
   }
 }
 
@@ -1005,14 +869,16 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
     return true;
   }
 
-  if (keybind_activated_by_event(manager->mod_manager->cfg.overlay_toggle, ev)) {
+  bool capture_open = ui_keybind_capture_is_open(&manager->keybind_capture);
+
+  if (!capture_open && keybind_activated_by_event(manager->mod_manager->cfg.overlay_toggle, ev)) {
     if (keybind_is_pressed(manager->mod_manager->cfg.overlay_toggle)) {
       ui_mod_manager_toggle(&manager->main);
     }
     return true;
   }
 
-  if (keybind_activated_by_event(manager->console.cfg.toggle_bind, ev)) {
+  if (!capture_open && keybind_activated_by_event(manager->console.cfg.toggle_bind, ev)) {
     if (keybind_is_pressed(manager->console.cfg.toggle_bind)) {
       ui_console_toggle(&manager->console);
     }
@@ -1058,6 +924,7 @@ ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter, float d
 
   if (manager->input_fed && !fed) {
     release_nav_keys(manager->ctx);
+    mem_zero(manager->nav_down, sizeof(manager->nav_down));
     manager->right_x = manager->right_y = 0.0f;
   }
 
@@ -1088,6 +955,8 @@ ui_manager_on_frame_end(ui_manager_t *manager, unsigned int vw, unsigned int vh)
 
   ui_mod_manager_draw(&manager->main, ctx, manager->mod_manager, vw, vh);
   ui_keybind_capture_draw(&manager->keybind_capture, ctx, vw, vh);
+
+  manager->console.gamepad_input = manager->gamepad_input;
   ui_console_draw(&manager->console, ctx, manager->mod_manager, vw, vh);
 
   if (nk_nav_text_requested(ctx, NULL) && manager->gamepad_input) {
