@@ -288,6 +288,15 @@ input_key_to_str(input_key_kind_t key)
   return g_key_map[key].str;
 }
 
+fname_t
+input_key_to_fname(input_key_kind_t key)
+{
+  if (key >= INPUT_KEY_MAX) {
+    return (fname_t){0};
+  }
+  return g_key_map[key].name;
+}
+
 str_t
 input_event_kind_to_str(input_event_kind_t kind)
 {

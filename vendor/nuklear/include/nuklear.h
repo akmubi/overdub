@@ -7051,6 +7051,10 @@ struct nk_pool {
 #  define NK_NAV_MAX_STOPS 1024
 #endif
 
+#ifndef NK_NAV_MAX_SCROLLS
+#  define NK_NAV_MAX_SCROLLS 64
+#endif
+
 #ifndef NK_NAV_MAX_WINDOWS
 #  define NK_NAV_MAX_WINDOWS 32
 #endif
@@ -7122,6 +7126,14 @@ struct nk_osk_state {
   int                       release_count;
 };
 
+/* a scrollable group: the right stick scrolls it when the focus is not in one */
+struct nk_nav_scroll {
+  nk_hash  window;
+  nk_uint *x, *y;
+  nk_uint *max_x, *max_y;
+  float    area;
+};
+
 struct nk_nav {
   nk_bool            enabled;
   nk_bool            active;
@@ -7162,6 +7174,8 @@ struct nk_nav {
   int                current;
   int                count[2];
   struct nk_nav_stop stops[2][NK_NAV_MAX_STOPS];
+  int                  scroll_count[2];
+  struct nk_nav_scroll scrolls[2][NK_NAV_MAX_SCROLLS];
 };
 
 /** Turns navigation by NK_KEY_NAV_* keys on or off (on from the start with NK_DEFAULT_NAVIGATION). */

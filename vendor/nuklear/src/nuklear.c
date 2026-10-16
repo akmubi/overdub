@@ -10920,8 +10920,9 @@ nk_nav_stop_keyed(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags,
 NK_LIB void
 nk_nav_next_frame(struct nk_context *ctx)
 {
-  ctx->nav.current                ^= 1;
-  ctx->nav.count[ctx->nav.current] = 0;
+  ctx->nav.current                       ^= 1;
+  ctx->nav.count[ctx->nav.current]        = 0;
+  ctx->nav.scroll_count[ctx->nav.current] = 0;
 }
 
 NK_INTERN int
@@ -11364,8 +11365,8 @@ nk_nav_update(struct nk_context *ctx)
     nav->repeat_key = 0;
   }
 
-  if (!nav->active && (key || cycle || scroll || tab || towards || maximize || (!editing && (nk_nav_pressed(in, NK_KEY_NAV_ACTIVATE) ||
-                                                      nk_nav_pressed(in, NK_KEY_NAV_MENU))))) {
+  if (!nav->active && (key || cycle || scroll || tab || towards || maximize || nk_nav_pressed(in, NK_KEY_NAV_WINDOW_MENU) ||
+                       (!editing && (nk_nav_pressed(in, NK_KEY_NAV_ACTIVATE) || nk_nav_pressed(in, NK_KEY_NAV_MENU))))) {
     nav->active = nk_true;
     started     = nk_true;
   }
@@ -11536,7 +11537,15 @@ nk_nav_update(struct nk_context *ctx)
   }
 
   if (nk_nav_pressed(in, NK_KEY_NAV_WINDOW_MENU) && !popup && !nav->osk.open) {
-    struct nk_window *w = nk_nav_find_window(ctx, scope);
+    struct nk_window *w;
+
+    /* ends moving / resizing: the menu opens on the window again */
+    if (nav->window_mode) {
+      scope            = nav->mode_window;
+      nav->window_mode = 0;
+    }
+
+    w = nk_nav_find_window(ctx, scope);
 
     if (w && (w->flags & NK_WINDOW_MINIMIZED)) {
       w->flags &= (nk_flags)~NK_WINDOW_MINIMIZED;
@@ -11743,6 +11752,9 @@ nk_nav_update(struct nk_context *ctx)
     return;
   }
 
+  /* the focused window is raised when the navigation is used, not every frame: another window may be active meanwhile */
+  nk_bool raise_window = started || stops[focus].id != nav->focus || key || cycle || tab || towards || nk_nav_pressed(in, NK_KEY_NAV_ACTIVATE);
+
   if (stops[focus].id != nav->focus) {
     nav->focus        = stops[focus].id;
     nav->focus_bounds = stops[focus].bounds;
@@ -11758,7 +11770,7 @@ nk_nav_update(struct nk_context *ctx)
   nav->focus_flags = stops[focus].flags;
 
   {
-    struct nk_window *w = nk_nav_find_window(ctx, stops[focus].window);
+    struct nk_window *w = raise_window ? nk_nav_find_window(ctx, stops[focus].window) : 0;
 
     if (w && !(w->flags & NK_WINDOW_BACKGROUND)) {
       if (ctx->end != w) {
@@ -11784,6 +11796,22 @@ nk_nav_update(struct nk_context *ctx)
         y     = stops[i].scroll_y;
         max_x = stops[i].scroll_max_x;
         max_y = stops[i].scroll_max_y;
+      }
+    }
+
+    /* the window's biggest scrollable group, e.g. a log made of text that is not focusable */
+    if (!y) {
+      const struct nk_nav_scroll *scrolls = nav->scrolls[!nav->current];
+      float                       best    = 0;
+
+      for (i = 0; i < nav->scroll_count[!nav->current]; ++i) {
+        if (scrolls[i].window == stops[focus].window && scrolls[i].max_y && *scrolls[i].max_y > 0 && scrolls[i].area > best) {
+          best  = scrolls[i].area;
+          x     = scrolls[i].x;
+          y     = scrolls[i].y;
+          max_x = scrolls[i].max_x;
+          max_y = scrolls[i].max_y;
+        }
       }
     }
 
@@ -16088,7 +16116,7 @@ nk_window_set_focus(struct nk_context *ctx, const char *name)
     nk_insert_window(ctx, win, NK_INSERT_BACK);
   }
 
-  if (win) {
+  if (win && !(win->flags & NK_WINDOW_NO_NAV)) {
     ctx->nav.focus_request = win->name;
   }
 
@@ -18803,6 +18831,18 @@ nk_group_scrolled_end(struct nk_context *ctx)
   g = win->layout;
   NK_ASSERT(g->parent);
   parent = g->parent;
+
+  if (ctx->nav.enabled && !(g->flags & NK_WINDOW_NO_SCROLLBAR_V) && g->offset_y &&
+      ctx->nav.scroll_count[ctx->nav.current] < NK_NAV_MAX_SCROLLS) {
+    struct nk_nav_scroll *target = &ctx->nav.scrolls[ctx->nav.current][ctx->nav.scroll_count[ctx->nav.current]++];
+
+    target->window = win->name;
+    target->x      = (g->flags & NK_WINDOW_NO_SCROLLBAR_H) ? 0 : g->offset_x;
+    target->y      = g->offset_y;
+    target->max_x  = g->prev_max_x;
+    target->max_y  = g->prev_max_y;
+    target->area   = g->bounds.w * g->bounds.h;
+  }
 
   /* dummy window */
   nk_zero_struct(pan);

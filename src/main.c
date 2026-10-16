@@ -3,6 +3,7 @@
 #include "builtin.h"
 #include "debug.h"
 #include "file.h"
+#include "game_input.h"
 #include "globals.h"
 #include "hook_chain.h"
 #include "input.h"
@@ -120,6 +121,7 @@ on_engine_init(void)
 
   enable_input_hooks();
   unreal_common_collect(&globals.unreal);
+  game_input_init();
   unreal_register_uobject_listener(UOBJECT_LISTENER_KIND_CREATE, on_uobject_created, &globals.mod_manager);
   unreal_register_uobject_listener(UOBJECT_LISTENER_KIND_DELETE, on_uobject_deleted, &globals.mod_manager);
 
@@ -526,7 +528,7 @@ loader_init(HINSTANCE inst)
   ASSERT(globals.listeners != NULL);
 
   globals.strings = string_pool_create(&globals.perm, 4 * KB);
-  actions_init(&globals.actions, on_held_event_send_on, on_action_fired_dispatch);
+  actions_init(&globals.actions, on_held_event_send_on, on_action_fired_dispatch, game_input_key_can_wait);
   mod_manager_init(&globals.mod_manager, globals.game_dir);
   mod_manager_startup_load_cfg(&globals.mod_manager);
 

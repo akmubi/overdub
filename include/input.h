@@ -264,6 +264,8 @@ input_key_clear_transient_state(void);
 
 MOD_API str_t
 input_key_to_str(input_key_kind_t key);
+fname_t
+input_key_to_fname(input_key_kind_t key);
 MOD_API str_t
 input_event_kind_to_str(input_event_kind_t kind);
 

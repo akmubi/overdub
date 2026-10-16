@@ -60,6 +60,8 @@ struct ui_console_line_s {
   ui_console_log_level_t level;
   char                   timestamp[UI_CONSOLE_TIMESTAMP_CAP];
   float                  row_w;
+  float                  wrap_w; // the width wrap_h was measured at
+  float                  wrap_h;
 };
 
 typedef struct ui_console_drag_state_s ui_console_drag_state_t;
