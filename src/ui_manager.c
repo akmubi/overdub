@@ -920,6 +920,8 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
     return true;
   }
 
+  bool consume = ui_manager_should_consume_input_pre(manager, ev);
+
   if (ui_manager_should_feed_input(manager)) {
     if (manager->input_frame != frame_counter) {
       nk_input_begin(manager->ctx);
@@ -928,10 +930,22 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
     }
 
     feed_input(manager, ev);
-    feed_nav(manager, manager->ctx, ev);
+
+    /* the mods will not see it (a field is being edited): Escape must still leave the field */
+    if (consume) {
+      feed_nav(manager, manager->ctx, ev);
+    }
   }
 
-  return ui_manager_should_consume_input_pre(manager, ev);
+  return consume;
+}
+
+void
+ui_manager_on_input_event_nav(ui_manager_t *manager, input_event_t *ev)
+{
+  if (manager->inited && manager->ctx && ev && ui_manager_should_feed_input(manager) && manager->input_begun) {
+    feed_nav(manager, manager->ctx, ev);
+  }
 }
 
 bool

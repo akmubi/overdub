@@ -306,6 +306,10 @@ on_held_event_send_on(bool replay)
     consumed = mod_manager_dispatch_input(&globals.mod_manager, &held.input);
   }
 
+  if (!consumed && !held.ui_fed) {
+    ui_manager_on_input_event_nav(&globals.ui_manager, &held.input);
+  }
+
   if (!consumed) {
     consumed = ui_manager_on_input_event_post(&globals.ui_manager, &held.input);
   }
@@ -388,6 +392,7 @@ on_input_event(input_event_t *ev)
     if (result == ACTIONS_EVENT_HOLD) {
       /* the UI gets the press now, only mods and the game wait */
       ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev);
+      ui_manager_on_input_event_nav(&globals.ui_manager, ev);
 
       if (g_current_key_event && g_held_count < CONFIG_ACTIONS_MAX_HELD_EVENTS) {
         int slot = (g_held_first + g_held_count) % CONFIG_ACTIONS_MAX_HELD_EVENTS;
@@ -410,6 +415,7 @@ on_input_event(input_event_t *ev)
       /* the UI got the press while it was held back */
       if (ev->kind == INPUT_EVENT_KEY_UP) {
         ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev);
+        ui_manager_on_input_event_nav(&globals.ui_manager, ev);
       }
     }
   }
@@ -429,6 +435,10 @@ on_input_event(input_event_t *ev)
   if (!consumed && globals.engine_inited && mod_manager_dispatch_input(&globals.mod_manager, ev)) {
     consumed = true;
     consumer = "Mods";
+  }
+
+  if (!consumed) {
+    ui_manager_on_input_event_nav(&globals.ui_manager, ev);
   }
 
   if (!consumed && ui_manager_on_input_event_post(&globals.ui_manager, ev)) {

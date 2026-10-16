@@ -77,6 +77,9 @@ void
 ui_manager_note_input_device(ui_manager_t *manager, input_event_t *ev);
 bool
 ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, input_event_t *ev);
+/* after the mods, for the events none of them took */
+void
+ui_manager_on_input_event_nav(ui_manager_t *manager, input_event_t *ev);
 bool
 ui_manager_on_input_event_post(ui_manager_t *manager, input_event_t *ev);
 void

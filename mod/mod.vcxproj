@@ -139,7 +139,7 @@
     <MSBuild Projects="$(OverdubProject)"
              Targets="Build"
              BuildInParallel="false"
-             Properties="Configuration=Debug;Platform=$(Platform)"
+             Properties="Configuration=Debug;Platform=$(Platform);PostBuildEventUseInBuild=false"
              RemoveProperties="OutDir;IntDir;ModName" />
   </Target>
 
