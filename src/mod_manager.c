@@ -20,6 +20,7 @@
 
 #include "lua_mod_runtime.h"
 
+#include <stdlib.h>
 #include <windows.h>
 
 static str_t
@@ -3696,12 +3697,64 @@ mod_manager_dispatch_ufunction_invoke_post(mod_manager_t *manager, ufunc_t *func
   }
 }
 
+#if defined(BUILD_DEBUG)
+/* input <key> down | up | <analog value>: for testing the UI without a device */
+static bool
+mod_manager_command_input(str_t args)
+{
+  str_t key_name = args;
+  str_t action   = STR_LIT("");
+
+  for (uint64_t i = 0; i < args.len; ++i) {
+    if (args.data[i] == ' ') {
+      key_name = str_make(args.data, i);
+      action   = str_make(args.data + i + 1, args.len - i - 1);
+      break;
+    }
+  }
+
+  input_key_kind_t key = input_key_from_str(key_name);
+
+  if (key == INPUT_KEY_NONE) {
+    keybind_t bind = keybind_parse(key_name, KEYBIND_NULL);
+    key            = bind.count > 0 ? bind.keys[0] : INPUT_KEY_NONE;
+  }
+
+  if (key == INPUT_KEY_NONE || str_is_empty(action)) {
+    LOG_ERROR("Usage: input <key> down | up | <analog value>");
+    return true;
+  }
+
+  input_event_t ev = {.key = key};
+
+  if (str_equal(action, STR_LIT("down"), 0)) {
+    ev.kind = INPUT_EVENT_KEY_DOWN;
+  } else if (str_equal(action, STR_LIT("up"), 0)) {
+    ev.kind = INPUT_EVENT_KEY_UP;
+  } else {
+    char value[32] = {0};
+    memcpy(value, action.data, MIN_VAL(action.len, sizeof(value) - 1));
+    ev.kind         = INPUT_EVENT_ANALOG;
+    ev.analog_value = (float)atof(value);
+  }
+
+  input_inject(&ev);
+  return true;
+}
+#endif
+
 bool
 mod_manager_dispatch_command(mod_manager_t *manager, str_t name, str_t args)
 {
   if (!manager || str_is_empty(name)) {
     return false;
   }
+
+#if defined(BUILD_DEBUG)
+  if (str_equal(name, STR_LIT("input"), 0)) {
+    return mod_manager_command_input(args);
+  }
+#endif
 
   bool matched = false;
   for (int i = 0; i < manager->mod_order.count; ++i) {

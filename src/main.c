@@ -131,6 +131,9 @@ on_engine_init(void)
 }
 
 static void
+input_replay_injected(void);
+
+static void
 on_engine_tick_pre(float delta)
 {
   if (!globals.engine_inited) {
@@ -146,6 +149,8 @@ on_engine_tick_pre(float delta)
       globals.fps += (fps - globals.fps) * 0.10f;
     }
   }
+
+  input_replay_injected();
 
   actions_set_hold_ms(&globals.actions, (uint32_t)globals.mod_manager.cfg.gamepad_hold_ms);
   actions_tick(&globals.actions);
@@ -356,6 +361,31 @@ on_action_fired_dispatch(input_event_t *ev)
   if (globals.engine_inited) {
     mod_manager_dispatch_input(&globals.mod_manager, ev);
   }
+}
+
+static bool
+on_input_event(input_event_t *ev);
+
+/* replayed when the engine's input comes, before the tick */
+static input_event_t g_injected[32];
+static int           g_injected_count;
+
+void
+input_inject(input_event_t *ev)
+{
+  if (g_injected_count < (int)COUNTOF(g_injected)) {
+    g_injected[g_injected_count++] = *ev;
+  }
+}
+
+static void
+input_replay_injected(void)
+{
+  for (int i = 0; i < g_injected_count; ++i) {
+    on_input_event(&g_injected[i]);
+  }
+
+  g_injected_count = 0;
 }
 
 static bool
