@@ -10838,6 +10838,12 @@ nk_nav_owner(const struct nk_window *win)
 NK_LIB nk_bool
 nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags)
 {
+  return nk_nav_stop_keyed(ctx, bounds, flags, 0);
+}
+
+NK_LIB nk_bool
+nk_nav_stop_keyed(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags, nk_hash key)
+{
   struct nk_nav      *nav;
   struct nk_window   *win;
   struct nk_panel    *layout;
@@ -10856,14 +10862,17 @@ nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags)
     return nk_false;
   }
 
-  {
+  if (key) {
+    id = nk_murmur_hash(&key, (int)sizeof(key), layout->text_selection_scope);
+  } else {
     int place[2];
 
     place[0] = (flags & NK_NAV_STOP_PANEL) ? -1 : (int)(bounds.x - layout->bounds.x + (float)*layout->offset_x);
     place[1] = (flags & NK_NAV_STOP_PANEL) ? -1 : (int)(bounds.y - layout->bounds.y + (float)*layout->offset_y);
     id       = nk_murmur_hash(place, (int)sizeof(place), layout->text_selection_scope);
-    id       = id ? id : 1;
   }
+
+  id = id ? id : 1;
 
   if (nav->count[nav->current] < NK_NAV_MAX_STOPS) {
     stop         = &nav->stops[nav->current][nav->count[nav->current]++];
@@ -10878,8 +10887,9 @@ nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags)
     stop->flags        = flags;
     stop->bounds       = bounds;
     stop->clip         = layout->clip;
-    stop->scroll_x     = (layout->flags & NK_WINDOW_NO_SCROLLBAR) ? 0 : layout->offset_x;
-    stop->scroll_y     = (layout->flags & NK_WINDOW_NO_SCROLLBAR) ? 0 : layout->offset_y;
+    /* NK_WINDOW_NO_SCROLLBAR is both bits */
+    stop->scroll_x     = (layout->flags & NK_WINDOW_NO_SCROLLBAR_H) ? 0 : layout->offset_x;
+    stop->scroll_y     = (layout->flags & NK_WINDOW_NO_SCROLLBAR_V) ? 0 : layout->offset_y;
     stop->scroll_max_x = layout->prev_max_x;
     stop->scroll_max_y = layout->prev_max_y;
   }
@@ -10891,11 +10901,18 @@ nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags)
   nav->focus_bounds = bounds;
   nav->focus_window = nk_nav_owner(win);
 
-  if (nav->active) {
-    nk_bool active = nav->captured || (flags & NK_NAV_STOP_ACTIVE);
+  if (nav->active && !(flags & NK_NAV_STOP_HIDDEN)) {
+    nk_bool        active = nav->captured || (flags & NK_NAV_STOP_ACTIVE);
+    struct nk_rect old    = win->buffer.clip;
+    struct nk_rect grown  = nk_rect(layout->clip.x - 3, layout->clip.y - 3, layout->clip.w + 6, layout->clip.h + 6);
+    struct nk_rect clip;
 
+    /* the outline is outside the widget: it may go past the panel, not past the window */
+    nk_unify(&clip, &grown, win->bounds.x, win->bounds.y, win->bounds.x + win->bounds.w, win->bounds.y + win->bounds.h);
+    nk_push_scissor(&win->buffer, clip);
     nk_stroke_rect(&win->buffer, nk_rect(bounds.x - 2, bounds.y - 2, bounds.w + 4, bounds.h + 4), 2, 2,
                    active ? ctx->style.nav_active : ctx->style.nav_highlight);
+    nk_push_scissor(&win->buffer, old);
   }
   return nk_true;
 }
@@ -11249,6 +11266,15 @@ nk_nav_update(struct nk_context *ctx)
     nk_osk_input(ctx);
   }
 
+  /* a cancel that nothing used last frame closes the window */
+  if (nav->enabled && nav->cancel && !nav->close_window) {
+    struct nk_window *w = nav->active && nav->focus ? nk_nav_find_window(ctx, nav->focus_window) : ctx->active;
+
+    if (w && (w->flags & (NK_WINDOW_CLOSABLE | NK_WINDOW_CLOSE_BUTTON_HIDES)) && !(w->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED))) {
+      nav->close_window = w->name;
+    }
+  }
+
   if (nav->close_window) {
     struct nk_window *w = nk_nav_find_window(ctx, nav->close_window);
 
@@ -11345,6 +11371,7 @@ nk_nav_update(struct nk_context *ctx)
   }
 
   if (!nav->active) {
+    nav->focus_request = 0;
     return;
   }
 
@@ -11413,6 +11440,30 @@ nk_nav_update(struct nk_context *ctx)
 
       if (focus < 0) {
         focus = nk_nav_first(stops, count, ctx->active->name);
+      }
+
+      key = 0;
+    }
+  }
+
+  /* from nk_window_set_focus, once the window has stops */
+  if (nav->focus_request) {
+    nk_hash want = nav->focus_request;
+    int     first = nk_nav_first(stops, count, want);
+
+    if (first >= 0 || popup || !nk_nav_find_window(ctx, want)) {
+      nav->focus_request = 0;
+    }
+
+    if (first >= 0 && !popup && (focus < 0 || stops[focus].window != want)) {
+      if (focus >= 0) {
+        nk_nav_remember(nav, stops[focus].window, stops[focus].id);
+      }
+
+      focus = nk_nav_index(stops, count, nk_nav_recall(nav, want));
+
+      if (focus < 0) {
+        focus = first;
       }
 
       key = 0;
@@ -11585,8 +11636,13 @@ nk_nav_update(struct nk_context *ctx)
         nav->return_focus = nav->focus;
       }
 
-      focus = nk_nav_first(stops, count, scope);
-      key   = 0;
+      focus = nk_nav_index(stops, count, nk_nav_recall(nav, scope));
+
+      if (focus < 0 || stops[focus].window != scope) {
+        focus = nk_nav_first(stops, count, scope);
+      }
+
+      key = 0;
     }
   }
 
@@ -11710,6 +11766,8 @@ nk_nav_update(struct nk_context *ctx)
         nk_insert_window(ctx, w, NK_INSERT_BACK);
       }
 
+      /* nk_begin clears NK_WINDOW_ROM only on a click */
+      w->flags   &= ~(nk_flags)NK_WINDOW_ROM;
       ctx->active = w;
     }
   }
@@ -11808,6 +11866,23 @@ nk_osk_open(struct nk_context *ctx)
     nav->osk_on_activate = nk_true;
     return nk_true;
   } else {
+    /* the first text field of the focused window */
+    const struct nk_nav_stop *stops  = nav->stops[nav->current];
+    int                       count  = nav->count[nav->current];
+    nk_hash                   window = nav->focus ? nav->focus_window : ctx->active ? ctx->active->name : 0;
+    int                       i;
+
+    for (i = 0; nav->enabled && window && i < count; ++i) {
+      if (stops[i].window == window && (stops[i].flags & NK_NAV_STOP_TEXT) && !(stops[i].flags & NK_NAV_STOP_HIDDEN)) {
+        nav->focus           = stops[i].id;
+        nav->focus_bounds    = stops[i].bounds;
+        nav->focus_flags     = stops[i].flags;
+        nav->active          = nk_true;
+        nav->click_focus     = nk_true;
+        nav->osk_on_activate = nk_true;
+        return nk_true;
+      }
+    }
     return nk_false;
   }
 
@@ -11901,6 +11976,38 @@ nk_osk_type(struct nk_osk_state *osk, nk_rune rune)
   }
 }
 
+/* pressed, then repeated while held */
+NK_INTERN nk_bool
+nk_osk_held(struct nk_context *ctx, enum nk_keys key)
+{
+  struct nk_osk_state   *osk = &ctx->nav.osk;
+  const struct nk_input *in  = &ctx->input;
+  float                  before;
+
+  if (nk_nav_pressed(in, key)) {
+    osk->repeat_key  = (int)key;
+    osk->repeat_time = 0;
+    return nk_true;
+  }
+
+  if (osk->repeat_key != (int)key) {
+    return nk_false;
+  }
+
+  if (!in->keyboard.keys[key].down) {
+    osk->repeat_key = 0;
+    return nk_false;
+  }
+
+  before            = osk->repeat_time;
+  osk->repeat_time += ctx->delta_time_seconds;
+  ctx->animating    = nk_true;
+
+  return osk->repeat_time >= NK_NAV_REPEAT_DELAY &&
+         (before < NK_NAV_REPEAT_DELAY ||
+          (int)((osk->repeat_time - NK_NAV_REPEAT_DELAY) / NK_NAV_REPEAT_RATE) != (int)((before - NK_NAV_REPEAT_DELAY) / NK_NAV_REPEAT_RATE));
+}
+
 NK_INTERN void
 nk_osk_input(struct nk_context *ctx)
 {
@@ -11976,23 +12083,23 @@ nk_osk(struct nk_context *ctx, struct nk_rect bounds)
   osk->seen = nk_false;
 
   /* pad shortcuts */
-  if (nk_nav_pressed(in, NK_KEY_NAV_MENU)) {
+  if (nk_osk_held(ctx, NK_KEY_NAV_MENU)) {
     nk_osk_key(osk, NK_KEY_BACKSPACE);
   }
 
-  if (nk_nav_pressed(in, NK_KEY_NAV_WINDOW_PREV)) {
+  if (nk_osk_held(ctx, NK_KEY_NAV_WINDOW_PREV)) {
     nk_osk_key(osk, NK_KEY_LEFT);
   }
 
-  if (nk_nav_pressed(in, NK_KEY_NAV_WINDOW_NEXT)) {
+  if (nk_osk_held(ctx, NK_KEY_NAV_WINDOW_NEXT)) {
     nk_osk_key(osk, NK_KEY_RIGHT);
   }
 
-  if (nk_nav_pressed(in, NK_KEY_NAV_WORD_PREV)) {
+  if (nk_osk_held(ctx, NK_KEY_NAV_WORD_PREV)) {
     nk_osk_key(osk, NK_KEY_TEXT_WORD_LEFT);
   }
 
-  if (nk_nav_pressed(in, NK_KEY_NAV_WORD_NEXT)) {
+  if (nk_osk_held(ctx, NK_KEY_NAV_WORD_NEXT)) {
     nk_osk_key(osk, NK_KEY_TEXT_WORD_RIGHT);
   }
 
@@ -15979,6 +16086,10 @@ nk_window_set_focus(struct nk_context *ctx, const char *name)
   if (win && ctx->end != win) {
     nk_remove_window(ctx, win);
     nk_insert_window(ctx, win, NK_INSERT_BACK);
+  }
+
+  if (win) {
+    ctx->nav.focus_request = win->name;
   }
 
   ctx->active = win;
@@ -27234,7 +27345,13 @@ nk_edit_buffer(struct nk_context *ctx, nk_flags flags, struct nk_text_edit *edit
     ctx->nav.hold      = nk_false;
     nk_osk_preview(&ctx->nav.osk, edit, bounds.w);
   } else if ((ret_flags & NK_EDIT_ACTIVATED) && ctx->nav.active && !(flags & NK_EDIT_READ_ONLY)) {
-    nk_textedit_select_all(edit);
+    /* typing replaces a number but adds to text */
+    if (filter == nk_filter_decimal || filter == nk_filter_float) {
+      nk_textedit_select_all(edit);
+    } else {
+      edit->select_start = edit->select_end = edit->string.len;
+    }
+
     edit->cursor = edit->string.len;
 
     if (filter == nk_filter_decimal || filter == nk_filter_float) {

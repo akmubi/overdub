@@ -51,7 +51,7 @@ A shortcut has a keyboard part and a gamepad part, written as `F1 | Select+RS`. 
 
 The game uses every gamepad button, so a gamepad shortcut waits for its first button: press `Select` before `RS`. A combination works as soon as all of its buttons are down. A single button works when held for the hold time set in Settings, and a shorter press still reaches the game.
 
-To change a shortcut, open its dialog, press the new keys or buttons, and release the buttons to apply them. Holding `B` alone cancels the dialog. The dialog warns when the keys are already used by another shortcut.
+To change a shortcut, open its dialog: opened with the gamepad it sets the gamepad part, otherwise the keyboard part. Choose Capture, press the new keys or buttons together and release them, then Apply. Clear empties the part, and Cancel (or `B`, `Escape`) keeps the shortcut as it was. The dialog warns when the keys are already used by another shortcut.
 
 ## Keyboard and gamepad navigation
 

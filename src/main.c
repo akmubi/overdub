@@ -274,6 +274,7 @@ struct held_key_event_s {
   void         *self;
   fkey_event_t  key_event;
   input_event_t input;
+  bool          ui_fed;
 };
 
 static held_key_event_t g_held_events[CONFIG_ACTIONS_MAX_HELD_EVENTS];
@@ -299,14 +300,21 @@ on_held_event_send_on(bool replay)
     return;
   }
 
-  globals.consumed_down[held.input.key] = false;
+  bool consumed = !held.ui_fed && ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, &held.input);
 
-  if (globals.engine_inited && mod_manager_dispatch_input(&globals.mod_manager, &held.input)) {
-    globals.consumed_down[held.input.key] = true;
-    return;
+  if (!consumed && globals.engine_inited) {
+    consumed = mod_manager_dispatch_input(&globals.mod_manager, &held.input);
   }
 
-  process_key_down_event_real(held.self, held.key_event);
+  if (!consumed) {
+    consumed = ui_manager_on_input_event_post(&globals.ui_manager, &held.input);
+  }
+
+  globals.consumed_down[held.input.key] = consumed;
+
+  if (!consumed) {
+    process_key_down_event_real(held.self, held.key_event);
+  }
 }
 
 static void
@@ -415,10 +423,15 @@ on_input_event(input_event_t *ev)
   bool        consumed = false;
   const char *consumer = "Engine";
 
+  ui_manager_note_input_device(&globals.ui_manager, ev);
+
   if (!ui_manager_keybind_capture_is_open(&globals.ui_manager)) {
     actions_event_result_t result = actions_on_input_event(&globals.actions, ev);
 
     if (result == ACTIONS_EVENT_HOLD) {
+      /* the UI gets the press now, only mods and the game wait */
+      ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev);
+
       if (g_current_key_event && g_held_count < CONFIG_ACTIONS_MAX_HELD_EVENTS) {
         int slot = (g_held_first + g_held_count) % CONFIG_ACTIONS_MAX_HELD_EVENTS;
 
@@ -426,6 +439,7 @@ on_input_event(input_event_t *ev)
           .self      = g_current_self,
           .key_event = *g_current_key_event,
           .input     = *ev,
+          .ui_fed    = true,
         };
         g_held_count += 1;
       }
@@ -435,6 +449,11 @@ on_input_event(input_event_t *ev)
     } else if (result == ACTIONS_EVENT_CONSUME) {
       consumed = true;
       consumer = "Actions";
+
+      /* the UI got the press while it was held back */
+      if (ev->kind == INPUT_EVENT_KEY_UP) {
+        ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev);
+      }
     }
   }
 

@@ -183,6 +183,7 @@ struct ui_nk_item_s {
   enum nk_widget_layout_states layout_state;
   struct nk_input             *in;
   nk_flags                     widget_state;
+  bool                         nav;
 };
 bool
 ui_nk_item_begin(struct nk_context *ctx, ui_nk_item_t *item);

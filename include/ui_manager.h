@@ -13,7 +13,6 @@
 typedef struct ui_manager_s ui_manager_t;
 struct ui_manager_s {
   struct nk_context *ctx;
-  struct nk_color    color_table[NK_COLOR_COUNT];
 
   bool inited;
 
@@ -21,11 +20,15 @@ struct ui_manager_s {
   uint64_t input_frame;
 
   uint32_t mouse_button_mask;
+  bool     mouse_seen;
+  int      mouse_x;
+  int      mouse_y;
   bool     block_keyboard_when_open;
   bool     block_gamepad_when_open;
 
   bool  gamepad_input; // last input was from a gamepad
   bool  input_fed;
+  bool  nav_down[INPUT_KEY_MAX];
   float right_x;
   float right_y;
 
@@ -68,6 +71,8 @@ ui_manager_main_is_open(ui_manager_t *manager);
 bool
 ui_manager_keybind_capture_is_open(ui_manager_t *manager);
 
+void
+ui_manager_note_input_device(ui_manager_t *manager, input_event_t *ev);
 bool
 ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, input_event_t *ev);
 bool

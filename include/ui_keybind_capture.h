@@ -8,17 +8,16 @@
 
 typedef struct ui_keybind_capture_s ui_keybind_capture_t;
 struct ui_keybind_capture_s {
-  bool     active; // currently capturing
+  bool     active;    // the dialog is open
+  bool     gamepad;   // sets the gamepad part, otherwise the keyboard one
+  bool     capturing;
   bool     combo_active;
   uint64_t owner;
 
   keybind_t  original;
-  keybind_t  live;
-  keybind_t  pending;
+  keybind_t  pending;   // the part being set
   keybind_t  pad_order; // in the order pressed: the first one leads
   keybind_t *target;
-  uint64_t   pad_since_us;
-  bool       pad_pressed;
 
   bool      result_ready;
   bool      result_accepted;

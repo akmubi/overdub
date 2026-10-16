@@ -111,6 +111,7 @@ struct ui_console_s {
 
   ui_console_drag_state_t drag;
   bool                    focus_input;
+  bool                    gamepad_input;
   bool                    inited;
   bool                    closed;
 };

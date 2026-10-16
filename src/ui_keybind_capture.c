@@ -94,72 +94,62 @@ ui_keybind_collect_current_down(keybind_t *out)
   }
 }
 
-static void
-ui_keybind_capture_sync_from_state(ui_keybind_capture_t *cap)
-{
-  keybind_t live = KEYBIND_NULL;
-  if (!ui_keybind_capture_is_open(cap)) {
-    return;
-  }
-
-  ui_keybind_collect_current_down(&live);
-
-  {
-    keybind_t pad   = keybind_gamepad_part(live);
-    keybind_t order = KEYBIND_NULL;
-
-    for (int i = 0; i < cap->pad_order.count; ++i) {
-      if (ui_keybind_has_key(&pad, cap->pad_order.keys[i])) {
-        ui_keybind_push_key(&order, cap->pad_order.keys[i]);
-      }
-    }
-
-    for (int i = 0; i < pad.count; ++i) {
-      ui_keybind_push_key(&order, pad.keys[i]);
-    }
-
-    cap->pad_order = order;
-    live           = keybind_merge(live, order);
-  }
-
-  cap->live = live;
-
-  if (keybind_is_valid(live)) {
-    keybind_t keyboard = keybind_keyboard_part(live);
-    keybind_t gamepad  = keybind_gamepad_part(live);
-    keybind_t was_kb   = keybind_keyboard_part(cap->pending);
-    keybind_t was_pad  = keybind_gamepad_part(cap->pending);
-
-    /* keys let go: the part stays */
-    if (keyboard.count > 0 && (!cap->combo_active || keyboard.count >= was_kb.count)) {
-      was_kb = keyboard;
-    }
-
-    if (gamepad.count > 0 && (!cap->combo_active || gamepad.count >= was_pad.count)) {
-      was_pad = gamepad;
-    }
-
-    cap->combo_active = true;
-    cap->pending      = keybind_merge(was_kb, was_pad);
-    } else {
-    cap->combo_active = false;
-  }
-}
-
 bool
 ui_keybind_capture_is_open(ui_keybind_capture_t *cap)
 {
   return cap && cap->active;
 }
 
+/* releasing all keys ends the capture */
 static void
-ui_keybind_capture_clear_part(ui_keybind_capture_t *cap, bool gamepad)
+ui_keybind_capture_sync_from_state(ui_keybind_capture_t *cap)
 {
-  keybind_t keyboard = gamepad ? keybind_keyboard_part(cap->pending) : KEYBIND_NULL;
-  keybind_t pad      = gamepad ? KEYBIND_NULL : keybind_gamepad_part(cap->pending);
-  cap->combo_active  = false;
-  cap->live          = KEYBIND_NULL;
-  cap->pending       = keybind_merge(keyboard, pad);
+  keybind_t live = KEYBIND_NULL;
+
+  if (!ui_keybind_capture_is_open(cap) || !cap->capturing) {
+    return;
+  }
+
+  ui_keybind_collect_current_down(&live);
+
+  keybind_t part = cap->gamepad ? keybind_gamepad_part(live) : keybind_keyboard_part(live);
+
+  if (cap->gamepad) {
+    keybind_t order = KEYBIND_NULL;
+
+    for (int i = 0; i < cap->pad_order.count; ++i) {
+      if (ui_keybind_has_key(&part, cap->pad_order.keys[i])) {
+        ui_keybind_push_key(&order, cap->pad_order.keys[i]);
+      }
+    }
+
+    for (int i = 0; i < part.count; ++i) {
+      ui_keybind_push_key(&order, part.keys[i]);
+    }
+
+    cap->pad_order = order;
+    part           = order;
+  }
+
+  if (part.count > 0) {
+    /* releasing some keys keeps the combo */
+    if (!cap->combo_active || part.count >= cap->pending.count) {
+      cap->pending = part;
+    }
+
+    cap->combo_active = true;
+  } else if (cap->combo_active) {
+    cap->combo_active = false;
+    cap->capturing    = false;
+    cap->pad_order    = KEYBIND_NULL;
+  }
+}
+
+static keybind_t
+ui_keybind_capture_result(ui_keybind_capture_t *cap)
+{
+  return cap->gamepad ? keybind_merge(keybind_keyboard_part(cap->original), cap->pending)
+                      : keybind_merge(cap->pending, keybind_gamepad_part(cap->original));
 }
 
 static void
@@ -168,53 +158,56 @@ ui_keybind_capture_finish(ui_keybind_capture_t *cap, bool accepted)
   cap->result_ready    = true;
   cap->result_accepted = accepted;
   cap->result_hash     = cap->owner;
-  cap->result          = cap->pending;
+  cap->result          = ui_keybind_capture_result(cap);
 
   cap->active       = false;
+  cap->capturing    = false;
   cap->combo_active = false;
   cap->owner        = 0;
   cap->original     = KEYBIND_NULL;
-  cap->live         = KEYBIND_NULL;
   cap->pending      = KEYBIND_NULL;
   cap->pad_order    = KEYBIND_NULL;
   cap->target       = NULL;
-  cap->pad_pressed  = false;
+}
+
+static void
+ui_keybind_capture_start(ui_keybind_capture_t *cap, uint64_t owner, keybind_t *bind)
+{
+  /* sets the part of the device that opened the dialog */
+  cap->gamepad      = globals.ui_manager.gamepad_input;
+  cap->active       = true;
+  cap->capturing    = false;
+  cap->combo_active = false;
+  cap->owner        = owner;
+  cap->original     = *bind;
+  cap->pending      = cap->gamepad ? keybind_gamepad_part(*bind) : keybind_keyboard_part(*bind);
+  cap->pad_order    = KEYBIND_NULL;
+  cap->target       = bind;
 }
 
 static bool
-ui_keybind_any_gamepad_down(void)
+ui_keybind_capture_event_is_part(ui_keybind_capture_t *cap, input_event_t *ev)
 {
-  for (input_key_kind_t key = INPUT_KEY_GAMEPAD_FACE_BOTTOM; key <= INPUT_KEY_GAMEPAD_DPAD_RIGHT; ++key) {
-    if (input_key_is_down(key)) {
-      return true;
-    }
+  if (cap->gamepad) {
+    return input_key_is_gamepad(ev->key);
+  }
+
+  switch (ev->kind) {
+  case INPUT_EVENT_KEY_DOWN:
+  case INPUT_EVENT_KEY_UP:
+  case INPUT_EVENT_KEY_CHAR:
+    return !input_key_is_gamepad(ev->key);
+
+  case INPUT_EVENT_MOUSE_DOWN:
+  case INPUT_EVENT_MOUSE_UP:
+  case INPUT_EVENT_MOUSE_DBLCLICK:
+    /* the left button stays the UI's */
+    return ev->key != INPUT_KEY_MOUSE_LEFT;
   }
   return false;
 }
 
-/* the dialog takes all gamepad input: releasing the buttons applies them */
-static void
-ui_keybind_capture_gamepad_released(ui_keybind_capture_t *cap)
-{
-  if (keybind_gamepad_part(cap->pending).count > 0) {
-    ui_keybind_capture_finish(cap, true);
-  }
-}
-
-/* holding B alone cancels: 0..1 */
-static float
-ui_keybind_capture_cancel_progress(ui_keybind_capture_t *cap)
-{
-  keybind_t pad = keybind_gamepad_part(cap->live);
-
-  if (pad.count != 1 || pad.keys[0] != INPUT_KEY_GAMEPAD_FACE_RIGHT) {
-    return 0.0f;
-  }
-
-  float cancel_us = (float)globals.mod_manager.cfg.gamepad_cancel_ms * 1000.0f;
-  return NK_CLAMP(0.0f, (float)(time_now_us() - cap->pad_since_us) / cancel_us, 1.0f);
-}
-
+/* false: the dialog gets the event like any window */
 bool
 ui_keybind_capture_input(ui_keybind_capture_t *cap, input_event_t *ev)
 {
@@ -222,81 +215,29 @@ ui_keybind_capture_input(ui_keybind_capture_t *cap, input_event_t *ev)
     return false;
   }
 
-  if (input_key_is_gamepad(ev->key) && (ev->kind == INPUT_EVENT_KEY_DOWN || ev->kind == INPUT_EVENT_KEY_UP) && !ev->is_repeat) {
-    if (ev->kind == INPUT_EVENT_KEY_DOWN) {
-      int down = 0;
+  if (ev->kind == INPUT_EVENT_APP_ACTIVATION && !ev->app_activated) {
+    cap->capturing    = false;
+    cap->combo_active = false;
+    return false;
+  }
 
-      for (input_key_kind_t key = INPUT_KEY_GAMEPAD_FACE_BOTTOM; key <= INPUT_KEY_GAMEPAD_DPAD_RIGHT; ++key) {
-        down += input_key_is_down(key);
-      }
+  if (!cap->capturing || !ui_keybind_capture_event_is_part(cap, ev)) {
+    return false;
+  }
 
-      if (down <= 1) {
-        cap->pad_since_us = time_now_us();
-      }
-
-      cap->pad_pressed = true;
-    }
-
+  if (ev->kind != INPUT_EVENT_ANALOG && ev->kind != INPUT_EVENT_KEY_CHAR && !ev->is_repeat) {
     ui_keybind_capture_sync_from_state(cap);
-
-    /* not the release of the button that opened the dialog */
-    if (ev->kind == INPUT_EVENT_KEY_UP && cap->pad_pressed && !ui_keybind_any_gamepad_down()) {
-      ui_keybind_capture_gamepad_released(cap);
-    }
-    return true;
   }
-
-  bool should_consume = true;
-  switch (ev->kind) {
-  case INPUT_EVENT_KEY_DOWN: {
-    if (ev->is_repeat) {
-      break;
-    }
-
-    ui_keybind_capture_sync_from_state(cap);
-    break;
-  }
-
-  case INPUT_EVENT_KEY_UP:
-  case INPUT_EVENT_MOUSE_DOWN:
-  case INPUT_EVENT_MOUSE_UP:
-  case INPUT_EVENT_MOUSE_DBLCLICK:
-  case INPUT_EVENT_MOUSE_WHEEL: {
-    ui_keybind_capture_sync_from_state(cap);
-    if (ev->key == INPUT_KEY_MOUSE_LEFT) {
-      should_consume = false;
-    }
-    break;
-  }
-
-  case INPUT_EVENT_MOUSE_MOVE: {
-    should_consume = false;
-    break;
-  }
-
-  case INPUT_EVENT_APP_ACTIVATION: {
-    if (!ev->app_activated) {
-      ui_keybind_capture_finish(cap, false);
-      break;
-    }
-
-    ui_keybind_capture_sync_from_state(cap);
-    break;
-  }
-  }
-
-  return should_consume;
+  return true;
 }
 
 str_t
 ui_keybind_capture_display_text(ui_keybind_capture_t *cap, arena_t *arena)
 {
-  if (keybind_is_valid(cap->pending)) {
-    return keybind_to_str(cap->pending, arena);
-  }
+  keybind_t result = ui_keybind_capture_result(cap);
 
-  if (keybind_is_valid(cap->live)) {
-    return keybind_to_str(cap->live, arena);
+  if (keybind_is_valid(result)) {
+    return keybind_to_str(result, arena);
   }
 
   return STR_LIT("<unassigned>");
@@ -344,47 +285,19 @@ ui_keybind_capture(ui_keybind_capture_t *cap, struct nk_context *ctx, str_t name
   ctx->style.button.active       = ctx->style.property.active;
   ctx->style.button.border_color = ctx->style.property.border_color;
 
-  if (cap->active && cap->owner == hash) {
-    if (keybind_is_valid(cap->pending)) {
-      tmp_arena_t tmp = scratch_begin(NULL);
-      {
-        str_t s = keybind_to_str(cap->pending, tmp.arena);
-        ui_button_str(ctx, s);
-      }
-      scratch_end(tmp);
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    if (cap->active && cap->owner == hash) {
+      ui_button_str(ctx, ui_keybind_capture_display_text(cap, tmp.arena));
     } else {
-      ui_button_str(ctx, STR_LIT("<empty>"));
-    }
-  } else {
-    if (keybind_is_valid(*bind)) {
-      tmp_arena_t tmp = scratch_begin(NULL);
-      {
-        str_t s = keybind_to_str(*bind, tmp.arena);
-        if (ui_button_str(ctx, s)) {
-          cap->active       = true;
-          cap->combo_active = false;
-          cap->owner        = hash;
-          cap->original     = *bind;
-          cap->live         = KEYBIND_NULL;
-          cap->pending      = *bind;
-          cap->pad_order    = KEYBIND_NULL;
-          cap->target       = bind;
-                }
+      str_t s = keybind_is_valid(*bind) ? keybind_to_str(*bind, tmp.arena) : STR_LIT("<unassigned>");
+
+      if (ui_button_str(ctx, s)) {
+        ui_keybind_capture_start(cap, hash, bind);
       }
-      scratch_end(tmp);
-    } else {
-      if (ui_button_str(ctx, STR_LIT("<unassigned>"))) {
-        cap->active       = true;
-        cap->combo_active = false;
-        cap->owner        = hash;
-        cap->original     = *bind;
-        cap->live         = KEYBIND_NULL;
-        cap->pending      = KEYBIND_NULL;
-        cap->pad_order    = KEYBIND_NULL;
-        cap->target       = bind;
-            }
     }
   }
+  scratch_end(tmp);
 
   ctx->style.button = saved_btn;
   return false;
@@ -426,54 +339,39 @@ ui_keybind_capture_draw(ui_keybind_capture_t *cap, struct nk_context *ctx, unsig
     return;
   }
 
-  nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE;
-  const char *name = "Set shortcut";
+  nk_flags    flags = NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE;
+  const char *name  = "keybind_capture";
+  const char *title = cap->gamepad ? "Set gamepad shortcut" : "Set keyboard shortcut";
 
-  struct nk_rect rect = centered_window_rect(520.0f, 260.0f, vw, vh);
-  rect                = clamp_window_rect(rect, 380.0f, 240.0f, 520.0f, 260.0f, vw, vh);
+  struct nk_rect rect = centered_window_rect(460.0f, 190.0f, vw, vh);
+  rect                = clamp_window_rect(rect, 380.0f, 190.0f, 460.0f, 190.0f, vw, vh);
 
   tmp_arena_t tmp = scratch_begin(NULL);
-  if (nk_begin(ctx, name, rect, flags)) {
-    keybind_t keyboard = keybind_keyboard_part(cap->pending);
-    keybind_t gamepad  = keybind_gamepad_part(cap->pending);
-    str_t     kb_text  = keyboard.count ? keybind_to_str(keyboard, tmp.arena) : STR_LIT("-");
-    str_t     pad_text = gamepad.count  ? keybind_to_str(gamepad, tmp.arena) : STR_LIT("-");
-    float     cancel   = ui_keybind_capture_cancel_progress(cap);
-    str_t     hint     = str_push_fmt(tmp.arena, "Press keys or gamepad buttons, the first gamepad button leads. A gamepad combo works at once, a single button when held for %u ms. "
-                                                 "Gamepad: release the buttons to apply, hold B alone to cancel.",
-                                      actions_get_hold_ms(&globals.actions));
+  if (nk_begin_titled(ctx, name, title, rect, flags)) {
+    str_t text = cap->pending.count ? keybind_to_str(cap->pending, tmp.arena) : STR_LIT("<none>");
 
-    nk_layout_row_template_begin(ctx, 26.0f);
-    nk_layout_row_template_push_static(ctx, 90.0f);
-    nk_layout_row_template_push_dynamic(ctx);
-    nk_layout_row_template_end(ctx);
-    nk_label(ctx, "Keyboard:", NK_TEXT_LEFT);
-    nk_label_colored(ctx, (const char *)kb_text.data, NK_TEXT_LEFT, UI_C_TEXT);
-    nk_label(ctx, "Gamepad:", NK_TEXT_LEFT);
-    nk_label_colored(ctx, (const char *)pad_text.data, NK_TEXT_LEFT, UI_C_TEXT);
-
-    nk_layout_row_dynamic(ctx, 56.0f, 1);
-    nk_label_colored_wrap(ctx, (const char *)hint.data, UI_C_TEXT_DIM);
-    nk_layout_row_dynamic(ctx, 22.0f, 1);
-
-    action_t *other = mod_keybind_find_conflict(&globals.mod_manager, &globals.actions, cap->pending, cap->target);
-
-    if (cancel > 0.0f) {
-      nk_size progress = (nk_size)(cancel * 100.0f);
-
-      nk_layout_row_template_begin(ctx, 22.0f);
-      nk_layout_row_template_push_static(ctx, 90.0f);
-      nk_layout_row_template_push_dynamic(ctx);
-      nk_layout_row_template_end(ctx);
-      nk_label_colored(ctx, "Cancelling", NK_TEXT_LEFT, UI_C_TEXT_DIM);
-      nk_progress(ctx, &progress, 100, nk_false);
-    } else if (other) {
-      str_t warning = str_push_fmt(tmp.arena, "Also used by '%.*s' (%.*s)", STR_ARG(other->label), STR_ARG(other->source));
-
-      nk_text_colored(ctx, (const char *)warning.data, (int)warning.len, NK_TEXT_LEFT, UI_C_GOLD);
-    } else {
-      nk_spacing(ctx, 1);
+    if (cap->capturing && !cap->combo_active) {
+      text = cap->gamepad ? STR_LIT("Press buttons...") : STR_LIT("Press keys...");
     }
+
+    nk_layout_row_dynamic(ctx, 44.0f, 1);
+    nk_label_colored(ctx, (const char *)text.data, NK_TEXT_CENTERED, UI_C_TEXT);
+
+    action_t *other = cap->capturing ? NULL : mod_keybind_find_conflict(&globals.mod_manager, &globals.actions, ui_keybind_capture_result(cap), cap->target);
+    str_t     status;
+
+    if (other) {
+      status = str_push_fmt(tmp.arena, "Also used by '%.*s' (%.*s)", STR_ARG(other->label), STR_ARG(other->source));
+    } else if (cap->capturing) {
+      status = cap->gamepad ? STR_LIT("The first button leads; release them all to finish") : STR_LIT("Release them all to finish");
+    } else if (cap->gamepad) {
+      status = str_push_fmt(tmp.arena, "A combo works at once, a single button when held for %u ms", actions_get_hold_ms(&globals.actions));
+    } else {
+      status = STR_LIT("");
+    }
+
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label_colored(ctx, (const char *)status.data, NK_TEXT_CENTERED, other ? UI_C_GOLD : UI_C_TEXT_DIM);
 
     nk_layout_row_dynamic(ctx, 32.0f, 4);
 
@@ -481,12 +379,23 @@ ui_keybind_capture_draw(ui_keybind_capture_t *cap, struct nk_context *ctx, unsig
       ui_keybind_capture_finish(cap, true);
     }
 
-    if (ui_button_str(ctx, STR_LIT("Clear keys"))) {
-      ui_keybind_capture_clear_part(cap, false);
+    /* starts on release, so that press is not captured */
+    if (cap->capturing) {
+      nk_widget_disable_begin(ctx);
     }
 
-    if (ui_button_str(ctx, STR_LIT("Clear gamepad"))) {
-      ui_keybind_capture_clear_part(cap, true);
+    if (ui_button_str(ctx, cap->capturing ? STR_LIT("Capturing") : STR_LIT("Capture"))) {
+      cap->capturing    = true;
+      cap->combo_active = false;
+      cap->pad_order    = KEYBIND_NULL;
+    }
+
+    if (cap->capturing) {
+      nk_widget_disable_end(ctx);
+    }
+
+    if (ui_button_str(ctx, STR_LIT("Clear"))) {
+      cap->pending = KEYBIND_NULL;
     }
 
     if (ui_button_str(ctx, STR_LIT("Cancel"))) {
@@ -496,7 +405,11 @@ ui_keybind_capture_draw(ui_keybind_capture_t *cap, struct nk_context *ctx, unsig
   nk_end(ctx);
   scratch_end(tmp);
 
-  if (nk_window_is_closed(ctx, name) || ui_keybind_capture_cancel_progress(cap) >= 1.0f) {
+  if (!ui_keybind_capture_is_open(cap)) {
+    return;
+  }
+
+  if (nk_window_is_closed(ctx, name)) {
     ui_keybind_capture_finish(cap, false);
   } else {
     nk_window_set_focus(ctx, name);

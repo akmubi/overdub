@@ -759,7 +759,10 @@ ui_console_draw_cmd_widget(ui_console_t *console, mod_manager_t *mod_manager, st
   }
 
   if (console->focus_input || nk_window_is_active(ctx, CONFIG_UI_CONSOLE_WINDOW_NAME)) {
-    nk_edit_focus(ctx, NK_EDIT_ALWAYS_INSERT_MODE);
+    /* with a gamepad, Y activates the field instead */
+    if (!console->gamepad_input) {
+      nk_edit_focus(ctx, NK_EDIT_ALWAYS_INSERT_MODE);
+    }
     console->focus_input = false;
   }
 
@@ -997,6 +1000,10 @@ ui_console_draw(ui_console_t *console, struct nk_context *ctx, mod_manager_t *mo
 
   struct nk_rect bounds = nk_rect(console_x, console_y, console_w, console_h);
   if (nk_begin(ctx, CONFIG_UI_CONSOLE_WINDOW_NAME, bounds, flags)) {
+    if (console->focus_input) {
+      nk_window_set_focus(ctx, CONFIG_UI_CONSOLE_WINDOW_NAME);
+    }
+
     struct nk_rect content = nk_window_get_content_region(ctx);
 
     float pad_y = ctx->style.window.padding.y;
