@@ -11242,6 +11242,7 @@ nk_nav_update(struct nk_context *ctx)
   nk_bool                   deferred = nk_false;
   nk_bool                   maximize = nk_false;
   nk_bool                   click    = nk_true;
+  nk_bool                   moved    = nk_false;
   int                       focus;
   nk_hash                   scope = 0;
   int                       i;
@@ -11467,7 +11468,8 @@ nk_nav_update(struct nk_context *ctx)
         focus = first;
       }
 
-      key = 0;
+      key   = 0;
+      moved = nk_true;
     }
   }
 
@@ -11752,8 +11754,8 @@ nk_nav_update(struct nk_context *ctx)
     return;
   }
 
-  /* the focused window is raised when the navigation is used, not every frame: another window may be active meanwhile */
-  nk_bool raise_window = started || stops[focus].id != nav->focus || key || cycle || tab || towards || nk_nav_pressed(in, NK_KEY_NAV_ACTIVATE);
+  /* the focused window is raised when the navigation is used, not when its focus only moved with the layout: another window may be active meanwhile */
+  nk_bool raise_window = started || moved || key || cycle || tab || towards || nk_nav_pressed(in, NK_KEY_NAV_ACTIVATE);
 
   if (stops[focus].id != nav->focus) {
     nav->focus        = stops[focus].id;

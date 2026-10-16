@@ -518,7 +518,8 @@ feed_nav(ui_manager_t *manager, struct nk_context *ctx, input_event_t *ev)
     return;
   }
 
-  if (ev->kind != INPUT_EVENT_KEY_DOWN && ev->kind != INPUT_EVENT_KEY_UP) {
+  /* the stick directions the engine also sends as buttons have no key: they are not the keyboard */
+  if ((ev->kind != INPUT_EVENT_KEY_DOWN && ev->kind != INPUT_EVENT_KEY_UP) || ev->key == INPUT_KEY_NONE) {
     return;
   }
 
@@ -875,7 +876,10 @@ ui_manager_note_input_device(ui_manager_t *manager, input_event_t *ev)
     }
 
     case INPUT_EVENT_KEY_DOWN: {
-      manager->gamepad_input = input_key_is_gamepad(ev->key);
+      /* not the stick directions the engine also sends as buttons, which have no key here */
+      if (ev->key != INPUT_KEY_NONE) {
+        manager->gamepad_input = input_key_is_gamepad(ev->key);
+      }
       break;
     }
 

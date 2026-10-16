@@ -266,6 +266,9 @@ MOD_API str_t
 input_key_to_str(input_key_kind_t key);
 fname_t
 input_key_to_fname(input_key_kind_t key);
+/* debug builds: handled as if the engine sent it, but never passed to the game */
+void
+input_inject(input_event_t *ev);
 MOD_API str_t
 input_event_kind_to_str(input_event_kind_t kind);
 

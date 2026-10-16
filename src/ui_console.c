@@ -832,8 +832,15 @@ ui_console_draw_cmd_widget(ui_console_t *console, mod_manager_t *mod_manager, st
     /* with a gamepad, Y activates the field instead */
     if (!console->gamepad_input) {
       nk_edit_focus(ctx, NK_EDIT_ALWAYS_INSERT_MODE);
+      console->input_auto_focused = true;
     }
     console->focus_input = false;
+  }
+
+  /* the field the console focused itself lets the gamepad go, so the right stick scrolls the log */
+  if (console->gamepad_input && console->input_auto_focused) {
+    nk_edit_unfocus(ctx);
+    console->input_auto_focused = false;
   }
 
   int   input_len = (int)console->input.len;
@@ -959,12 +966,23 @@ ui_console_is_open(ui_console_t *console)
 }
 
 static void
-ui_console_draw_handle(ui_console_t *console, struct nk_context *ctx)
+ui_console_draw_handle(ui_console_t *console, struct nk_context *ctx, float viewport_h)
 {
   struct nk_rect               r  = {0};
   enum nk_widget_layout_states ws = nk_widget(&r, ctx);
   if (ws == NK_WIDGET_INVALID) {
     return;
+  }
+
+  /* navigation: activate, then up and down resize; keyed because resizing moves it */
+  nk_hash key = nk_murmur_hash(&console, (int)sizeof(console), NK_FLAG(29));
+
+  if (nk_nav_stop_keyed(ctx, r, NK_NAV_STOP_ADJUST | NK_NAV_STOP_NO_CLICK, key) && ctx->nav.adjust) {
+    float step = 16.0f * (float)ctx->nav.adjust / NK_MAX(viewport_h, 1.0f);
+
+    /* adjust is positive for up: the handle moves up */
+    console->drag.height_ratio += console->cfg.position == UI_CONSOLE_POSITION_BOTTOM ? step : -step;
+    console->drag.height_ratio  = NK_CLAMP(CONFIG_NK_CONSOLE_MIN_HEIGHT / NK_MAX(viewport_h, 1.0f), console->drag.height_ratio, 1.0f);
   }
 
   struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
@@ -1117,7 +1135,7 @@ ui_console_draw(ui_console_t *console, struct nk_context *ctx, mod_manager_t *mo
       ui_console_update_handle(console, ctx, vh, console_y, console_h, handle_r_screen);
 
       nk_layout_space_push(ctx, handle_r);
-      ui_console_draw_handle(console, ctx);
+      ui_console_draw_handle(console, ctx, vh);
 
       nk_layout_space_push(ctx, log_r);
       bool log_selection_active = ui_console_draw_log_widget(console, ctx);
