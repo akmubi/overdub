@@ -31,7 +31,6 @@ static HCURSOR           g_arrow_cursor     = NULL;
 
 static volatile LONG g_cursor_restore_requested = 0;
 static volatile LONG g_ui_cursor_forced_visible = 0;
-static volatile LONG g_input_on_gamepad         = 0;
 
 static HCURSOR WINAPI
 set_cursor_hook(HCURSOR cursor)
@@ -151,7 +150,8 @@ on_engine_tick_pre(float delta)
 
   ui_manager_on_frame_begin(&globals.ui_manager, globals.frame_counter, delta);
 
-  if (ui_manager_should_show_cursor(&globals.ui_manager) && !InterlockedCompareExchange(&g_input_on_gamepad, 0, 0)) {
+  /* no cursor while the player is on the controller */
+  if (ui_manager_should_show_cursor(&globals.ui_manager) && !globals.ui_manager.gamepad_input) {
     InterlockedExchange(&g_ui_cursor_forced_visible, 1);
     InterlockedExchange(&g_cursor_restore_requested, 1);
   } else {
@@ -325,53 +325,10 @@ on_action_fired_dispatch(input_event_t *ev)
   }
 }
 
-/* an open window shows the cursor only while the controller is not in use */
-static void
-input_note_device(input_event_t *ev)
-{
-  static float last_x, last_y;
-
-  switch (ev->kind) {
-    case INPUT_EVENT_MOUSE_MOVE: {
-      // the engine also reports moves that did not move
-      float dx = (float)ev->client_x - last_x;
-      float dy = (float)ev->client_y - last_y;
-
-      if (dx * dx + dy * dy >= 9.0f) {
-        last_x = (float)ev->client_x;
-        last_y = (float)ev->client_y;
-        InterlockedExchange(&g_input_on_gamepad, 0);
-      }
-      break;
-    }
-
-    case INPUT_EVENT_MOUSE_DOWN:
-    case INPUT_EVENT_MOUSE_DBLCLICK:
-    case INPUT_EVENT_MOUSE_WHEEL:
-      InterlockedExchange(&g_input_on_gamepad, 0);
-      break;
-
-    case INPUT_EVENT_KEY_DOWN:
-      InterlockedExchange(&g_input_on_gamepad, input_event_is_gamepad(ev) ? 1 : 0);
-      break;
-
-    case INPUT_EVENT_ANALOG:
-      // sticks and triggers at rest still report small values
-      if (input_event_is_gamepad(ev) && (ev->analog_value > 0.5f || ev->analog_value < -0.5f)) {
-        InterlockedExchange(&g_input_on_gamepad, 1);
-      }
-      break;
-
-    default:
-      break;
-  }
-}
-
 static bool
 on_input_event(input_event_t *ev)
 {
   ASSERT(ev->key < INPUT_KEY_MAX);
-  input_note_device(ev);
 
   switch (ev->kind) {
     case INPUT_EVENT_KEY_DOWN:

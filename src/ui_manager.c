@@ -853,8 +853,43 @@ feed_input(ui_manager_t *manager, input_event_t *ev)
 void
 ui_manager_note_input_device(ui_manager_t *manager, input_event_t *ev)
 {
-  if (ev->kind == INPUT_EVENT_KEY_DOWN || ev->kind == INPUT_EVENT_MOUSE_DOWN) {
-    manager->gamepad_input = input_key_is_gamepad(ev->key);
+  switch (ev->kind) {
+    case INPUT_EVENT_MOUSE_MOVE: {
+      /* the engine also reports moves that did not move */
+      float dx = (float)ev->client_x - manager->device_mouse_x;
+      float dy = (float)ev->client_y - manager->device_mouse_y;
+
+      if (dx * dx + dy * dy >= 9.0f) {
+        manager->device_mouse_x = (float)ev->client_x;
+        manager->device_mouse_y = (float)ev->client_y;
+        manager->gamepad_input  = false;
+      }
+      break;
+    }
+
+    case INPUT_EVENT_MOUSE_DOWN:
+    case INPUT_EVENT_MOUSE_DBLCLICK:
+    case INPUT_EVENT_MOUSE_WHEEL: {
+      manager->gamepad_input = false;
+      break;
+    }
+
+    case INPUT_EVENT_KEY_DOWN: {
+      manager->gamepad_input = input_key_is_gamepad(ev->key);
+      break;
+    }
+
+    case INPUT_EVENT_ANALOG: {
+      /* sticks and triggers at rest still report small values */
+      if (input_key_is_gamepad(ev->key) && (ev->analog_value > 0.5f || ev->analog_value < -0.5f)) {
+        manager->gamepad_input = true;
+      }
+      break;
+    }
+
+    default: {
+      break;
+    }
   }
 }
 
