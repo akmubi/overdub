@@ -74,6 +74,15 @@ struct log_message_s {
 
 void
 log_ui_enqueue(log_level_t level, str_t text);
+
+/* Called on the thread that logs, for every message. A listener must not log. */
+typedef void (MOD_CALL *log_listener_fn_t)(uint64_t owner, log_level_t level, uint64_t frame, str_t text, void *user);
+
+bool
+log_listener_add(uint64_t owner, log_listener_fn_t fn, void *user);
+/* fn NULL removes all of the owner's; returns after any call in progress has finished */
+void
+log_listener_remove(uint64_t owner, log_listener_fn_t fn, void *user);
 void
 log_ui_on_frame_begin(uint64_t frame_counter);
 

@@ -19,7 +19,7 @@ typedef version_t mod_version_t;
 #define MOD_HANDLE_INVALID     ((mod_handle_t)0)
 #define MOD_CFG_HANDLE_INVALID ((mod_cfg_handle_t)0)
 
-#define MOD_ABI_VERSION ((mod_version_t)MAKE_VERSION(3, 0, 0))
+#define MOD_ABI_VERSION ((mod_version_t)MAKE_VERSION(3, 1, 0))
 
 #define MOD_ABI_VERSION_EXPORT "mod_abi_version"
 #define MOD_ENTRY_EXPORT       "mod_entry"
@@ -50,6 +50,40 @@ typedef void (MOD_CALL *mod_func_invoke_post_fn_t)(mod_handle_t mod, ufunc_t *fu
 
 typedef void (MOD_CALL *mod_draw_panel_fn_t) (mod_handle_t mod, struct nk_context *ctx);
 typedef void (MOD_CALL *mod_draw_config_fn_t)(mod_handle_t mod, struct nk_context *ctx);
+
+typedef void (MOD_CALL *mod_log_fn_t)(mod_handle_t mod, log_level_t level, uint64_t frame, str_t text, void *user);
+
+typedef uint32_t mod_action_t;
+enum {
+  MOD_ACTION_RELOAD,
+  MOD_ACTION_RESTART,
+  MOD_ACTION_START,
+  MOD_ACTION_STOP,
+  MOD_ACTION_LOAD,
+  MOD_ACTION_UNLOAD,
+  MOD_ACTION_LUA_START,
+  MOD_ACTION_LUA_STOP,
+  MOD_ACTION_ENABLE,
+  MOD_ACTION_DISABLE,
+  MOD_ACTION_MAX,
+};
+
+/* the strings are valid until the mod changes */
+typedef struct mod_status_s mod_status_t;
+struct mod_status_s {
+  str_t id;
+  str_t name;
+  str_t dir;
+  str_t dll_path;
+  str_t dll_state;
+  str_t dll_error;
+  bool  enabled;
+  bool  has_code;
+  bool  has_lua;
+  bool  builtin;
+  bool  dll_active;
+  bool  lua_active;
+};
 
 typedef bool (MOD_CALL *mod_init_fn_t)  (mod_handle_t mod);
 typedef void (MOD_CALL *mod_deinit_fn_t)(mod_handle_t mod);
@@ -121,6 +155,20 @@ MOD_API bool          mod_hook_enable(mod_handle_t mod, void *target);
 MOD_API bool          mod_hook_disable(mod_handle_t mod, void *target);
 MOD_API bool          mod_hook_remove(mod_handle_t mod, void *target);
 
+/* Called on the thread that logs; the listener must not log */
+MOD_API bool mod_register_log_listener(mod_handle_t mod, mod_log_fn_t fn, void *user);
+MOD_API void mod_deregister_log_listener(mod_handle_t mod, mod_log_fn_t fn, void *user);
+
+/* Other mods and Overdub; an action runs after this frame's mod ticks */
+MOD_API int          mod_list_count(void);
+MOD_API mod_handle_t mod_list_get(int index);
+MOD_API mod_handle_t mod_find(str_t id);
+MOD_API bool         mod_get_status(mod_handle_t target, mod_status_t *status);
+MOD_API bool         mod_request_action(mod_handle_t target, mod_action_t action);
+MOD_API bool         mod_run_cmd(str_t name, str_t args);
+MOD_API str_t        mod_get_game_dir(void);
+MOD_API void        *mod_get_game_window(void);
+
 /* Exported by each mod DLL */
 MOD_EXTERN_C MOD_EXPORT mod_version_t    MOD_CALL mod_abi_version(void);
 MOD_EXTERN_C MOD_EXPORT const mod_api_t *MOD_CALL mod_entry(void);
@@ -128,7 +176,8 @@ MOD_EXTERN_C MOD_EXPORT const mod_api_t *MOD_CALL mod_entry(void);
 static inline bool
 mod_abi_compatible(mod_version_t host, mod_version_t mod)
 {
-  return host.major == mod.major && host.minor == mod.minor;
+  /* minor versions only add to the API */
+  return host.major == mod.major && host.minor >= mod.minor;
 }
 
 MOD_EXTERN_C_END

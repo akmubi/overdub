@@ -222,6 +222,22 @@ example_draw_panel(mod_handle_t mod, struct nk_context *ctx)
 
 Nuklear is immediate mode. Store persistent values in mod state and rebuild the controls on every draw. Do not keep the context pointer after the callback.
 
+## Logs and other mods
+
+`mod_register_log_listener` sees every log message, on the thread that logs it, so the listener must be thread-safe and must not log. It is removed after `deinit`, and `mod_deregister_log_listener` returns only after any call in progress has finished.
+
+```c
+static void MOD_CALL
+example_on_log(mod_handle_t mod, log_level_t level, uint64_t frame, str_t text, void *user)
+{
+  if (level == LOG_LEVEL_ERROR) {
+    InterlockedIncrement((volatile LONG *)user);
+  }
+}
+```
+
+`mod_list_count`, `mod_list_get` and `mod_find` give handles to the installed mods, and `mod_get_status` describes one. `mod_request_action` reloads, restarts, stops, starts, enables or disables a mod after this frame's mod ticks, so a mod may also ask for its own reload. `mod_run_cmd` runs an Overdub console command, and `mod_get_game_dir` and `mod_get_game_window` return the game directory and window.
+
 ## Signature scans and hooks
 
 Use a native hook only when Unreal reflection or a loader callback cannot provide the event you need. A signature identifies code in one supported executable build; it does not prove that the function ABI or surrounding data layout stayed compatible.
