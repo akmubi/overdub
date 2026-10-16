@@ -1,5 +1,6 @@
 #include "ui_manager.h"
 #include "input.h"
+#include "mod_manager.h"
 #include "scratch.h"
 #include "str.h"
 #include "ui_console.h"
@@ -297,12 +298,37 @@ ui_manager_preinit(ui_manager_t *manager, mod_manager_t *mod_manager, arena_t *a
     .mod_manager              = mod_manager,
     .mouse_button_mask        = 0,
     .block_keyboard_when_open = true,
-    .block_gamepad_when_open  = false,
+    .block_gamepad_when_open  = true,
     .vw                       = 0,
     .vh                       = 0,
   };
 
   ui_console_init(&manager->console, arena);
+}
+
+static void
+on_toggle_mod_manager(void *user)
+{
+  ui_manager_t *manager = user;
+
+  ui_mod_manager_toggle(&manager->main);
+}
+
+static void
+on_toggle_console(void *user)
+{
+  ui_manager_t *manager = user;
+
+  ui_console_toggle(&manager->console);
+}
+
+void
+ui_manager_register_actions(ui_manager_t *manager, actions_t *registry)
+{
+  mod_manager_t *mod_manager = manager->mod_manager;
+
+  actions_register(registry, STR_LIT("overdub.mod_manager"), STR_LIT("Mod manager"), STR_LIT("Overdub"), MOD_HANDLE_INVALID, &mod_manager->cfg.overlay_toggle,  on_toggle_mod_manager, manager);
+  actions_register(registry, STR_LIT("overdub.console"),     STR_LIT("Console"),     STR_LIT("Overdub"), MOD_HANDLE_INVALID, &manager->console.cfg.toggle_bind, on_toggle_console,     manager);
 }
 
 void
@@ -590,6 +616,11 @@ ui_manager_should_consume_input_post(ui_manager_t *manager, input_event_t *ev)
 {
   if (is_any_window_interactive(manager->ctx)) {
     if (input_event_is_gamepad(ev)) {
+      /* the character still moves */
+      if (ev->key == INPUT_KEY_GAMEPAD_LEFT_X || ev->key == INPUT_KEY_GAMEPAD_LEFT_Y || ev->key == INPUT_KEY_GAMEPAD_L3) {
+        return false;
+      }
+
       return manager->block_gamepad_when_open;
     }
 
@@ -599,6 +630,186 @@ ui_manager_should_consume_input_post(ui_manager_t *manager, input_event_t *ev)
   }
 
   return false;
+}
+
+/* [KEYBOARD]:
+ * - arrows:    move (Ctrl: scroll, Alt: window, Ctrl+Shift: move, Alt+Shift: resize)
+ * - Enter:     accept
+ * - Escape:    cancel
+ * - Tab:       focus
+ * - Alt+M:     maximize
+ * - Alt+W:     window menu
+ *
+ * [GAMEPAD]:
+ * - D-Pad:       move
+ * - A:           accept
+ * - B:           cancel
+ * - X:           menu
+ * - Y:           keyboard
+ * - LB/RB:       previous/next window/symbol
+ * - LT/RT:       previous/next word
+ * - right stick: scroll
+ * - start:       window menu
+ */
+static void
+feed_nav(ui_manager_t *manager, struct nk_context *ctx, input_event_t *ev)
+{
+  if (ev->kind == INPUT_EVENT_ANALOG) {
+    if (ev->key == INPUT_KEY_GAMEPAD_RIGHT_X || ev->key == INPUT_KEY_GAMEPAD_RIGHT_Y) {
+      float *axis = ev->key == INPUT_KEY_GAMEPAD_RIGHT_X ? &manager->right_x : &manager->right_y;
+      float  was  = *axis;
+      *axis       = ev->analog_value;
+
+      if (NK_ABS(*axis) > 0.5f || NK_ABS(was) > 0.35f) {
+        bool on = NK_ABS(*axis) > 0.35f;
+
+        if (ev->key == INPUT_KEY_GAMEPAD_RIGHT_X) {
+          nk_input_key(ctx, NK_KEY_NAV_SCROLL_LEFT,  on && *axis < 0);
+          nk_input_key(ctx, NK_KEY_NAV_SCROLL_RIGHT, on && *axis > 0);
+        } else {
+          nk_input_key(ctx, NK_KEY_NAV_SCROLL_UP,   on && *axis > 0);
+          nk_input_key(ctx, NK_KEY_NAV_SCROLL_DOWN, on && *axis < 0);
+        }
+
+        manager->gamepad_input = true;
+      }
+    }
+    return;
+  }
+
+  if (ev->kind != INPUT_EVENT_KEY_DOWN && ev->kind != INPUT_EVENT_KEY_UP) {
+    return;
+  }
+
+  int  down  = ev->kind == INPUT_EVENT_KEY_DOWN;
+  bool ctrl  = (ev->modifiers & INPUT_MOD_CTRL)  != 0;
+  bool shift = (ev->modifiers & INPUT_MOD_SHIFT) != 0;
+  bool alt   = (ev->modifiers & INPUT_MOD_ALT)   != 0;
+
+  if (input_key_is_gamepad(ev->key)) {
+    manager->gamepad_input = true;
+  } else if (down) {
+    manager->gamepad_input = false;
+  }
+
+  switch (ev->key) {
+    case INPUT_KEY_UP:
+    case INPUT_KEY_DOWN:
+    case INPUT_KEY_LEFT:
+    case INPUT_KEY_RIGHT: {
+      int dir = ev->key == INPUT_KEY_UP ? 0 : ev->key == INPUT_KEY_DOWN ? 1 : ev->key == INPUT_KEY_LEFT ? 2 : 3;
+
+      nk_input_key(ctx, (enum nk_keys)(NK_KEY_NAV_UP        + dir), down && ((!ctrl && !alt) || (alt && shift) || (ctrl && shift && !alt)));
+      nk_input_key(ctx, (enum nk_keys)(NK_KEY_NAV_SCROLL_UP + dir), down && ctrl && !alt && !shift);
+      nk_input_key(ctx, (enum nk_keys)(NK_KEY_NAV_WINDOW_UP + dir), down && alt && !shift);
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_SIZE, down && alt  && shift);
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_MOVE, down && ctrl && shift && !alt);
+      break;
+    }
+
+    case INPUT_KEY_ENTER: {
+      nk_input_key(ctx, NK_KEY_NAV_ACTIVATE, down);
+      break;
+    }
+
+    case INPUT_KEY_ESCAPE: {
+      nk_input_key(ctx, NK_KEY_NAV_CANCEL, down);
+      break;
+    }
+
+    case INPUT_KEY_TAB: {
+      nk_input_key(ctx, NK_KEY_FOCUS_NEXT, down && !shift && !ctrl && !alt);
+      nk_input_key(ctx, NK_KEY_FOCUS_PREV, down && shift && !ctrl && !alt);
+      break;
+    }
+
+    case INPUT_KEY_M: {
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_MAXIMIZE, down && alt);
+      break;
+    }
+
+    case INPUT_KEY_W: {
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_MENU, down && alt);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_DPAD_UP: {
+      nk_input_key(ctx, NK_KEY_NAV_UP, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_DPAD_DOWN: {
+      nk_input_key(ctx, NK_KEY_NAV_DOWN, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_DPAD_LEFT: {
+      nk_input_key(ctx, NK_KEY_NAV_LEFT, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_DPAD_RIGHT: {
+      nk_input_key(ctx, NK_KEY_NAV_RIGHT, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_FACE_BOTTOM: {
+      nk_input_key(ctx, NK_KEY_NAV_ACTIVATE, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_FACE_RIGHT: {
+      nk_input_key(ctx, NK_KEY_NAV_CANCEL, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_FACE_LEFT: {
+      nk_input_key(ctx, NK_KEY_NAV_MENU, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_FACE_TOP: {
+      nk_input_key(ctx, NK_KEY_NAV_KEYBOARD, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_LB: {
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_PREV, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_RB: {
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_NEXT, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_LT: {
+      nk_input_key(ctx, NK_KEY_NAV_WORD_PREV, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_RT: {
+      nk_input_key(ctx, NK_KEY_NAV_WORD_NEXT, down);
+      break;
+    }
+
+    case INPUT_KEY_GAMEPAD_SPECIAL_RIGHT: {
+      nk_input_key(ctx, NK_KEY_NAV_WINDOW_MENU, down);
+      break;
+    }
+
+    default: {
+      break;
+    }
+  }
+}
+
+static void
+release_nav_keys(struct nk_context *ctx)
+{
+  for (int k = NK_KEY_FOCUS_NEXT; k < NK_KEY_MAX; ++k) {
+    ctx->input.keyboard.keys[k].down = nk_false;
+  }
 }
 
 static void
@@ -816,6 +1027,7 @@ ui_manager_on_input_event_pre(ui_manager_t *manager, uint64_t frame_counter, inp
     }
 
     feed_input(manager, ev);
+    feed_nav(manager, manager->ctx, ev);
   }
 
   return ui_manager_should_consume_input_pre(manager, ev);
@@ -832,13 +1044,24 @@ ui_manager_on_input_event_post(ui_manager_t *manager, input_event_t *ev)
 }
 
 void
-ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter)
+ui_manager_on_frame_begin(ui_manager_t *manager, uint64_t frame_counter, float delta)
 {
   ui_console_on_frame_begin(&manager->console, frame_counter);
 
   if (!manager->inited || !manager->ctx) {
     return;
   }
+
+  manager->ctx->delta_time_seconds = NK_CLAMP(0.0f, delta, 0.1f);
+
+  bool fed = ui_manager_should_feed_input(manager);
+
+  if (manager->input_fed && !fed) {
+    release_nav_keys(manager->ctx);
+    manager->right_x = manager->right_y = 0.0f;
+  }
+
+  manager->input_fed = fed;
 
   if (!manager->input_begun) {
     nk_input_begin(manager->ctx);
@@ -861,7 +1084,23 @@ ui_manager_on_frame_end(ui_manager_t *manager, unsigned int vw, unsigned int vh)
   manager->vw = vw;
   manager->vh = vh;
 
+  nk_window_set_maximize_bounds(ctx, nk_rect(0.0f, 0.0f, (float)vw, (float)vh));
+
   ui_mod_manager_draw(&manager->main, ctx, manager->mod_manager, vw, vh);
   ui_keybind_capture_draw(&manager->keybind_capture, ctx, vw, vh);
   ui_console_draw(&manager->console, ctx, manager->mod_manager, vw, vh);
+
+  if (nk_nav_text_requested(ctx, NULL) && manager->gamepad_input) {
+    nk_osk_open(ctx);
+  }
+
+  if (nk_input_is_key_pressed(&ctx->input, NK_KEY_NAV_KEYBOARD)) {
+    if (nk_osk_is_open(ctx)) {
+      nk_osk_close(ctx);
+    } else {
+      nk_osk_open(ctx);
+    }
+  }
+
+  nk_osk(ctx, nk_osk_place(ctx, nk_rect(0.0f, 0.0f, (float)vw, (float)vh), 640.0f, 280.0f));
 }

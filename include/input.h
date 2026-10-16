@@ -223,6 +223,8 @@ struct input_key_state_s {
   bool released;
 };
 
+/* A keybind has a keyboard part and a gamepad part, written "F2 | Select+RB" (either may be missing).
+ * It is down / pressed / released when either part is. */
 #define KEYBIND_MAX_KEYS (10)
 #ifdef __cplusplus
 #  define KEYBIND_NULL keybind_t{}
@@ -282,6 +284,8 @@ MOD_API bool
 input_event_is_keyboard(input_event_t *ev);
 MOD_API bool
 input_event_is_gamepad(input_event_t *ev);
+MOD_API bool
+input_key_is_gamepad(input_key_kind_t key);
 
 MOD_API keybind_t
 keybind_parse(str_t str, keybind_t default_val);
@@ -297,6 +301,13 @@ MOD_API bool
 keybind_equal(keybind_t a, keybind_t b);
 MOD_API void
 keybind_clear(keybind_t *bind);
+
+MOD_API keybind_t
+keybind_keyboard_part(keybind_t bind);
+MOD_API keybind_t
+keybind_gamepad_part(keybind_t bind);
+MOD_API keybind_t
+keybind_merge(keybind_t keyboard, keybind_t gamepad);
 
 /* NOTE: used in engine tick */
 MOD_API bool

@@ -1,3 +1,4 @@
+#include "actions.h"
 #include "arena.h"
 #include "builtin.h"
 #include "debug.h"
@@ -144,7 +145,10 @@ on_engine_tick_pre(float delta)
     }
   }
 
-  ui_manager_on_frame_begin(&globals.ui_manager, globals.frame_counter);
+  actions_set_hold_ms(&globals.actions, (uint32_t)globals.mod_manager.cfg.gamepad_hold_ms);
+  actions_tick(&globals.actions);
+
+  ui_manager_on_frame_begin(&globals.ui_manager, globals.frame_counter, delta);
 
   if (ui_manager_should_show_cursor(&globals.ui_manager)) {
     InterlockedExchange(&g_ui_cursor_forced_visible, 1);
@@ -262,6 +266,56 @@ input_sync_virtual_modifier(input_key_kind_t key)
   }
 }
 
+/* gamepad key down events held back by the keybind registry */
+typedef struct held_key_event_s held_key_event_t;
+
+struct held_key_event_s {
+  void         *self;
+  fkey_event_t  key_event;
+  input_event_t input;
+};
+
+static held_key_event_t g_held_events[CONFIG_ACTIONS_MAX_HELD_EVENTS];
+static int              g_held_first;
+static int              g_held_count;
+
+static void         *g_current_self;
+static fkey_event_t *g_current_key_event;
+
+static void
+on_held_event_send_on(bool replay)
+{
+  if (g_held_count == 0) {
+    return;
+  }
+
+  held_key_event_t held = g_held_events[g_held_first];
+
+  g_held_first  = (g_held_first + 1) % CONFIG_ACTIONS_MAX_HELD_EVENTS;
+  g_held_count -= 1;
+
+  if (!replay) {
+    return;
+  }
+
+  globals.consumed_down[held.input.key] = false;
+
+  if (globals.engine_inited && mod_manager_dispatch_input(&globals.mod_manager, &held.input)) {
+    globals.consumed_down[held.input.key] = true;
+    return;
+  }
+
+  process_key_down_event_real(held.self, held.key_event);
+}
+
+static void
+on_action_fired_dispatch(input_event_t *ev)
+{
+  if (globals.engine_inited) {
+    mod_manager_dispatch_input(&globals.mod_manager, ev);
+  }
+}
+
 static bool
 on_input_event(input_event_t *ev)
 {
@@ -314,16 +368,40 @@ on_input_event(input_event_t *ev)
     }
   }
 
-  bool force_consume = false;
-  if ((ev->kind == INPUT_EVENT_KEY_UP || ev->kind == INPUT_EVENT_MOUSE_UP) && ev->key != INPUT_KEY_NONE && globals.consumed_down[ev->key]) {
-    globals.consumed_down[ev->key] = false;
-    force_consume = true;
-  }
-
   bool        consumed = false;
   const char *consumer = "Engine";
 
-  if (ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev)) {
+  if (!ui_manager_keybind_capture_is_open(&globals.ui_manager)) {
+    actions_event_result_t result = actions_on_input_event(&globals.actions, ev);
+
+    if (result == ACTIONS_EVENT_HOLD) {
+      if (g_current_key_event && g_held_count < CONFIG_ACTIONS_MAX_HELD_EVENTS) {
+        int slot = (g_held_first + g_held_count) % CONFIG_ACTIONS_MAX_HELD_EVENTS;
+
+        g_held_events[slot] = (held_key_event_t){
+          .self      = g_current_self,
+          .key_event = *g_current_key_event,
+          .input     = *ev,
+        };
+        g_held_count += 1;
+      }
+
+      consumed = true;
+      consumer = "Actions (held)";
+    } else if (result == ACTIONS_EVENT_CONSUME) {
+      consumed = true;
+      consumer = "Actions";
+    }
+  }
+
+  /* after the registry: it may have just sent a held-back press on to the game */
+  bool force_consume = false;
+  if ((ev->kind == INPUT_EVENT_KEY_UP || ev->kind == INPUT_EVENT_MOUSE_UP) && ev->key != INPUT_KEY_NONE && globals.consumed_down[ev->key]) {
+    globals.consumed_down[ev->key] = false;
+    force_consume = !consumed;
+  }
+
+  if (!consumed && ui_manager_on_input_event_pre(&globals.ui_manager, globals.frame_counter, ev)) {
     consumed = true;
     consumer = "UI (pre)";
   }
@@ -390,8 +468,13 @@ loader_init(HINSTANCE inst)
   globals.listeners = ARENA_PUSH_ARRAY_ZERO(&globals.perm, uobject_listener_t, CONFIG_UOBJECT_ARRAY_MAX_LISTENERS);
   ASSERT(globals.listeners != NULL);
 
+  globals.strings = string_pool_create(&globals.perm, 4 * KB);
+  actions_init(&globals.actions, on_held_event_send_on, on_action_fired_dispatch);
   mod_manager_init(&globals.mod_manager, globals.game_dir);
   mod_manager_startup_load_cfg(&globals.mod_manager);
+
+  ui_manager_register_actions(&globals.ui_manager, &globals.actions);
+
   {
     register_builtin_uobject_search(&globals.mod_manager);
     register_builtin_ufunction_tracer(&globals.mod_manager);
@@ -678,7 +761,14 @@ bool __fastcall
 process_key_down_event_hook(void *self, fkey_event_t key_event)
 {
   input_event_t input_event = input_event_from_key_event(INPUT_EVENT_KEY_DOWN, &key_event);
-  if (on_input_event(&input_event)) {
+
+  g_current_self      = self;
+  g_current_key_event = &key_event;
+
+  bool consumed       = on_input_event(&input_event);
+  g_current_key_event = NULL;
+
+  if (consumed) {
     return true;
   }
   return process_key_down_event_real(self, key_event);

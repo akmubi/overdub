@@ -2,9 +2,8 @@
 #include "profiler.h"
 
 #include <d3d11.h>
+#include <xinput.h>
 
-#include <assert.h>
-#include <float.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,30 +17,13 @@ struct nk_d3d11_vertex {
   nk_byte col[4];
 };
 
-#define NK_D3D11_GLYPH_TABLE_CAPACITY   4096
-#define NK_D3D11_DYNAMIC_GLYPH_CAPACITY 1024
-#define NK_D3D11_GLYPH_BITMAP_SIZE      128
-#define NK_D3D11_DYNAMIC_ATLAS_HEIGHT   1024
-
-struct nk_d3d11_glyph_slot {
-  nk_glyph_id                 id;
-  float                       height;
-  const struct nk_font_glyph *glyph;
-};
-
-struct nk_d3d11_font_data {
-  const void                *ttf;
-  struct nk_d3d11_glyph_slot table[NK_D3D11_GLYPH_TABLE_CAPACITY];
-  struct nk_font_glyph       dynamic_glyphs[NK_D3D11_DYNAMIC_GLYPH_CAPACITY];
-  unsigned int               dynamic_glyph_count;
-};
+#define NK_D3D11_TEXT_CACHE_SIZE (8 * 1024 * 1024)
 
 static struct {
-  struct nk_context         ctx;
-  struct nk_buffer          cmds;
-  struct nk_font           *fonts[NK_RUNTIME_FONT_CAPACITY];
-  struct nk_d3d11_font_data font_data[NK_RUNTIME_FONT_CAPACITY];
-  int                       font_count;
+  struct nk_context      ctx;
+  struct nk_buffer       cmds;
+  void                  *text_memory;
+  struct nk_glyph_atlas *atlas;
 
   struct nk_draw_null_texture tex_null;
   unsigned int                max_vertex_buffer;
@@ -49,7 +31,6 @@ static struct {
 
   D3D11_VIEWPORT            viewport;
   ID3D11Device             *device;
-  ID3D11DeviceContext      *render_context;
   ID3D11RasterizerState    *rasterizer_state;
   ID3D11VertexShader       *vertex_shader;
   ID3D11InputLayout        *input_layout;
@@ -62,15 +43,36 @@ static struct {
   ID3D11Texture2D          *font_texture;
   ID3D11SamplerState       *sampler_state;
 
-  int atlas_width;
-  int atlas_height;
-  int atlas_next_x;
-  int atlas_next_y;
-  int atlas_row_height;
-
-  nk_byte glyph_alpha[NK_D3D11_GLYPH_BITMAP_SIZE * NK_D3D11_GLYPH_BITMAP_SIZE];
-  nk_byte glyph_rgba[NK_D3D11_GLYPH_BITMAP_SIZE * NK_D3D11_GLYPH_BITMAP_SIZE * 4];
+  /* XInput, loaded at the first poll */
+  HMODULE xinput;
+  DWORD(WINAPI *xinput_get_state)(DWORD, XINPUT_STATE *);
+  nk_bool  xinput_tried;
+  nk_bool  pad_connected[XUSER_MAX_COUNT];
+  ULONGLONG pad_retry; /* look for new pads once a second */
+  nk_bool  pad_down[NK_KEY_NAV_WINDOW_MENU - NK_KEY_NAV_UP + 1];
 } d3d11;
+
+static void
+nk_d3d11_upload_atlas(ID3D11DeviceContext *context)
+{
+  int       x, y, w, h;
+  D3D11_BOX box;
+
+  if (!d3d11.atlas || !d3d11.font_texture || !nk_glyph_atlas_dirty(d3d11.atlas, &x, &y, &w, &h)) {
+    return;
+  }
+
+  box.left   = (UINT)x;
+  box.top    = (UINT)y;
+  box.front  = 0;
+  box.right  = (UINT)(x + w);
+  box.bottom = (UINT)(y + h);
+  box.back   = 1;
+  ID3D11DeviceContext_UpdateSubresource(context, (ID3D11Resource *)d3d11.font_texture, 0, &box,
+                                        d3d11.atlas->pixels + ((size_t)y * (size_t)d3d11.atlas->width + (size_t)x) * 4,
+                                        (UINT)d3d11.atlas->width * 4, 0);
+  nk_glyph_atlas_clean(d3d11.atlas);
+}
 
 NK_API void
 nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
@@ -109,10 +111,23 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
 
     hr =
       ID3D11DeviceContext_Map(context, (ID3D11Resource *)d3d11.vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &vertices);
-    NK_ASSERT(SUCCEEDED(hr));
+
+    if (FAILED(hr)) {
+      /* device removed or reset: drop the frame */
+      nk_clear(&d3d11.ctx);
+      nk_buffer_clear(&d3d11.cmds);
+      return;
+    }
+
     hr =
       ID3D11DeviceContext_Map(context, (ID3D11Resource *)d3d11.index_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &indices);
-    NK_ASSERT(SUCCEEDED(hr));
+
+    if (FAILED(hr)) {
+      ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)d3d11.vertex_buffer, 0);
+      nk_clear(&d3d11.ctx);
+      nk_buffer_clear(&d3d11.cmds);
+      return;
+    }
 
     { /* fill converting configuration */
       struct nk_convert_config                              config;
@@ -121,6 +136,7 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
         {NK_VERTEX_TEXCOORD, NK_FORMAT_FLOAT, NK_OFFSETOF(struct nk_d3d11_vertex, uv)},
         {NK_VERTEX_COLOR, NK_FORMAT_R8G8B8A8, NK_OFFSETOF(struct nk_d3d11_vertex, col)},
         {NK_VERTEX_LAYOUT_END}};
+
       memset(&config, 0, sizeof(config));
       config.vertex_layout        = vertex_layout;
       config.vertex_size          = sizeof(struct nk_d3d11_vertex);
@@ -135,18 +151,18 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
 
       { /* setup buffers to load vertices and elements */
         struct nk_buffer vbuf, ibuf;
+
         nk_buffer_init_fixed(&vbuf, vertices.pData, (size_t)d3d11.max_vertex_buffer);
         nk_buffer_init_fixed(&ibuf, indices.pData, (size_t)d3d11.max_index_buffer);
-        d3d11.render_context = context;
         PROF_SCOPE_BEGIN("nk_convert", convert);
         nk_convert(&d3d11.ctx, &d3d11.cmds, &vbuf, &ibuf, &config);
         PROF_SCOPE_END(convert);
-        d3d11.render_context = NULL;
       }
     }
 
     ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)d3d11.vertex_buffer, 0);
     ID3D11DeviceContext_Unmap(context, (ID3D11Resource *)d3d11.index_buffer, 0);
+    nk_d3d11_upload_atlas(context);
 
     /* iterate over and execute each draw command */
     PROF_SCOPE_BEGIN("d3d11.draw", draw);
@@ -177,16 +193,17 @@ nk_d3d11_render(ID3D11DeviceContext *context, enum nk_anti_aliasing AA)
 static void
 nk_d3d11_get_projection_matrix(int width, int height, float *result)
 {
-  const float L            = 0.0f;
-  const float R            = (float)width;
-  const float T            = 0.0f;
-  const float B            = (float)height;
+  const float L = 0.0f;
+  const float R = (float)width;
+  const float T = 0.0f;
+  const float B = (float)height;
   float       matrix[4][4] = {
     {0.0f, 0.0f, 0.0f, 0.0f},
     {0.0f, 0.0f, 0.0f, 0.0f},
     {0.0f, 0.0f, 0.5f, 0.0f},
     {0.0f, 0.0f, 0.5f, 1.0f},
   };
+
   matrix[0][0] = 2.0f / (R - L);
   matrix[1][1] = 2.0f / (T - B);
   matrix[3][0] = (R + L) / (L - R);
@@ -198,6 +215,7 @@ NK_API void
 nk_d3d11_resize(ID3D11DeviceContext *context, int width, int height)
 {
   D3D11_MAPPED_SUBRESOURCE mapped;
+
   if (SUCCEEDED(ID3D11DeviceContext_Map(
         context, (ID3D11Resource *)d3d11.const_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
     nk_d3d11_get_projection_matrix(width, height, (float *)mapped.pData);
@@ -212,233 +230,288 @@ NK_API int
 nk_d3d11_handle_event(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
   static int insert_toggle = 0;
+
   switch (msg) {
-  case WM_KEYDOWN:
-  case WM_KEYUP:
-  case WM_SYSKEYDOWN:
-  case WM_SYSKEYUP: {
-    int down = !((lparam >> 31) & 1);
-    int ctrl = GetKeyState(VK_CONTROL) & (1 << 15);
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP: {
+      int down = !((lparam >> 31) & 1);
+      int ctrl = GetKeyState(VK_CONTROL) & (1 << 15);
 
-    switch (wparam) {
-    case VK_SHIFT:
-    case VK_LSHIFT:
-    case VK_RSHIFT:
-      nk_input_key(&d3d11.ctx, NK_KEY_SHIFT, down);
-      return 1;
+      switch (wparam) {
+        case VK_SHIFT:
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+          nk_input_key(&d3d11.ctx, NK_KEY_SHIFT, down);
+          return 1;
 
-    case VK_DELETE:
-      nk_input_key(&d3d11.ctx, NK_KEY_DEL, down);
-      return 1;
+        case VK_CONTROL:
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+          nk_input_key(&d3d11.ctx, NK_KEY_CTRL, down);
 
-    case VK_RETURN:
-    case VK_SEPARATOR:
-      nk_input_key(&d3d11.ctx, NK_KEY_ENTER, down);
-      return 1;
+          if (!down) {
+            int k;
 
-    case VK_TAB:
-      nk_input_key(&d3d11.ctx, NK_KEY_TAB, down);
-      return 1;
+            for (k = NK_KEY_NAV_SCROLL_UP; k <= NK_KEY_NAV_SCROLL_RIGHT; ++k) {
+              nk_input_key(&d3d11.ctx, (enum nk_keys)k, 0);
+            }
+          }
+          return 1;
 
-    case VK_UP:
-      nk_input_key(&d3d11.ctx, NK_KEY_UP, down);
-      return 1;
+        case VK_DELETE:
+          nk_input_key(&d3d11.ctx, NK_KEY_DEL, down);
+          return 1;
 
-    case VK_DOWN:
-      nk_input_key(&d3d11.ctx, NK_KEY_DOWN, down);
-      return 1;
+        case VK_RETURN:
+        case VK_SEPARATOR:
+          nk_input_key(&d3d11.ctx, NK_KEY_ENTER, down);
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_ACTIVATE, down);
+          return 1;
 
-    case VK_LEFT:
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_WORD_LEFT, down);
-      } else {
-        nk_input_key(&d3d11.ctx, NK_KEY_LEFT, down);
-      }
-      return 1;
+        case VK_APPS:
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_MENU, down);
+          return 1;
 
-    case VK_RIGHT:
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_WORD_RIGHT, down);
-      } else {
-        nk_input_key(&d3d11.ctx, NK_KEY_RIGHT, down);
-      }
-      return 1;
+        case VK_F6: {
+          int shift = GetKeyState(VK_SHIFT) & (1 << 15);
 
-    case VK_BACK:
-      nk_input_key(&d3d11.ctx, NK_KEY_BACKSPACE, down);
-      return 1;
-
-    case VK_HOME:
-      nk_input_key(&d3d11.ctx, NK_KEY_TEXT_START, down);
-      nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_START, down);
-      return 1;
-
-    case VK_END:
-      nk_input_key(&d3d11.ctx, NK_KEY_TEXT_END, down);
-      nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_END, down);
-      return 1;
-
-    case VK_NEXT:
-      nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_DOWN, down);
-      return 1;
-
-    case VK_PRIOR:
-      nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_UP, down);
-      return 1;
-
-    case VK_ESCAPE:
-      nk_input_key(&d3d11.ctx, NK_KEY_TEXT_RESET_MODE, down);
-      return 1;
-
-    case VK_INSERT:
-      /* Only switch on release to avoid repeat issues
-       * kind of confusing since we have to negate it but we're already
-       * hacking it since Nuklear treats them as two separate keys rather
-       * than a single toggle state */
-      if (!down) {
-        insert_toggle = !insert_toggle;
-        if (insert_toggle) {
-          nk_input_key(&d3d11.ctx, NK_KEY_TEXT_INSERT_MODE, !down);
-          /* nk_input_key(&d3d11.ctx, NK_KEY_TEXT_REPLACE_MODE, down); */
-        } else {
-          nk_input_key(&d3d11.ctx, NK_KEY_TEXT_REPLACE_MODE, !down);
-          /* nk_input_key(&d3d11.ctx, NK_KEY_TEXT_INSERT_MODE, down); */
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_NEXT, down && !shift);
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_PREV, down && shift);
+          return 1;
         }
+
+        case VK_TAB: {
+          /* not with Ctrl/Alt: Ctrl+Tab stays free */
+          int shift = GetKeyState(VK_SHIFT) & (1 << 15);
+          int plain = !ctrl && !(GetKeyState(VK_MENU) & (1 << 15));
+
+          nk_input_key(&d3d11.ctx, NK_KEY_TAB, down);
+          nk_input_key(&d3d11.ctx, NK_KEY_FOCUS_NEXT, down && plain && !shift);
+          nk_input_key(&d3d11.ctx, NK_KEY_FOCUS_PREV, down && plain && shift);
+          return 1;
+        }
+
+        case VK_UP:
+        case VK_DOWN:
+        case VK_LEFT:
+        case VK_RIGHT: {
+          static const enum nk_keys text[4] = {NK_KEY_UP, NK_KEY_DOWN, NK_KEY_LEFT, NK_KEY_RIGHT};
+          int dir                           = wparam == VK_UP ? 0 : wparam == VK_DOWN ? 1 : wparam == VK_LEFT ? 2 : 3;
+          int alt                           = GetKeyState(VK_MENU) & (1 << 15);
+          int shift                         = GetKeyState(VK_SHIFT) & (1 << 15);
+          int plain                         = !ctrl && !alt;
+
+          nk_input_key(&d3d11.ctx, (ctrl && dir >= 2) ? (dir == 2 ? NK_KEY_TEXT_WORD_LEFT : NK_KEY_TEXT_WORD_RIGHT) : text[dir], down && !alt);
+          nk_input_key(&d3d11.ctx, (enum nk_keys)(NK_KEY_NAV_UP + dir), down && (plain || (alt && shift) || (ctrl && shift && !alt)));
+          nk_input_key(&d3d11.ctx, (enum nk_keys)(NK_KEY_NAV_SCROLL_UP + dir), down && ctrl && !alt && !shift);
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_MOVE, down && ctrl && shift && !alt);
+          nk_input_key(&d3d11.ctx, (enum nk_keys)(NK_KEY_NAV_WINDOW_UP + dir), down && alt && !shift);
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_SIZE, down && alt && shift);
+          return 1;
+        }
+
+        case VK_F2:
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_KEYBOARD, down);
+          return 1;
+
+        case 'W':
+          /* Alt+W: window menu */
+          if ((GetKeyState(VK_MENU) & (1 << 15)) || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_MENU, down);
+
+            if (down) {
+              return 1;
+            }
+          }
+          break;
+
+        case 'M':
+          /* Alt+M: maximize */
+          if ((GetKeyState(VK_MENU) & (1 << 15)) || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_NAV_WINDOW_MAXIMIZE, down);
+
+            if (down) {
+              return 1;
+            }
+          }
+          break;
+
+        case VK_BACK:
+          nk_input_key(&d3d11.ctx, NK_KEY_BACKSPACE, down);
+          return 1;
+
+        case VK_HOME:
+          nk_input_key(&d3d11.ctx, NK_KEY_TEXT_START, down);
+          nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_START, down);
+          return 1;
+
+        case VK_END:
+          nk_input_key(&d3d11.ctx, NK_KEY_TEXT_END, down);
+          nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_END, down);
+          return 1;
+
+        case VK_NEXT:
+          nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_DOWN, down);
+          return 1;
+
+        case VK_PRIOR:
+          nk_input_key(&d3d11.ctx, NK_KEY_SCROLL_UP, down);
+          return 1;
+
+        case VK_ESCAPE:
+          nk_input_key(&d3d11.ctx, NK_KEY_TEXT_RESET_MODE, down);
+          nk_input_key(&d3d11.ctx, NK_KEY_NAV_CANCEL, down);
+          return 1;
+
+        case VK_INSERT:
+          if (down && !((lparam >> 30) & 1)) {
+            insert_toggle = !insert_toggle;
+          }
+
+          nk_input_key(&d3d11.ctx, insert_toggle ? NK_KEY_TEXT_REPLACE_MODE : NK_KEY_TEXT_INSERT_MODE, down);
+          return 1;
+
+        case 'A':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_TEXT_SELECT_ALL, down);
+            return 1;
+          }
+          break;
+
+        case 'B':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_TEXT_LINE_START, down);
+            return 1;
+          }
+          break;
+
+        case 'E':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_TEXT_LINE_END, down);
+            return 1;
+          }
+          break;
+
+        case 'C':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_COPY, down);
+            return 1;
+          }
+          break;
+
+        case 'V':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_PASTE, down);
+            return 1;
+          }
+          break;
+
+        case 'X':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_CUT, down);
+            return 1;
+          }
+          break;
+
+        case 'Z':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_TEXT_UNDO, down);
+            return 1;
+          }
+          break;
+
+        case 'R':
+          if (ctrl || !down) {
+            nk_input_key(&d3d11.ctx, NK_KEY_TEXT_REDO, down);
+            return 1;
+          }
+          break;
       }
+      return 0;
+    }
+
+    case WM_CHAR:
+      if (wparam >= 32) {
+        nk_input_unicode(&d3d11.ctx, (nk_rune)wparam);
+        return 1;
+      }
+      break;
+
+    case WM_LBUTTONDOWN:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_LEFT, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+      SetCapture(wnd);
       return 1;
 
-    case 'A':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_SELECT_ALL, down);
-        return 1;
-      }
-      break;
-
-    case 'B':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_LINE_START, down);
-        return 1;
-      }
-      break;
-
-    case 'E':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_LINE_END, down);
-        return 1;
-      }
-      break;
-
-    case 'C':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_COPY, down);
-        return 1;
-      }
-      break;
-
-    case 'V':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_PASTE, down);
-        return 1;
-      }
-      break;
-
-    case 'X':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_CUT, down);
-        return 1;
-      }
-      break;
-
-    case 'Z':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_UNDO, down);
-        return 1;
-      }
-      break;
-
-    case 'R':
-      if (ctrl) {
-        nk_input_key(&d3d11.ctx, NK_KEY_TEXT_REDO, down);
-        return 1;
-      }
-      break;
-    }
-    return 0;
-  }
-
-  case WM_CHAR:
-    if (wparam >= 32) {
-      nk_input_unicode(&d3d11.ctx, (nk_rune)wparam);
+    case WM_LBUTTONUP:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_DOUBLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+      nk_input_button(&d3d11.ctx, NK_BUTTON_LEFT, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+      ReleaseCapture();
       return 1;
-    }
-    break;
 
-  case WM_LBUTTONDOWN:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_LEFT, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-    SetCapture(wnd);
-    return 1;
+    case WM_RBUTTONDOWN:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_RIGHT, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+      SetCapture(wnd);
+      return 1;
 
-  case WM_LBUTTONUP:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_DOUBLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-    nk_input_button(&d3d11.ctx, NK_BUTTON_LEFT, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-    ReleaseCapture();
-    return 1;
+    case WM_RBUTTONUP:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_RIGHT, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+      ReleaseCapture();
+      return 1;
 
-  case WM_RBUTTONDOWN:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_RIGHT, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-    SetCapture(wnd);
-    return 1;
+    case WM_MBUTTONDOWN:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_MIDDLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+      SetCapture(wnd);
+      return 1;
 
-  case WM_RBUTTONUP:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_RIGHT, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-    ReleaseCapture();
-    return 1;
+    case WM_MBUTTONUP:
+      nk_input_button(&d3d11.ctx, NK_BUTTON_MIDDLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+      ReleaseCapture();
+      return 1;
 
-  case WM_MBUTTONDOWN:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_MIDDLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-    SetCapture(wnd);
-    return 1;
+    case WM_XBUTTONDOWN:
+      switch (GET_XBUTTON_WPARAM(wparam)) {
+        case XBUTTON1:
+          nk_input_button(&d3d11.ctx, NK_BUTTON_X1, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+          break;
 
-  case WM_MBUTTONUP:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_MIDDLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-    ReleaseCapture();
-    return 1;
+        case XBUTTON2:
+          nk_input_button(&d3d11.ctx, NK_BUTTON_X2, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+          break;
+      }
 
-  case WM_XBUTTONDOWN:
-    switch (GET_XBUTTON_WPARAM(wparam)) {
-    case XBUTTON1:
-      nk_input_button(&d3d11.ctx, NK_BUTTON_X1, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-      break;
-    case XBUTTON2:
-      nk_input_button(&d3d11.ctx, NK_BUTTON_X2, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-      break;
-    }
-    SetCapture(wnd);
-    return 1;
+      SetCapture(wnd);
+      return 1;
 
-  case WM_XBUTTONUP:
-    switch (GET_XBUTTON_WPARAM(wparam)) {
-    case XBUTTON1:
-      nk_input_button(&d3d11.ctx, NK_BUTTON_X1, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-      break;
-    case XBUTTON2:
-      nk_input_button(&d3d11.ctx, NK_BUTTON_X2, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
-      break;
-    }
-    ReleaseCapture();
-    return 1;
+    case WM_XBUTTONUP:
+      switch (GET_XBUTTON_WPARAM(wparam)) {
+        case XBUTTON1:
+          nk_input_button(&d3d11.ctx, NK_BUTTON_X1, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+          break;
 
-  case WM_MOUSEWHEEL:
-    nk_input_scroll(&d3d11.ctx, nk_vec2(0, (float)(short)HIWORD(wparam) / WHEEL_DELTA));
-    return 1;
+        case XBUTTON2:
+          nk_input_button(&d3d11.ctx, NK_BUTTON_X2, (short)LOWORD(lparam), (short)HIWORD(lparam), 0);
+          break;
+      }
 
-  case WM_MOUSEMOVE:
-    nk_input_motion(&d3d11.ctx, (short)LOWORD(lparam), (short)HIWORD(lparam));
-    return 1;
+      ReleaseCapture();
+      return 1;
 
-  case WM_LBUTTONDBLCLK:
-    nk_input_button(&d3d11.ctx, NK_BUTTON_DOUBLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
-    return 1;
+    case WM_MOUSEWHEEL:
+      nk_input_scroll(&d3d11.ctx, nk_vec2(0, (float)(short)HIWORD(wparam) / WHEEL_DELTA));
+      return 1;
+
+    case WM_MOUSEMOVE:
+      nk_input_motion(&d3d11.ctx, (short)LOWORD(lparam), (short)HIWORD(lparam));
+      return 1;
+
+    case WM_LBUTTONDBLCLK:
+      /* with CS_DBLCLKS the second press arrives only as this message */
+      nk_input_button(&d3d11.ctx, NK_BUTTON_DOUBLE, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+      nk_input_button(&d3d11.ctx, NK_BUTTON_LEFT, (short)LOWORD(lparam), (short)HIWORD(lparam), 1);
+      SetCapture(wnd);
+      return 1;
   }
 
   return 0;
@@ -455,6 +528,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
                        nk_size       text_cache_size)
 {
   HRESULT hr;
+
   d3d11.max_vertex_buffer = max_vertex_buffer;
   d3d11.max_index_buffer  = max_index_buffer;
   d3d11.device            = device;
@@ -466,12 +540,18 @@ nk_d3d11_init_internal(ID3D11Device *device,
     }
   } else {
     nk_init_default(&d3d11.ctx, 0);
+    d3d11.text_memory = malloc(NK_D3D11_TEXT_CACHE_SIZE);
+
+    if (!d3d11.text_memory || !nk_text_memory_init(&d3d11.ctx, d3d11.text_memory, NK_D3D11_TEXT_CACHE_SIZE)) {
+      return NULL;
+    }
   }
 
   nk_buffer_init_default(&d3d11.cmds);
 
   { /* rasterizer state */
     D3D11_RASTERIZER_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.FillMode              = D3D11_FILL_SOLID;
     desc.CullMode              = D3D11_CULL_NONE;
@@ -519,6 +599,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
        D3D11_INPUT_PER_VERTEX_DATA,
        0},
     };
+
     hr = ID3D11Device_CreateInputLayout(
       device, layout, ARRAYSIZE(layout), nk_d3d11_vertex_shader, sizeof(nk_d3d11_vertex_shader), &d3d11.input_layout);
     NK_ASSERT(SUCCEEDED(hr));
@@ -528,6 +609,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
   {
     float             matrix[4 * 4];
     D3D11_BUFFER_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.ByteWidth      = sizeof(matrix);
     desc.Usage          = D3D11_USAGE_DYNAMIC;
@@ -537,6 +619,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
 
     {
       D3D11_SUBRESOURCE_DATA data;
+
       data.pSysMem          = matrix;
       data.SysMemPitch      = 0;
       data.SysMemSlicePitch = 0;
@@ -556,6 +639,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
 
   { /* blend state */
     D3D11_BLEND_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.AlphaToCoverageEnable                 = FALSE;
     desc.RenderTarget[0].BlendEnable           = TRUE;
@@ -573,6 +657,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
   /* vertex buffer */
   {
     D3D11_BUFFER_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.Usage          = D3D11_USAGE_DYNAMIC;
     desc.ByteWidth      = max_vertex_buffer;
@@ -586,6 +671,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
   /* index buffer */
   {
     D3D11_BUFFER_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.Usage          = D3D11_USAGE_DYNAMIC;
     desc.ByteWidth      = max_index_buffer;
@@ -598,6 +684,7 @@ nk_d3d11_init_internal(ID3D11Device *device,
   /* sampler state */
   {
     D3D11_SAMPLER_DESC desc;
+
     memset(&desc, 0, sizeof(desc));
     desc.Filter         = D3D11_FILTER_MIN_MAG_MIP_POINT;
     desc.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -644,203 +731,16 @@ nk_d3d11_init_fixed(ID3D11Device *device,
   return nk_d3d11_init_internal(device, width, height, max_vertex_buffer, max_index_buffer, memory, memory_size, text_cache_size);
 }
 
-static struct nk_d3d11_font_data *
-nk_d3d11_get_font_data(const struct nk_font *font)
+NK_API nk_bool
+nk_d3d11_setup_atlas(struct nk_glyph_atlas *atlas)
 {
-  for (int i = 0; i < d3d11.font_count; ++i) {
-    if (font == d3d11.fonts[i]) {
-      return &d3d11.font_data[i];
-    }
-  }
-  return NULL;
-}
+  D3D11_TEXTURE2D_DESC            desc;
+  D3D11_SHADER_RESOURCE_VIEW_DESC srv;
+  HRESULT                         hr;
 
-static struct nk_d3d11_glyph_slot *
-nk_d3d11_find_glyph_slot(struct nk_d3d11_font_data *font_data, nk_glyph_id id, float height)
-{
-  unsigned int idx = id * 2654435761u;
-
-  for (unsigned int i = 0; i < NK_D3D11_GLYPH_TABLE_CAPACITY; ++i) {
-    struct nk_d3d11_glyph_slot *slot = &font_data->table[(idx + i) & (NK_D3D11_GLYPH_TABLE_CAPACITY - 1)];
-    if (!slot->glyph || (slot->id == id && slot->height == height)) {
-      return slot;
-    }
-  }
-  return NULL;
-}
-
-static void
-nk_d3d11_cache_prebaked_glyphs(struct nk_d3d11_font_data *font_data, struct nk_font *font)
-{
-  for (unsigned int i = 0; i < font->info.glyph_count; ++i) {
-    if (!font->glyphs[i].id) {
-      continue;
-    }
-    struct nk_d3d11_glyph_slot *slot = nk_d3d11_find_glyph_slot(font_data, font->glyphs[i].id, font->info.height);
-    if (slot && !slot->glyph) {
-      slot->id     = font->glyphs[i].id;
-      slot->height = font->info.height;
-      slot->glyph  = &font->glyphs[i];
-    }
-  }
-}
-
-static nk_bool
-nk_d3d11_place_glyph_bitmap(int width, int height, int *x, int *y)
-{
-  int packed_width  = width + 2;
-  int packed_height = height + 2;
-
-  if (d3d11.atlas_next_x + packed_width > d3d11.atlas_width) {
-    d3d11.atlas_next_x  = 0;
-    d3d11.atlas_next_y += d3d11.atlas_row_height;
-    d3d11.atlas_row_height = 0;
-  }
-  if (d3d11.atlas_next_y + packed_height > d3d11.atlas_height) {
-    return nk_false;
-  }
-
-  *x = d3d11.atlas_next_x + 1;
-  *y = d3d11.atlas_next_y + 1;
-  d3d11.atlas_next_x += packed_width;
-  d3d11.atlas_row_height = NK_MAX(d3d11.atlas_row_height, packed_height);
-  return nk_true;
-}
-
-static const struct nk_font_glyph *
-nk_d3d11_rasterize_glyph(struct nk_font *font, struct nk_d3d11_font_data *font_data, nk_glyph_id id, float height)
-{
-  struct nk_font_glyph *glyph;
-  int                   bitmap_width;
-  int                   bitmap_height;
-  int                   atlas_x = 0;
-  int                   atlas_y = 0;
-
-  if (font_data->dynamic_glyph_count == NK_D3D11_DYNAMIC_GLYPH_CAPACITY || !d3d11.render_context) {
-    return NULL;
-  }
-
-  glyph = &font_data->dynamic_glyphs[font_data->dynamic_glyph_count];
-  if (!nk_runtime_font_rasterize(font_data->ttf,
-                                 height,
-                                 id,
-                                 d3d11.glyph_alpha,
-                                 NK_D3D11_GLYPH_BITMAP_SIZE,
-                                 glyph)) {
-    return NULL;
-  }
-
-  bitmap_width  = (int)glyph->w;
-  bitmap_height = (int)glyph->h;
-
-  if ((bitmap_width || bitmap_height) && !nk_d3d11_place_glyph_bitmap(bitmap_width, bitmap_height, &atlas_x, &atlas_y)) {
-    return NULL;
-  }
-
-  font_data->dynamic_glyph_count += 1;
-
-  if (bitmap_width && bitmap_height) {
-    D3D11_BOX box = {0};
-
-    for (int y = 0; y < bitmap_height; ++y) {
-      for (int x = 0; x < bitmap_width; ++x) {
-        int dst = (y * bitmap_width + x) * 4;
-        d3d11.glyph_rgba[dst + 0] = 255;
-        d3d11.glyph_rgba[dst + 1] = 255;
-        d3d11.glyph_rgba[dst + 2] = 255;
-        d3d11.glyph_rgba[dst + 3] = d3d11.glyph_alpha[y * NK_D3D11_GLYPH_BITMAP_SIZE + x];
-      }
-    }
-
-    box.left   = atlas_x;
-    box.top    = atlas_y;
-    box.front  = 0;
-    box.right  = atlas_x + bitmap_width;
-    box.bottom = atlas_y + bitmap_height;
-    box.back   = 1;
-    ID3D11DeviceContext_UpdateSubresource(d3d11.render_context, (ID3D11Resource *)d3d11.font_texture, 0, &box, d3d11.glyph_rgba, bitmap_width * 4, 0);
-
-    glyph->u0 = (float)atlas_x / d3d11.atlas_width;
-    glyph->v0 = (float)atlas_y / d3d11.atlas_height;
-    glyph->u1 = (float)(atlas_x + bitmap_width) / d3d11.atlas_width;
-    glyph->v1 = (float)(atlas_y + bitmap_height) / d3d11.atlas_height;
-  }
-  return glyph;
-}
-
-static void
-nk_d3d11_font_query_glyph(nk_handle handle, float height, struct nk_user_font_glyph *out, nk_glyph_id id)
-{
-  struct nk_font             *font = handle.ptr;
-  struct nk_d3d11_font_data  *font_data;
-  struct nk_d3d11_glyph_slot *slot;
-  const struct nk_font_glyph *glyph;
-
-  memset(out, 0, sizeof(*out));
-  if (!font) {
-    return;
-  }
-
-  font_data = nk_d3d11_get_font_data(font);
-  slot      = nk_d3d11_find_glyph_slot(font_data, id, height);
-  if (!slot) {
-    return;
-  }
-
-  glyph = slot->glyph;
-  if (!glyph) {
-    glyph = nk_d3d11_rasterize_glyph(font, font_data, id, height);
-    if (!glyph) {
-      return;
-    }
-    slot->id     = id;
-    slot->height = height;
-    slot->glyph  = glyph;
-  }
-
-  out->width    = glyph->x1 - glyph->x0;
-  out->height   = glyph->y1 - glyph->y0;
-  out->offset   = nk_vec2(glyph->x0, glyph->y0);
-  out->xadvance = glyph->xadvance;
-  out->uv[0]    = nk_vec2(glyph->u0, glyph->v0);
-  out->uv[1]    = nk_vec2(glyph->u1, glyph->v1);
-}
-
-NK_API void
-nk_d3d11_setup_fonts(struct nk_runtime_fonts *fonts)
-{
-  int         w     = fonts->width;
-  int         h     = fonts->height;
-  const void *image = fonts->pixels;
-
-  /* upload font to texture and create texture view */
-  HRESULT hr;
-
-  memset(d3d11.font_data, 0, sizeof(d3d11.font_data));
-  d3d11.font_count = fonts->face_count;
-  for (int i = 0; i < fonts->face_count; ++i) {
-    d3d11.fonts[i]         = fonts->faces[i].font;
-    d3d11.font_data[i].ttf = fonts->faces[i].ttf;
-  }
-
-  d3d11.atlas_width      = w;
-  d3d11.atlas_height     = h + NK_D3D11_DYNAMIC_ATLAS_HEIGHT;
-  d3d11.atlas_next_x     = 0;
-  d3d11.atlas_next_y     = h;
-  d3d11.atlas_row_height = 0;
-
-  for (int face = 0; face < fonts->face_count; ++face) {
-    struct nk_font *font = fonts->faces[face].font;
-    for (nk_rune i = 0; i < font->info.glyph_count; ++i) {
-      font->glyphs[i].v0 *= (float)h / d3d11.atlas_height;
-      font->glyphs[i].v1 *= (float)h / d3d11.atlas_height;
-    }
-  }
-
-  D3D11_TEXTURE2D_DESC desc;
   memset(&desc, 0, sizeof(desc));
-  desc.Width              = d3d11.atlas_width;
-  desc.Height             = d3d11.atlas_height;
+  desc.Width              = (UINT)atlas->width;
+  desc.Height             = (UINT)atlas->height;
   desc.MipLevels          = 1;
   desc.ArraySize          = 1;
   desc.Format             = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -851,39 +751,107 @@ nk_d3d11_setup_fonts(struct nk_runtime_fonts *fonts)
   desc.CPUAccessFlags     = 0;
 
   hr = ID3D11Device_CreateTexture2D(d3d11.device, &desc, NULL, &d3d11.font_texture);
-  assert(SUCCEEDED(hr));
 
-  {
-    D3D11_BOX              box = {0, 0, 0, w, h, 1};
-    ID3D11DeviceContext   *upload_context;
-    ID3D11Device_GetImmediateContext(d3d11.device, &upload_context);
-    ID3D11DeviceContext_UpdateSubresource(upload_context, (ID3D11Resource *)d3d11.font_texture, 0, &box, image, w * 4, 0);
-    ID3D11DeviceContext_Release(upload_context);
+  if (FAILED(hr)) {
+    return nk_false;
   }
 
-  {
-    D3D11_SHADER_RESOURCE_VIEW_DESC srv;
-    memset(&srv, 0, sizeof(srv));
-    srv.Format                    = desc.Format;
-    srv.ViewDimension             = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srv.Texture2D.MipLevels       = 1;
-    srv.Texture2D.MostDetailedMip = 0;
-    hr                            = ID3D11Device_CreateShaderResourceView(
-      d3d11.device, (ID3D11Resource *)d3d11.font_texture, &srv, &d3d11.font_texture_view);
-    assert(SUCCEEDED(hr));
+  memset(&srv, 0, sizeof(srv));
+  srv.Format                    = desc.Format;
+  srv.ViewDimension             = D3D11_SRV_DIMENSION_TEXTURE2D;
+  srv.Texture2D.MipLevels       = 1;
+  srv.Texture2D.MostDetailedMip = 0;
+  hr                            = ID3D11Device_CreateShaderResourceView(d3d11.device, (ID3D11Resource *)d3d11.font_texture, &srv, &d3d11.font_texture_view);
+
+  if (FAILED(hr)) {
+    ID3D11Texture2D_Release(d3d11.font_texture);
+    d3d11.font_texture = NULL;
+    return nk_false;
   }
 
-  d3d11.tex_null.texture = nk_handle_ptr(d3d11.font_texture_view);
-  d3d11.tex_null.uv      = nk_vec2(((float)fonts->atlas.custom.x + 0.5f) / d3d11.atlas_width,
-                                   ((float)fonts->atlas.custom.y + 0.5f) / d3d11.atlas_height);
+  d3d11.atlas = atlas;
+  nk_glyph_atlas_set_texture(atlas, nk_handle_ptr(d3d11.font_texture_view));
+  d3d11.tex_null = atlas->null;
+  return nk_true;
+}
 
-  for (int i = 0; i < fonts->face_count; ++i) {
-    struct nk_font *font       = fonts->faces[i].font;
-    font->handle.query_glyph   = nk_d3d11_font_query_glyph;
-    nk_d3d11_cache_prebaked_glyphs(&d3d11.font_data[i], font);
+#define NK_D3D11_STICK_THRESHOLD 16000
+
+NK_API nk_bool
+nk_d3d11_poll_gamepad(void)
+{
+  nk_bool   down[NK_KEY_NAV_WINDOW_MENU - NK_KEY_NAV_UP + 1];
+  nk_bool   connected = nk_false;
+  ULONGLONG now       = GetTickCount64();
+  nk_bool   retry     = now >= d3d11.pad_retry;
+  DWORD     i;
+
+  if (!d3d11.xinput_tried) {
+    d3d11.xinput_tried = nk_true;
+    d3d11.xinput       = LoadLibraryA("xinput1_4.dll");
+
+    if (!d3d11.xinput) {
+      d3d11.xinput = LoadLibraryA("xinput9_1_0.dll");
+    }
+
+    if (d3d11.xinput) {
+      d3d11.xinput_get_state = (DWORD(WINAPI *)(DWORD, XINPUT_STATE *))(void (*)(void))GetProcAddress(d3d11.xinput, "XInputGetState");
+    }
   }
-  fonts->atlas.tex_height = d3d11.atlas_height;
-  nk_font_atlas_end(&fonts->atlas, d3d11.tex_null.texture, NULL);
+
+  if (!d3d11.xinput_get_state) {
+    return nk_false;
+  }
+
+  if (retry) {
+    d3d11.pad_retry = now + 1000;
+  }
+
+  memset(down, 0, sizeof(down));
+
+  for (i = 0; i < XUSER_MAX_COUNT; ++i) {
+    XINPUT_STATE state;
+    WORD         b;
+
+    if (!d3d11.pad_connected[i] && !retry) {
+      continue;
+    }
+
+    d3d11.pad_connected[i] = d3d11.xinput_get_state(i, &state) == ERROR_SUCCESS;
+
+    if (!d3d11.pad_connected[i]) {
+      continue;
+    }
+
+    connected                                      = nk_true;
+    b                                              = state.Gamepad.wButtons;
+    down[NK_KEY_NAV_UP - NK_KEY_NAV_UP]           |= (b & XINPUT_GAMEPAD_DPAD_UP) || state.Gamepad.sThumbLY > NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_DOWN - NK_KEY_NAV_UP]         |= (b & XINPUT_GAMEPAD_DPAD_DOWN) || state.Gamepad.sThumbLY < -NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_LEFT - NK_KEY_NAV_UP]         |= (b & XINPUT_GAMEPAD_DPAD_LEFT) || state.Gamepad.sThumbLX < -NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_RIGHT - NK_KEY_NAV_UP]        |= (b & XINPUT_GAMEPAD_DPAD_RIGHT) || state.Gamepad.sThumbLX > NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_ACTIVATE - NK_KEY_NAV_UP]     |= (b & XINPUT_GAMEPAD_A) != 0;
+    down[NK_KEY_NAV_CANCEL - NK_KEY_NAV_UP]       |= (b & XINPUT_GAMEPAD_B) != 0;
+    down[NK_KEY_NAV_MENU - NK_KEY_NAV_UP]         |= (b & XINPUT_GAMEPAD_X) != 0;
+    down[NK_KEY_NAV_WINDOW_PREV - NK_KEY_NAV_UP]  |= (b & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
+    down[NK_KEY_NAV_WINDOW_NEXT - NK_KEY_NAV_UP]  |= (b & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+    down[NK_KEY_NAV_WORD_PREV - NK_KEY_NAV_UP]    |= state.Gamepad.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+    down[NK_KEY_NAV_WORD_NEXT - NK_KEY_NAV_UP]    |= state.Gamepad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+    down[NK_KEY_NAV_SCROLL_UP - NK_KEY_NAV_UP]    |= state.Gamepad.sThumbRY > NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_SCROLL_DOWN - NK_KEY_NAV_UP]  |= state.Gamepad.sThumbRY < -NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_SCROLL_LEFT - NK_KEY_NAV_UP]  |= state.Gamepad.sThumbRX < -NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_SCROLL_RIGHT - NK_KEY_NAV_UP] |= state.Gamepad.sThumbRX > NK_D3D11_STICK_THRESHOLD;
+    down[NK_KEY_NAV_KEYBOARD - NK_KEY_NAV_UP]     |= (b & XINPUT_GAMEPAD_Y) != 0;
+    /* Menu: window menu; View and the stick clicks stay free */
+    down[NK_KEY_NAV_WINDOW_MENU - NK_KEY_NAV_UP] |= (b & XINPUT_GAMEPAD_START) != 0;
+  }
+
+  for (i = 0; i < NK_LEN(down); ++i) {
+    if (down[i] != d3d11.pad_down[i]) {
+      d3d11.pad_down[i] = down[i];
+      nk_input_key(&d3d11.ctx, (enum nk_keys)(NK_KEY_NAV_UP + (int)i), down[i]);
+    }
+  }
+  return connected;
 }
 
 NK_API
@@ -892,10 +860,19 @@ nk_d3d11_shutdown(void)
 {
   nk_buffer_free(&d3d11.cmds);
   nk_free(&d3d11.ctx);
+  free(d3d11.text_memory);
+  d3d11.text_memory = NULL;
 
   ID3D11SamplerState_Release(d3d11.sampler_state);
-  ID3D11ShaderResourceView_Release(d3d11.font_texture_view);
-  ID3D11Texture2D_Release(d3d11.font_texture);
+
+  if (d3d11.font_texture_view) {
+    ID3D11ShaderResourceView_Release(d3d11.font_texture_view);
+  }
+
+  if (d3d11.font_texture) {
+    ID3D11Texture2D_Release(d3d11.font_texture);
+  }
+
   ID3D11Buffer_Release(d3d11.vertex_buffer);
   ID3D11Buffer_Release(d3d11.index_buffer);
   ID3D11BlendState_Release(d3d11.blend_state);
@@ -905,4 +882,12 @@ nk_d3d11_shutdown(void)
   ID3D11InputLayout_Release(d3d11.input_layout);
   ID3D11RasterizerState_Release(d3d11.rasterizer_state);
   ID3D11Device_Release(d3d11.device);
+
+  if (d3d11.xinput) {
+    FreeLibrary(d3d11.xinput);
+  }
+
+  d3d11.xinput           = NULL;
+  d3d11.xinput_get_state = NULL;
+  d3d11.xinput_tried     = nk_false;
 }

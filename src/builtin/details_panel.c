@@ -3567,9 +3567,9 @@ draw_details_panel(search_tool_t *tool, float panel_h)
 
     if (in) {
       if (tool->details.count > 0) {
-        if (keybind_str_is_pressed(STR_LIT("Ctrl+Tab"))) {
+        if (keybind_str_is_pressed(STR_LIT("Ctrl+Shift+Tab"))) {
           detail_tab_prev(tool);
-        } else if (keybind_str_is_pressed(STR_LIT("Tab"))) {
+        } else if (keybind_str_is_pressed(STR_LIT("Ctrl+Tab"))) {
           detail_tab_next(tool);
         } else if (keybind_str_is_pressed(STR_LIT("Ctrl+W"))) {
           if (tool->details.selected_tab) {

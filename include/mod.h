@@ -19,7 +19,7 @@ typedef version_t mod_version_t;
 #define MOD_HANDLE_INVALID     ((mod_handle_t)0)
 #define MOD_CFG_HANDLE_INVALID ((mod_cfg_handle_t)0)
 
-#define MOD_ABI_VERSION ((mod_version_t)MAKE_VERSION(2, 0, 0))
+#define MOD_ABI_VERSION ((mod_version_t)MAKE_VERSION(3, 0, 0))
 
 #define MOD_ABI_VERSION_EXPORT "mod_abi_version"
 #define MOD_ENTRY_EXPORT       "mod_entry"

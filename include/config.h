@@ -32,8 +32,19 @@
 #define CONFIG_NK_D3D12_MAX_DRAW_CMDS    (1024)     // max draw commands per frame snapshot
 #define CONFIG_NK_D3D12_MAX_BACK_BUFFERS (4)        // num of swap chain frames in flight
 
-#define CONFIG_NK_OVERLAY_DEFAULT_TOGGLE_KEY STR_LIT("`")
-#define CONFIG_NK_CONSOLE_DEFAULT_TOGGLE_KEY STR_LIT("F1")
+/* keyboard part | gamepad part */
+#define CONFIG_NK_OVERLAY_DEFAULT_TOGGLE_KEY STR_LIT("` | Select")
+#define CONFIG_NK_CONSOLE_DEFAULT_TOGGLE_KEY STR_LIT("F1 | Select+RS")
+
+/* keybind registry */
+#define CONFIG_ACTIONS_MAX               (512)
+#define CONFIG_ACTIONS_DEFAULT_HOLD_MS   (400)
+#define CONFIG_ACTIONS_MIN_HOLD_MS       (100)
+#define CONFIG_ACTIONS_MAX_HOLD_MS       (2000)
+#define CONFIG_ACTIONS_MAX_HELD_EVENTS   (KEYBIND_MAX_KEYS)
+#define CONFIG_ACTIONS_DEFAULT_CANCEL_MS (1000)
+#define CONFIG_ACTIONS_MIN_CANCEL_MS     (300)
+#define CONFIG_ACTIONS_MAX_CANCEL_MS     (3000)
 
 /* console (Nuklear) */
 #define CONFIG_NK_CONSOLE_MAX_LINES     (4 * KB)

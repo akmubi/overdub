@@ -1,10 +1,12 @@
 #ifndef GLOBALS_H
 #define GLOBALS_H
 
+#include "actions.h"
 #include "arena.h"
 #include "input.h"
 #include "mod_manager.h"
 #include "sigscan.h"
+#include "string_pool.h"
 #include "ui_console.h"
 #include "ui_keybind_capture.h"
 #include "ui_manager.h"
@@ -13,7 +15,9 @@
 
 typedef struct globals_s globals_t;
 struct globals_s {
-  arena_t  perm;
+  arena_t       perm;
+  string_pool_t strings;
+
   void    *module;
   bool     engine_inited;
   uint32_t game_thread_id;
@@ -49,6 +53,9 @@ struct globals_s {
   bool              consumed_down[INPUT_KEY_MAX];
   float             analog_values[INPUT_KEY_MAX];
   float             wheel_delta;
+
+  /* keybind registry */
+  actions_t actions;
 
   /* mod manager */
   mod_manager_t mod_manager;

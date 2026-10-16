@@ -1,5 +1,7 @@
 #include "mod_manager.h"
 
+#include "actions.h"
+
 #include "arena.h"
 #include "file.h"
 #include "globals.h"
@@ -1040,6 +1042,119 @@ mod_cfg_parse_blueprint_section(mod_t *mod, ini_section_t *section)
   }
 }
 
+static void
+mod_cfg_register_keybinds(mod_t *mod, mod_handle_t h)
+{
+  tmp_arena_t tmp = scratch_begin(NULL);
+
+  {
+    str_t mod_id = mod->manifest.info.id;
+    str_t source = str_is_empty(mod->manifest.info.name) ? mod_id : mod->manifest.info.name;
+
+    for (int i = 0; i < mod->option_count && i < mod->manifest.option_count; ++i) {
+      mod_option_info_t *info = &mod->manifest.options[i];
+
+      if (info->type != MOD_OPTION_KEYBIND) {
+        continue;
+      }
+
+      str_t id    = str_push_fmt(tmp.arena, "%.*s.%.*s", STR_ARG(mod_id), STR_ARG(info->id));
+      str_t label = str_is_empty(info->label) ? info->id : info->label;
+
+      actions_register(&globals.actions, id, label, source, h, &mod->options[i].cfg.keybind, NULL, NULL);
+    }
+
+    for (int i = 0; i < mod->blueprint_count && i < mod->manifest.blueprint_count; ++i) {
+      mod_blueprint_info_t *info = &mod->manifest.blueprints[i];
+
+      str_t id    = str_push_fmt(tmp.arena, "%.*s.%.*s.spawn", STR_ARG(mod_id), STR_ARG(info->id));
+      str_t label = str_push_fmt(tmp.arena, "Spawn %.*s", STR_ARG(info->id));
+
+      actions_register(&globals.actions, id, label, source, h, &mod->blueprints[i].cfg.spawn_keybind, NULL, NULL);
+    }
+  }
+
+  scratch_end(tmp);
+}
+
+static bool
+mod_keybind_action_live(mod_manager_t *manager, action_t *a)
+{
+  if (a->owner == MOD_HANDLE_INVALID) {
+    return true;
+  }
+
+  mod_t *m = mod_handle_resolve(manager, a->owner);
+  return m && m->enabled;
+}
+
+static bool
+mod_keybind_part_shared(keybind_t a, keybind_t b)
+{
+  return a.count > 0 && keybind_equal(a, b);
+}
+
+action_t *
+mod_keybind_find_conflict(mod_manager_t *manager, actions_t *registry, keybind_t candidate, keybind_t *exclude)
+{
+  keybind_t keyboard = keybind_keyboard_part(candidate);
+  keybind_t gamepad  = keybind_gamepad_part(candidate);
+
+  for (int i = 0; i < registry->count; ++i) {
+    action_t *a = &registry->items[i];
+
+    if (a->bind == exclude || !a->bind || !mod_keybind_action_live(manager, a)) {
+      continue;
+    }
+
+    if (mod_keybind_part_shared(keyboard, keybind_keyboard_part(*a->bind)) ||
+        mod_keybind_part_shared(gamepad,  keybind_gamepad_part (*a->bind))) {
+      return a;
+    }
+  }
+  return NULL;
+}
+
+str_list_t
+mod_keybind_issues(mod_manager_t *manager, actions_t *registry, mod_handle_t h, arena_t *arena)
+{
+  str_list_t issues = {0};
+
+  for (int i = 0; i < registry->count; ++i) {
+    action_t *a = &registry->items[i];
+
+    if (a->owner != h || !a->bind) {
+      continue;
+    }
+
+    if (a->bind->count == 0) {
+      str_list_push_fmt(arena, &issues, "'%.*s' has no keybind", STR_ARG(a->label));
+      continue;
+    }
+
+    action_t *other = mod_keybind_find_conflict(manager, registry, *a->bind, a->bind);
+
+    if (other) {
+      str_list_push_fmt(arena, &issues, "'%.*s' shares a keybind with '%.*s' (%.*s)", STR_ARG(a->label), STR_ARG(other->label), STR_ARG(other->source));
+    }
+  }
+  return issues;
+}
+
+bool
+mod_has_keybind_issues(mod_manager_t *manager, actions_t *registry, mod_handle_t h)
+{
+  bool        issues = false;
+  tmp_arena_t tmp    = scratch_begin(NULL);
+
+  {
+    issues = mod_keybind_issues(manager, registry, h, tmp.arena).count > 0;
+  }
+
+  scratch_end(tmp);
+  return issues;
+}
+
 bool
 mod_cfg_load(mod_manager_t *manager, mod_handle_t h)
 {
@@ -1081,6 +1196,8 @@ mod_cfg_load(mod_manager_t *manager, mod_handle_t h)
   for (int i = 0; i < mod->blueprint_count; ++i) {
     mod->blueprints[i].saved_cfg = mod->blueprints[i].cfg;
   }
+
+  mod_cfg_register_keybinds(mod, h);
 
   scratch_end(tmp);
   return result;
@@ -1298,6 +1415,18 @@ mod_manager_load_cfg(mod_manager_t *manager)
               mod_cfg_string_set(&manager->cfg.root_mod_dir, value);
             } else if (str_equal_icase(key, STR_LIT("overlay_toggle_keybind"))) {
               manager->cfg.overlay_toggle = keybind_parse(value, KEYBIND_NULL);
+            } else if (str_equal_icase(key, STR_LIT("gamepad_hold_ms"))) {
+              int ms = CONFIG_ACTIONS_DEFAULT_HOLD_MS;
+
+              if (str_parse_int(value, &ms)) {
+                manager->cfg.gamepad_hold_ms = CLAMP(ms, CONFIG_ACTIONS_MIN_HOLD_MS, CONFIG_ACTIONS_MAX_HOLD_MS);
+              }
+            } else if (str_equal_icase(key, STR_LIT("gamepad_cancel_ms"))) {
+              int ms = CONFIG_ACTIONS_DEFAULT_CANCEL_MS;
+
+              if (str_parse_int(value, &ms)) {
+                manager->cfg.gamepad_cancel_ms = CLAMP(ms, CONFIG_ACTIONS_MIN_CANCEL_MS, CONFIG_ACTIONS_MAX_CANCEL_MS);
+              }
             }
           }
         } else if (str_equal_icase(section->name, STR_LIT("mod_order"))) {
@@ -1335,6 +1464,8 @@ mod_manager_save_cfg(mod_manager_t *manager)
       str_list_push(tmp.arena, &lines, STR_LIT("[loader]"));
       str_list_push_fmt(tmp.arena, &lines, "mod_dir                = %.*s", STR_ARG(root_mod_dir));
       str_list_push_fmt(tmp.arena, &lines, "overlay_toggle_keybind = %.*s", STR_ARG(overlay_toggle_bind_str));
+      str_list_push_fmt(tmp.arena, &lines, "gamepad_hold_ms        = %d", manager->cfg.gamepad_hold_ms);
+      str_list_push_fmt(tmp.arena, &lines, "gamepad_cancel_ms      = %d", manager->cfg.gamepad_cancel_ms);
       str_list_push(tmp.arena, &lines, STR_LIT(""));
 
       str_list_t mod_order_id_list = mod_manager_get_mod_order_id_list(manager, tmp.arena);
@@ -3641,6 +3772,9 @@ mod_manager_init(mod_manager_t *manager, str_t game_dir)
   manager->config_path = path_join(&manager->perm, game_dir, CONFIG_MOD_MANAGER_CONFIG_PATH);
   manager->mods        = ARENA_PUSH_ARRAY_ZERO(&manager->perm, mod_t, CONFIG_MOD_MANAGER_MAX_MODS);
 
+  manager->cfg.gamepad_hold_ms   = CONFIG_ACTIONS_DEFAULT_HOLD_MS;
+  manager->cfg.gamepad_cancel_ms = CONFIG_ACTIONS_DEFAULT_CANCEL_MS;
+
   ASSERT(!str_is_empty(manager->config_path));
   ASSERT(manager->mods != NULL);
 
@@ -3921,6 +4055,10 @@ mod_manager_cfg_is_dirty(mod_manager_cfg_t *cfg, mod_manager_cfg_t *saved_cfg)
   }
 
   if (!keybind_equal(cfg->overlay_toggle, saved_cfg->overlay_toggle)) {
+    return true;
+  }
+
+  if (cfg->gamepad_hold_ms != saved_cfg->gamepad_hold_ms || cfg->gamepad_cancel_ms != saved_cfg->gamepad_cancel_ms) {
     return true;
   }
 

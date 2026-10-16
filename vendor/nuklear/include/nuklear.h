@@ -9,10 +9,11 @@
 #define NK_INCLUDE_STANDARD_VARARGS
 #define NK_INCLUDE_DEFAULT_ALLOCATOR
 #define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
-#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_GLYPH_ATLAS
 #define NK_BUTTON_TRIGGER_ON_RELEASE
 #define NK_UINT_DRAW_INDEX
 #define NK_DEFAULT_TEXT_SELECTABLE
+#define NK_DEFAULT_NAVIGATION
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,12 +29,15 @@ extern "C" {
 #define NK_UNDEFINED   (-1.0f)
 #define NK_UTF_INVALID 0xFFFD /**< internal invalid utf8 rune */
 #define NK_UTF_SIZE    4      /**< describes the number of bytes a glyph consists of*/
+
 #ifndef NK_INPUT_MAX
 #  define NK_INPUT_MAX 16
 #endif
+
 #ifndef NK_MAX_NUMBER_BUFFER
 #  define NK_MAX_NUMBER_BUFFER 64
 #endif
+
 #ifndef NK_SCROLLBAR_HIDING_TIMEOUT
 #  define NK_SCROLLBAR_HIDING_TIMEOUT 4.0f
 #endif
@@ -59,6 +63,7 @@ extern "C" {
 #    define NK_API extern
 #  endif
 #endif
+
 #ifndef NK_LIB
 #  ifdef NK_SINGLE_FILE
 #    define NK_LIB static
@@ -102,12 +107,14 @@ extern "C" {
 
 #ifdef NK_INCLUDE_STANDARD_VARARGS
 #  include <stdarg.h>
+
 #  if defined(_MSC_VER) && (_MSC_VER >= 1600) /* VS 2010 and above */
 #    include <sal.h>
 #    define NK_PRINTF_FORMAT_STRING _Printf_format_string_
 #  else
 #    define NK_PRINTF_FORMAT_STRING
 #  endif
+
 #  if defined(__GNUC__)
 #    define NK_PRINTF_VARARG_FUNC(fmtargnumber) __attribute__((format(__printf__, fmtargnumber, fmtargnumber + 1)))
 #    define NK_PRINTF_VALIST_FUNC(fmtargnumber) __attribute__((format(__printf__, fmtargnumber, 0)))
@@ -138,15 +145,19 @@ extern "C" {
 #  ifndef NK_INT8
 #    define NK_INT8 signed char
 #  endif
+
 #  ifndef NK_UINT8
 #    define NK_UINT8 unsigned char
 #  endif
+
 #  ifndef NK_INT16
 #    define NK_INT16 signed short
 #  endif
+
 #  ifndef NK_UINT16
 #    define NK_UINT16 unsigned short
 #  endif
+
 #  ifndef NK_INT32
 #    if defined(_MSC_VER)
 #      define NK_INT32 __int32
@@ -154,6 +165,7 @@ extern "C" {
 #      define NK_INT32 signed int
 #    endif
 #  endif
+
 #  ifndef NK_UINT32
 #    if defined(_MSC_VER)
 #      define NK_UINT32 unsigned __int32
@@ -161,6 +173,7 @@ extern "C" {
 #      define NK_UINT32 unsigned int
 #    endif
 #  endif
+
 #  ifndef NK_SIZE_TYPE
 #    if defined(_WIN64) && defined(_MSC_VER)
 #      define NK_SIZE_TYPE unsigned __int64
@@ -180,6 +193,7 @@ extern "C" {
 #      define NK_SIZE_TYPE unsigned long
 #    endif
 #  endif
+
 #  ifndef NK_POINTER_TYPE
 #    if defined(_WIN64) && defined(_MSC_VER)
 #      define NK_POINTER_TYPE unsigned __int64
@@ -301,6 +315,7 @@ struct nk_recti {
 };
 
 typedef char nk_glyph[NK_UTF_SIZE];
+
 typedef union {
   void *ptr;
   int   id;
@@ -510,6 +525,7 @@ enum nk_symbol_type {
 NK_API nk_bool
 nk_init_default(struct nk_context *, const struct nk_user_font *);
 #endif
+
 /**
  * # nk_init_fixed
  * Initializes a `nk_context` struct from single fixed size memory block
@@ -731,8 +747,37 @@ enum nk_keys {
   NK_KEY_SCROLL_END,
   NK_KEY_SCROLL_DOWN,
   NK_KEY_SCROLL_UP,
+  /* Tab and Shift+Tab: keyboard focus between fields */
+  NK_KEY_FOCUS_NEXT,
+  NK_KEY_FOCUS_PREV,
+  /* navigation without a mouse: see nk_nav_enable */
+  NK_KEY_NAV_UP,              /**!< held directions repeat, and values speed up */
+  NK_KEY_NAV_DOWN,
+  NK_KEY_NAV_LEFT,
+  NK_KEY_NAV_RIGHT,
+  NK_KEY_NAV_ACTIVATE,        /**!< click the focus */
+  NK_KEY_NAV_CANCEL,          /**!< close the popup, leave the edit field */
+  NK_KEY_NAV_MENU,            /**!< right click the focus */
+  NK_KEY_NAV_WINDOW_NEXT,     /**!< next window; on-screen keyboard: next character */
+  NK_KEY_NAV_WINDOW_PREV,     /**!< previous window; on-screen keyboard: previous character */
+  NK_KEY_NAV_SCROLL_UP,       /**!< held: scroll */
+  NK_KEY_NAV_SCROLL_DOWN,
+  NK_KEY_NAV_SCROLL_LEFT,
+  NK_KEY_NAV_SCROLL_RIGHT,
+  NK_KEY_NAV_WINDOW_UP,       /**!< the window that way */
+  NK_KEY_NAV_WINDOW_DOWN,
+  NK_KEY_NAV_WINDOW_LEFT,
+  NK_KEY_NAV_WINDOW_RIGHT,
+  NK_KEY_NAV_WINDOW_MAXIMIZE, /**!< maximize or restore */
+  NK_KEY_NAV_WINDOW_SIZE,     /**!< held: directions resize */
+  NK_KEY_NAV_WINDOW_MOVE,     /**!< held: directions move */
+  NK_KEY_NAV_KEYBOARD,        /**!< for the application: an on-screen keyboard */
+  NK_KEY_NAV_WORD_PREV,       /**!< on-screen keyboard: previous word */
+  NK_KEY_NAV_WORD_NEXT,       /**!< on-screen keyboard: next word */
+  NK_KEY_NAV_WINDOW_MENU,     /**!< window menu */
   NK_KEY_MAX
 };
+
 enum nk_buttons {
   NK_BUTTON_LEFT,
   NK_BUTTON_MIDDLE,
@@ -925,7 +970,7 @@ nk_input_end(struct nk_context *);
  *         your_draw_rect_function(...)
  *         break;
  *     case //...:
- *         //[...]
+ *          //[...]
  *     }
  * }
  * ```
@@ -1123,6 +1168,7 @@ nk_input_end(struct nk_context *);
  */
 
 enum nk_anti_aliasing { NK_ANTI_ALIASING_OFF, NK_ANTI_ALIASING_ON };
+
 enum nk_convert_result {
   NK_CONVERT_SUCCESS             = 0,
   NK_CONVERT_INVALID_PARAM       = 1,
@@ -1130,18 +1176,20 @@ enum nk_convert_result {
   NK_CONVERT_VERTEX_BUFFER_FULL  = NK_FLAG(2),
   NK_CONVERT_ELEMENT_BUFFER_FULL = NK_FLAG(3)
 };
+
 struct nk_draw_null_texture {
   nk_handle      texture; /**!< texture handle to a texture with a white pixel */
   struct nk_vec2 uv;      /**!< coordinates to a white pixel in the texture  */
 };
+
 struct nk_convert_config {
-  float                       global_alpha; /**!< global alpha value */
-  enum nk_anti_aliasing       line_AA;  /**!< line anti-aliasing flag can be turned off if you are tight on memory */
-  enum nk_anti_aliasing       shape_AA; /**!< shape anti-aliasing flag can be turned off if you are tight on memory */
-  unsigned                    circle_segment_count; /**!< number of segments used for circles: default to 22 */
-  unsigned                    arc_segment_count;    /**!< number of segments used for arcs: default to 22 */
-  unsigned                    curve_segment_count;  /**!< number of segments used for curves: default to 22 */
-  struct nk_draw_null_texture tex_null;             /**!< handle to texture with a white pixel for shape drawing */
+  float                       global_alpha;                     /**!< global alpha value */
+  enum nk_anti_aliasing       line_AA;                          /**!< line anti-aliasing flag can be turned off if you are tight on memory */
+  enum nk_anti_aliasing       shape_AA;                         /**!< shape anti-aliasing flag can be turned off if you are tight on memory */
+  unsigned                    circle_segment_count;             /**!< number of segments used for circles: default to 22 */
+  unsigned                    arc_segment_count;                /**!< number of segments used for arcs: default to 22 */
+  unsigned                    curve_segment_count;              /**!< number of segments used for curves: default to 22 */
+  struct nk_draw_null_texture tex_null;                         /**!< handle to texture with a white pixel for shape drawing */
   const struct nk_draw_vertex_layout_element *vertex_layout;    /**!< describes the vertex output format and packing */
   nk_size                                     vertex_size;      /**!< sizeof one vertex for vertex packing */
   nk_size                                     vertex_alignment; /**!< vertex alignment: Can be obtained by NK_ALIGNOF */
@@ -1386,7 +1434,7 @@ nk__draw_next(const struct nk_draw_command *, const struct nk_buffer *, const st
  *         your_draw_rect_function(...)
  *         break;
  *     case //...:
- *         //[...]
+ *          //[...]
  *     }
  *     nk_clear(&ctx);
  * }
@@ -2359,13 +2407,13 @@ nk_rule_horizontal(struct nk_context *ctx, struct nk_color color, nk_bool roundi
  *        nk_layout_row_template_push_variable(ctx, 80);
  *        nk_layout_row_template_push_static(ctx, 80);
  *        nk_layout_row_template_end(ctx);
- *        //
- *        // first row
+ *                        //
+ *                        // first row
  *        nk_widget(...); // dynamic widget can go to zero if not enough space
  *        nk_widget(...); // variable widget with min 80 pixel but can grow bigger if enough space
  *        nk_widget(...); // static widget with fixed 80 pixel width
- *        //
- *        // second row same layout
+ *                        //
+ *                        // second row same layout
  *        nk_widget(...);
  *        nk_widget(...);
  *        nk_widget(...);
@@ -2445,6 +2493,7 @@ enum nk_widget_align {
   NK_WIDGET_ALIGN_MIDDLE   = 0x10,
   NK_WIDGET_ALIGN_BOTTOM   = 0x20
 };
+
 enum nk_widget_alignment {
   NK_WIDGET_LEFT     = NK_WIDGET_ALIGN_MIDDLE | NK_WIDGET_ALIGN_LEFT,
   NK_WIDGET_CENTERED = NK_WIDGET_ALIGN_MIDDLE | NK_WIDGET_ALIGN_CENTERED,
@@ -3396,6 +3445,7 @@ nk_tree_state_pop(struct nk_context *);
   nk_tree_element_push_hashed(ctx, type, title, state, sel, NK_FILE_LINE, nk_strlen(NK_FILE_LINE), __LINE__)
 #define nk_tree_element_push_id(ctx, type, title, state, sel, id) \
   nk_tree_element_push_hashed(ctx, type, title, state, sel, NK_FILE_LINE, nk_strlen(NK_FILE_LINE), id)
+
 NK_API nk_bool
 nk_tree_element_push_hashed(struct nk_context *,
                             enum nk_tree_type,
@@ -3435,11 +3485,13 @@ struct nk_list_view {
   nk_uint            prev_max_value;
   nk_uint           *prev_flags_pointer;
 };
+
 NK_API nk_bool
 nk_list_view_begin(
   struct nk_context *, struct nk_list_view *out, const char *id, nk_flags, int row_height, int row_count);
 NK_API void
 nk_list_view_end(struct nk_list_view *);
+
 /* =============================================================================
  *
  *                                  WIDGET
@@ -3451,16 +3503,18 @@ enum nk_widget_layout_states {
   NK_WIDGET_ROM,     /**< The widget is partially visible and cannot be updated */
   NK_WIDGET_DISABLED /**< The widget is manually disabled and acts like NK_WIDGET_ROM */
 };
+
 enum nk_widget_states {
   NK_WIDGET_STATE_MODIFIED = NK_FLAG(1),
-  NK_WIDGET_STATE_INACTIVE = NK_FLAG(2), /**!< widget is neither active nor hovered */
-  NK_WIDGET_STATE_ENTERED  = NK_FLAG(3), /**!< widget has been hovered on the current frame */
-  NK_WIDGET_STATE_HOVER    = NK_FLAG(4), /**!< widget is being hovered */
-  NK_WIDGET_STATE_ACTIVED  = NK_FLAG(5), /**!< widget is currently activated */
-  NK_WIDGET_STATE_LEFT     = NK_FLAG(6), /**!< widget is from this frame on not hovered anymore */
+  NK_WIDGET_STATE_INACTIVE = NK_FLAG(2),                                        /**!< widget is neither active nor hovered */
+  NK_WIDGET_STATE_ENTERED  = NK_FLAG(3),                                        /**!< widget has been hovered on the current frame */
+  NK_WIDGET_STATE_HOVER    = NK_FLAG(4),                                        /**!< widget is being hovered */
+  NK_WIDGET_STATE_ACTIVED  = NK_FLAG(5),                                        /**!< widget is currently activated */
+  NK_WIDGET_STATE_LEFT     = NK_FLAG(6),                                        /**!< widget is from this frame on not hovered anymore */
   NK_WIDGET_STATE_HOVERED  = NK_WIDGET_STATE_HOVER | NK_WIDGET_STATE_MODIFIED,  /**!< widget is being hovered */
   NK_WIDGET_STATE_ACTIVE   = NK_WIDGET_STATE_ACTIVED | NK_WIDGET_STATE_MODIFIED /**!< widget is currently activated */
 };
+
 NK_API enum nk_widget_layout_states
 nk_widget(struct nk_rect *, const struct nk_context *);
 NK_API enum nk_widget_layout_states
@@ -3487,6 +3541,7 @@ NK_API void
 nk_widget_disable_begin(struct nk_context *ctx);
 NK_API void
 nk_widget_disable_end(struct nk_context *ctx);
+
 /* =============================================================================
  *
  *                                  TEXT
@@ -3500,11 +3555,13 @@ enum nk_text_align {
   NK_TEXT_ALIGN_MIDDLE   = 0x10,
   NK_TEXT_ALIGN_BOTTOM   = 0x20
 };
+
 enum nk_text_alignment {
   NK_TEXT_LEFT     = NK_TEXT_ALIGN_MIDDLE | NK_TEXT_ALIGN_LEFT,
   NK_TEXT_CENTERED = NK_TEXT_ALIGN_MIDDLE | NK_TEXT_ALIGN_CENTERED,
   NK_TEXT_RIGHT    = NK_TEXT_ALIGN_MIDDLE | NK_TEXT_ALIGN_RIGHT
 };
+
 NK_API void
 nk_text(struct nk_context *, const char *, int, nk_flags);
 NK_API void
@@ -3772,6 +3829,7 @@ nk_value_color_float(struct nk_context *, const char *prefix, struct nk_color);
 NK_API void
 nk_value_color_hex(struct nk_context *, const char *prefix, struct nk_color);
 #endif
+
 /* =============================================================================
  *
  *                                  BUTTON
@@ -4206,12 +4264,14 @@ enum nk_edit_flags {
   NK_EDIT_MULTILINE            = NK_FLAG(10),
   NK_EDIT_GOTO_END_ON_ACTIVATE = NK_FLAG(11)
 };
+
 enum nk_edit_types {
   NK_EDIT_SIMPLE = NK_EDIT_ALWAYS_INSERT_MODE,
   NK_EDIT_FIELD  = NK_EDIT_ALWAYS_INSERT_MODE | NK_EDIT_SELECTABLE | NK_EDIT_CLIPBOARD,
   NK_EDIT_BOX    = NK_EDIT_ALWAYS_INSERT_MODE | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE | NK_EDIT_ALLOW_TAB | NK_EDIT_CLIPBOARD,
   NK_EDIT_EDITOR = NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE | NK_EDIT_ALLOW_TAB | NK_EDIT_CLIPBOARD
 };
+
 enum nk_edit_events {
   NK_EDIT_ACTIVE      = NK_FLAG(0), /**!< edit widget is currently being modified */
   NK_EDIT_INACTIVE    = NK_FLAG(1), /**!< edit widget is not active and is not being modified */
@@ -4219,6 +4279,7 @@ enum nk_edit_events {
   NK_EDIT_DEACTIVATED = NK_FLAG(3), /**!< edit widget went from state active to state inactive */
   NK_EDIT_COMMITED    = NK_FLAG(4)  /**!< edit widget has received an enter and lost focus */
 };
+
 NK_API nk_flags
 nk_edit_string(struct nk_context *, nk_flags, char *buffer, int *len, int max, nk_plugin_filter);
 NK_API nk_flags
@@ -4411,6 +4472,7 @@ nk_tooltip_text(struct nk_context *, const char *, int);
 NK_API void
 nk_tooltip_text_offset(
   struct nk_context *ctx, const char *text, int len, enum nk_tooltip_pos position, struct nk_vec2 offset);
+
 #ifdef NK_INCLUDE_STANDARD_VARARGS
 NK_API void
 nk_tooltipf(struct nk_context *, NK_PRINTF_FORMAT_STRING const char *, ...) NK_PRINTF_VARARG_FUNC(2);
@@ -4424,6 +4486,7 @@ nk_tooltipfv_offset(
   struct nk_context *, enum nk_tooltip_pos, struct nk_vec2, NK_PRINTF_FORMAT_STRING const char *, va_list)
   NK_PRINTF_VALIST_FUNC(4);
 #endif
+
 NK_API nk_bool
 nk_tooltip_begin(struct nk_context *, float width);
 NK_API nk_bool
@@ -4539,6 +4602,20 @@ nk_style_load_cursor(struct nk_context *, enum nk_style_cursor, const struct nk_
 NK_API void
 nk_style_load_all_cursors(struct nk_context *, const struct nk_cursor *);
 NK_API const char *nk_style_get_color_by_name(enum nk_style_colors);
+
+/** Built-in color schemes (nk_style_default is NK_THEME_DARK_TEAL). */
+enum nk_style_theme {
+  NK_THEME_DARK_TEAL,
+  NK_THEME_DARK_BLUE,
+  NK_THEME_LIGHT,
+  NK_THEME_COUNT
+};
+
+/** The color table of a theme, for nk_style_from_table. */
+NK_API const struct nk_color *
+nk_style_theme_table(enum nk_style_theme theme);
+NK_API void
+nk_style_from_theme(struct nk_context *, enum nk_style_theme theme);
 /** Sets the default face and resets font_size to font->height. */
 NK_API void
 nk_style_set_font(struct nk_context *, const struct nk_user_font *);
@@ -4785,18 +4862,15 @@ NK_API int
 nk_strtoi(const char *str, char **endptr);
 NK_API float
 nk_strtof(const char *str, char **endptr);
+
 #ifndef NK_STRTOD
 #  define NK_STRTOD nk_strtod
 #  define NK_STRTOD_NEEDED
+
 NK_API double
 nk_strtod(const char *str, char **endptr);
 #endif
-NK_API int
-nk_strfilter(const char *text, const char *regexp);
-NK_API int
-nk_strmatch_fuzzy_string(char const *str, char const *pattern, int *out_score);
-NK_API int
-nk_strmatch_fuzzy_text(const char *txt, int txt_len, const char *pattern, int *out_score);
+
 /* =============================================================================
  *
  *                                  UTF-8
@@ -4822,15 +4896,15 @@ nk_utf_at(const char *buffer, int length, int index, nk_rune *unicode, int *len)
  * A font identifies one face and provides glyph images by font-specific glyph ID.
  * `height` is the face's default UI size; `nk_style_push_font_size` can override it.
  *
- * Nuklear's optional font atlas remains available as a raster atlas builder. Shaping
- * is independent of it, so another rasterizer or atlas implementation may be used.
+ * The optional glyph atlas (NK_INCLUDE_GLYPH_ATLAS) renders glyphs on demand with stb_truetype.
+ * Shaping is independent of it, so another rasterizer may implement query_glyph instead.
  */
 struct nk_user_font_glyph;
 typedef nk_uint nk_glyph_id;
 typedef void (*nk_query_font_glyph_id_f)(
   nk_handle handle, float font_height, struct nk_user_font_glyph *glyph, nk_glyph_id glyph_id);
 
-#if defined(NK_INCLUDE_VERTEX_BUFFER_OUTPUT) || defined(NK_INCLUDE_SOFTWARE_FONT)
+#ifdef NK_INCLUDE_VERTEX_BUFFER_OUTPUT
 struct nk_user_font_glyph {
   struct nk_vec2 uv[2];         /**!< texture coordinates */
   struct nk_vec2 offset;        /**!< bitmap top-left relative to the glyph origin and shared text baseline */
@@ -5032,9 +5106,13 @@ struct nk_text_backend {
   struct nk_buffer     *temporary; /**!< caller-owned output buffer used when a shape cannot be cached */
 };
 
-/** Reserves a fixed cache region from an unused context created by nk_init_fixed. */
+/** Reserves the cache from the end of an unused context created by nk_init_fixed. */
 NK_API nk_bool
 nk_text_memory_init_fixed(struct nk_context *ctx, nk_size cache_size);
+
+/** Caller memory for the text cache; it never grows or frees. About 3 KB per short label. */
+NK_API nk_bool
+nk_text_memory_init(struct nk_context *ctx, void *memory, nk_size size);
 
 /** Invalidates all cached text measurements and shapes, then reuses their memory. */
 NK_API void
@@ -5044,7 +5122,7 @@ nk_text_memory_clear(struct nk_context *ctx);
 NK_API void
 nk_text_backend_set(struct nk_context *ctx, const struct nk_text_backend *backend);
 
-/** Returns a matching cached shape or builds one. An uncached result remains valid until the next shaping call. */
+/** A cached shape stays valid until nk_clear; without room, until the next shaping call. */
 NK_API struct nk_text_shape *
 nk_text_shape_build(struct nk_context *ctx, const struct nk_text_request *request);
 NK_API float
@@ -5071,140 +5149,6 @@ nk_text_wrap_iterator_next(struct nk_text_wrap_iterator *iterator, struct nk_tex
 NK_API float
 nk_text_width(struct nk_context *ctx, const struct nk_user_font *font, float height, const char *text, int len);
 
-#ifdef NK_INCLUDE_FONT_BAKING
-enum nk_font_coord_type {
-  NK_COORD_UV,   /**!< texture coordinates inside font glyphs are clamped between 0-1 */
-  NK_COORD_PIXEL /**!< texture coordinates inside font glyphs are in absolute pixel */
-};
-
-struct nk_font;
-struct nk_baked_font {
-  float          height;       /**!< height of the font  */
-  float          ascent;       /**!< font glyphs ascent and descent  */
-  float          descent;      /**!< font glyphs ascent and descent  */
-  nk_rune        glyph_offset; /**!< glyph array offset inside the font glyph baking output array  */
-  nk_rune        glyph_count;  /**!< number of glyphs of this font inside the glyph baking array output */
-  const nk_rune *ranges;       /**!< font codepoint ranges as pairs of (from/to) and 0 as last element */
-};
-
-struct nk_font_config {
-  struct nk_font_config *next; /**!< NOTE: only used internally */
-  void   *ttf_blob; /**!< pointer to loaded TTF file memory block.  * \note not needed for nk_font_atlas_add_from_memory
-                       and nk_font_atlas_add_from_file. */
-  nk_size ttf_size; /**!< size of the loaded TTF file memory block * \note not needed for nk_font_atlas_add_from_memory
-                       and nk_font_atlas_add_from_file. */
-
-  unsigned char ttf_data_owned_by_atlas; /**!< used inside font atlas: default to: 0*/
-  unsigned char merge_mode;              /**!< merges this font into the last font */
-  unsigned char pixel_snap;              /**!< align every character to pixel boundary (if true set oversample (1,1)) */
-  unsigned char oversample_v, oversample_h; /**!< rasterize at high quality for sub-pixel position */
-  unsigned char padding[3];
-
-  float                   size;           /**!< baked pixel height of the font */
-  enum nk_font_coord_type coord_type;     /**!< texture coordinate format with either pixel or UV coordinates */
-  struct nk_vec2          spacing;        /**!< extra pixel spacing between glyphs  */
-  const nk_rune          *range;          /**!< list of unicode ranges (2 values per range, zero terminated) */
-  struct nk_baked_font   *font;           /**!< font to setup in the baking process: NOTE: not needed for font atlas */
-  struct nk_font_config  *n;
-  struct nk_font_config  *p;
-};
-
-struct nk_font_glyph {
-  nk_rune codepoint;
-  nk_glyph_id id;
-  float   xadvance;
-  float   x0, y0, x1, y1, w, h;
-  float   u0, v0, u1, v1;
-};
-
-struct nk_font {
-  struct nk_font        *next;
-  struct nk_user_font    handle;
-  struct nk_baked_font   info;
-  struct nk_font_glyph  *glyphs;
-  nk_handle              texture;
-  struct nk_font_config *config;
-};
-
-enum nk_font_atlas_format { NK_FONT_ATLAS_ALPHA8, NK_FONT_ATLAS_RGBA32 };
-
-struct nk_font_atlas {
-  void *pixel;
-  int   tex_width;
-  int   tex_height;
-
-  struct nk_allocator permanent;
-  struct nk_allocator temporary;
-
-  struct nk_recti  custom;
-  struct nk_cursor cursors[NK_CURSOR_COUNT];
-
-  int                    glyph_count;
-  struct nk_font_glyph  *glyphs;
-  struct nk_font        *default_font;
-  struct nk_font        *fonts;
-  struct nk_font_config *config;
-  int                    font_num;
-};
-
-/** some language glyph codepoint ranges */
-NK_API const nk_rune *
-nk_font_default_glyph_ranges(void);
-NK_API const nk_rune *
-nk_font_chinese_glyph_ranges(void);
-NK_API const nk_rune *
-nk_font_cyrillic_glyph_ranges(void);
-NK_API const nk_rune *
-nk_font_korean_glyph_ranges(void);
-
-#  ifdef NK_INCLUDE_DEFAULT_ALLOCATOR
-NK_API void
-nk_font_atlas_init_default(struct nk_font_atlas *);
-#  endif
-NK_API void
-nk_font_atlas_init(struct nk_font_atlas *, const struct nk_allocator *);
-NK_API void
-nk_font_atlas_init_custom(struct nk_font_atlas *,
-                          const struct nk_allocator *persistent,
-                          const struct nk_allocator *transient);
-NK_API void
-nk_font_atlas_begin(struct nk_font_atlas *);
-NK_API struct nk_font_config
-nk_font_config(float pixel_height);
-NK_API struct nk_font *
-nk_font_atlas_add(struct nk_font_atlas *, const struct nk_font_config *);
-#  ifdef NK_INCLUDE_DEFAULT_FONT
-NK_API struct nk_font *
-nk_font_atlas_add_default(struct nk_font_atlas *, float height, const struct nk_font_config *);
-#  endif
-NK_API struct nk_font *
-nk_font_atlas_add_from_memory(
-  struct nk_font_atlas *atlas, void *memory, nk_size size, float height, const struct nk_font_config *config);
-#  ifdef NK_INCLUDE_STANDARD_IO
-NK_API struct nk_font *
-nk_font_atlas_add_from_file(struct nk_font_atlas *atlas,
-                            const char           *file_path,
-                            float                 height,
-                            const struct nk_font_config *);
-#  endif
-NK_API struct nk_font *
-nk_font_atlas_add_compressed(
-  struct nk_font_atlas *, void *memory, nk_size size, float height, const struct nk_font_config *);
-NK_API struct nk_font *
-nk_font_atlas_add_compressed_base85(struct nk_font_atlas *,
-                                    const char                  *data,
-                                    float                        height,
-                                    const struct nk_font_config *config);
-NK_API const void *
-nk_font_atlas_bake(struct nk_font_atlas *, int *width, int *height, enum nk_font_atlas_format);
-NK_API void
-nk_font_atlas_end(struct nk_font_atlas *, nk_handle tex, struct nk_draw_null_texture *);
-NK_API void
-nk_font_atlas_cleanup(struct nk_font_atlas *atlas);
-NK_API void
-nk_font_atlas_clear(struct nk_font_atlas *);
-
-#endif
 
 /* ==============================================================
  *
@@ -5264,6 +5208,7 @@ struct nk_memory {
   void   *ptr;
   nk_size size;
 };
+
 struct nk_buffer {
   struct nk_buffer_marker marker[NK_BUFFER_MAX]; /**!< buffer marker to free a buffer to a certain offset */
   struct nk_allocator     pool;                  /**!< allocator callback for dynamic buffers */
@@ -5280,6 +5225,7 @@ struct nk_buffer {
 NK_API void
 nk_buffer_init_default(struct nk_buffer *);
 #endif
+
 NK_API void
 nk_buffer_init(struct nk_buffer *, const struct nk_allocator *, nk_size size);
 NK_API void
@@ -5304,6 +5250,77 @@ nk_buffer_memory_const(const struct nk_buffer *);
 NK_API nk_size
 nk_buffer_total(const struct nk_buffer *);
 
+#ifdef NK_INCLUDE_GLYPH_ATLAS
+/**
+ * \page Glyph atlas
+ * Fonts render glyphs on first use into one RGBA texture shared by all fonts. Glyphs are never
+ * evicted: a glyph that does not fit is drawn empty.
+ *
+ *   nk_size size = nk_glyph_atlas_memory_size(1024, 1024, 4096);
+ *   nk_glyph_atlas_init(&atlas, malloc(size), size, 1024, 1024, 4096);
+ *   nk_glyph_atlas_set_texture(&atlas, nk_handle_id(texture));
+ *   nk_font_init(&font, &atlas, ttf, ttf_size, 0, 16.0f);
+ *   nk_style_set_font(ctx, &font.handle);
+ *   ... per frame, after nk_convert:
+ *   if (nk_glyph_atlas_dirty(&atlas, &x, &y, &w, &h)) upload(atlas.pixels, atlas.width, x, y, w, h);
+ *   nk_glyph_atlas_clean(&atlas);
+ */
+struct nk_glyph_atlas_slot;
+struct nk_font;
+
+#  define NK_GLYPH_ATLAS_MAX_FONTS 16
+
+struct nk_glyph_atlas {
+  nk_handle                   texture; /**!< set with nk_glyph_atlas_set_texture */
+  int                         width;
+  int                         height;
+  nk_byte                    *pixels; /**!< RGBA32 copy of the texture */
+  struct nk_draw_null_texture null;   /**!< for nk_convert_config.tex_null */
+
+  /* private */
+  struct nk_buffer            memory;
+  struct nk_allocator         scratch_alloc;
+  nk_byte                    *scratch;
+  nk_size                     scratch_size;
+  nk_size                     scratch_used;
+  struct nk_glyph_atlas_slot *slots;
+  int                         slot_capacity; /**!< power of two */
+  int                         slot_count;
+  int                         max_glyphs;
+  int                         pack_x, pack_y, pack_row_height;
+  int                         dirty_x0, dirty_y0, dirty_x1, dirty_y1;
+  nk_bool                     full;
+  struct nk_font             *fonts[NK_GLYPH_ATLAS_MAX_FONTS];
+  int                         font_count;
+};
+
+struct nk_font {
+  struct nk_user_font    handle; /**!< for nk_style_set_font */
+  struct nk_glyph_atlas *atlas;
+  const void            *ttf; /**!< owned by the caller, kept while used */
+  nk_size                ttf_size;
+  void                  *info; /**!< private */
+};
+
+/** Bytes nk_glyph_atlas_init needs. */
+NK_API nk_size
+nk_glyph_atlas_memory_size(int width, int height, int max_glyphs);
+/** Uses caller memory, kept while the atlas is used. */
+NK_API nk_bool
+nk_glyph_atlas_init(struct nk_glyph_atlas *, void *memory, nk_size size, int width, int height, int max_glyphs);
+/** The texture the pixels are uploaded to. */
+NK_API void
+nk_glyph_atlas_set_texture(struct nk_glyph_atlas *, nk_handle texture);
+/** True when pixels changed since nk_glyph_atlas_clean. */
+NK_API nk_bool
+nk_glyph_atlas_dirty(const struct nk_glyph_atlas *, int *x, int *y, int *w, int *h);
+NK_API void
+nk_glyph_atlas_clean(struct nk_glyph_atlas *);
+/** A face of a TTF/OTF file; the font must not move afterwards. */
+NK_API nk_bool
+nk_font_init(struct nk_font *, struct nk_glyph_atlas *, const void *ttf, nk_size ttf_size, int face_index, float height);
+#endif
+
 /* ==============================================================
  *
  *                          STRING
@@ -5323,6 +5340,7 @@ struct nk_str {
 NK_API void
 nk_str_init_default(struct nk_str *);
 #endif
+
 NK_API void
 nk_str_init(struct nk_str *, const struct nk_allocator *, nk_size size);
 NK_API void
@@ -5432,6 +5450,7 @@ nk_str_len_char(const struct nk_str *);
 #endif
 
 struct nk_text_edit;
+
 struct nk_clipboard {
   nk_handle       userdata;
   nk_plugin_paste paste;
@@ -5510,6 +5529,7 @@ nk_filter_binary(const struct nk_text_edit *, nk_rune unicode);
 NK_API void
 nk_textedit_init_default(struct nk_text_edit *);
 #endif
+
 NK_API void
 nk_textedit_init(struct nk_text_edit *, const struct nk_allocator *, nk_size size);
 NK_API void
@@ -5750,6 +5770,7 @@ struct nk_command_image {
 
 typedef void (*nk_command_custom_callback)(
   void *canvas, short x, short y, unsigned short w, unsigned short h, nk_handle callback_data);
+
 struct nk_command_custom {
   struct nk_command          header;
   short                      x, y;
@@ -5868,6 +5889,7 @@ struct nk_mouse_button {
   unsigned int   clicked;
   struct nk_vec2 clicked_pos;
 };
+
 struct nk_mouse {
   struct nk_mouse_button buttons[NK_BUTTON_MAX];
   struct nk_vec2         pos;
@@ -5886,6 +5908,7 @@ struct nk_key {
   nk_bool      down;
   unsigned int clicked;
 };
+
 struct nk_keyboard {
   struct nk_key keys[NK_KEY_MAX];
   char          text[NK_INPUT_MAX];
@@ -5959,6 +5982,7 @@ typedef nk_uint nk_draw_index;
 #  else
 typedef nk_ushort nk_draw_index;
 #  endif
+
 enum nk_draw_list_stroke {
   NK_STROKE_OPEN   = nk_false, /***< build up path has no connection back to the beginning */
   NK_STROKE_CLOSED = nk_true   /***< build up path has a connection back to the beginning */
@@ -6000,6 +6024,7 @@ enum nk_draw_vertex_layout_format {
 };
 
 #  define NK_VERTEX_LAYOUT_END NK_VERTEX_ATTRIBUTE_COUNT, NK_FORMAT_COUNT, 0
+
 struct nk_draw_vertex_layout_element {
   enum nk_draw_vertex_layout_attribute attribute;
   enum nk_draw_vertex_layout_format    format;
@@ -6055,6 +6080,7 @@ nk_draw_list_setup(struct nk_draw_list *,
 /* drawing */
 #  define nk_draw_list_foreach(cmd, can, b) \
     for ((cmd) = nk__draw_list_begin(can, b); (cmd) != 0; (cmd) = nk__draw_list_next(cmd, b, can))
+
 NK_API const struct nk_draw_command *
 nk__draw_list_begin(const struct nk_draw_list *, const struct nk_buffer *);
 NK_API const struct nk_draw_command *
@@ -6139,6 +6165,7 @@ NK_API void
 nk_draw_list_add_image(struct nk_draw_list *, struct nk_image texture, struct nk_rect rect, struct nk_color);
 NK_API void
 nk_draw_list_add_text_shape(struct nk_draw_list *, const struct nk_text_shape *, struct nk_rect, float font_height, struct nk_color);
+
 #  ifdef NK_INCLUDE_COMMAND_USERDATA
 NK_API void
 nk_draw_list_push_userdata(struct nk_draw_list *, nk_handle userdata);
@@ -6551,6 +6578,7 @@ struct nk_style_tab {
 };
 
 enum nk_style_header_align { NK_HEADER_LEFT, NK_HEADER_RIGHT };
+
 struct nk_style_window_header {
   /* background */
   struct nk_style_item normal;
@@ -6623,6 +6651,8 @@ struct nk_style {
   const struct nk_cursor    *cursor_active;
   struct nk_cursor          *cursor_last;
   int                        cursor_visible;
+  struct nk_color            nav_highlight; /**!< navigation focus outline */
+  struct nk_color            nav_active;    /**!< outline while active */
 
   struct nk_style_text       text;
   struct nk_style_button     button;
@@ -6658,6 +6688,7 @@ nk_style_item_hide(void);
 #ifndef NK_MAX_LAYOUT_ROW_TEMPLATE_COLUMNS
 #  define NK_MAX_LAYOUT_ROW_TEMPLATE_COLUMNS 16
 #endif
+
 #ifndef NK_CHART_MAX_SLOT
 #  define NK_CHART_MAX_SLOT 4
 #endif
@@ -6672,6 +6703,7 @@ enum nk_panel_type {
   NK_PANEL_MENU       = NK_FLAG(6),
   NK_PANEL_TOOLTIP    = NK_FLAG(7)
 };
+
 enum nk_panel_set {
   NK_PANEL_SET_NONBLOCK = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP,
   NK_PANEL_SET_POPUP    = NK_PANEL_CONTEXTUAL | NK_PANEL_COMBO | NK_PANEL_MENU | NK_PANEL_TOOLTIP | NK_PANEL_POPUP,
@@ -6707,6 +6739,7 @@ enum nk_panel_row_layout_type {
   NK_LAYOUT_TEMPLATE,
   NK_LAYOUT_COUNT
 };
+
 struct nk_row_layout {
   enum nk_panel_row_layout_type type;
   int                           index;
@@ -6758,6 +6791,7 @@ struct nk_panel {
   struct nk_panel                 *parent;
   struct nk_text_selection_context text_selection;
   nk_hash                          text_selection_scope;
+  unsigned int                     tab_seq;
   nk_bool                          text_selection_loaded;
 };
 
@@ -6844,6 +6878,14 @@ struct nk_window {
   unsigned int             scrolled;
   nk_bool                  widgets_disabled;
 
+  /* Tab focus */
+  nk_bool tab_next;
+  nk_hash tab_target;
+  nk_bool tab_target_seen;
+  nk_bool tab_target_new;
+  nk_hash tab_last;
+  nk_hash tab_frame_last; /* where Shift+Tab wraps to */
+
   struct nk_table *tables;
   unsigned int     table_count;
 
@@ -6921,6 +6963,7 @@ struct nk_window {
   }
 
 #define nk_float float
+
 NK_CONFIGURATION_STACK_TYPE(struct nk, style_item, style_item);
 NK_CONFIGURATION_STACK_TYPE(nk, float, float);
 NK_CONFIGURATION_STACK_TYPE(struct nk, vec2, vec2);
@@ -6989,6 +7032,197 @@ struct nk_pool {
   nk_size                 cap;
 };
 
+/* ==============================================================
+ *
+ *                          NAVIGATION
+ *
+ * ===============================================================*/
+/**
+ * \page Navigation
+ * With nk_nav_enable the UI works with the NK_KEY_NAV_* keys alone (e.g. a gamepad). Every
+ * interactive widget is a stop; a direction moves the focus to the nearest stop that way, scrolling
+ * when there is none. The mouse follows the focus and NK_KEY_NAV_ACTIVATE is its left button.
+ * Value widgets are adjusted with the directions after NK_KEY_NAV_ACTIVATE, until it or
+ * NK_KEY_NAV_CANCEL. An active edit field keeps the keys. Moving the real mouse ends navigation.
+ */
+#ifndef NK_NAV_MAX_STOPS
+#  define NK_NAV_MAX_STOPS 1024
+#endif
+
+#ifndef NK_NAV_MAX_WINDOWS
+#  define NK_NAV_MAX_WINDOWS 32
+#endif
+
+enum nk_nav_stop_flags {
+  NK_NAV_STOP_ADJUST   = NK_FLAG(0), /**!< left and right change the value */
+  NK_NAV_STOP_NO_CLICK = NK_FLAG(1), /**!< activate does not click it */
+  NK_NAV_STOP_CAPTURE  = NK_FLAG(2), /**!< activate captures the directions */
+  NK_NAV_STOP_PANEL    = NK_FLAG(3), /**!< a window without widgets */
+  NK_NAV_STOP_ACTIVE   = NK_FLAG(4), /**!< being edited */
+  NK_NAV_STOP_HIDDEN   = NK_FLAG(5), /**!< scrolled out of view */
+  NK_NAV_STOP_TEXT     = NK_FLAG(6)  /**!< an edit field */
+};
+
+struct nk_nav_stop {
+  nk_hash        id;
+  nk_hash        window;
+  nk_bool        popup;
+  nk_flags       flags;
+  struct nk_rect bounds;
+  struct nk_rect clip;
+  nk_uint       *scroll_x;
+  nk_uint       *scroll_y;
+  nk_uint       *scroll_max_x;
+  nk_uint       *scroll_max_y;
+};
+
+#ifndef NK_OSK_ROWS
+#  define NK_OSK_ROWS 4
+#endif
+
+/** A page of the on-screen keyboard: rows of keys, one UTF-8 character per key. */
+struct nk_osk_page {
+  const char *label;                 /**!< on the key that switches to this page */
+  const char *rows[NK_OSK_ROWS];     /**!< NULL for no row */
+  const char *shifted[NK_OSK_ROWS];  /**!< with Shift; NULL to keep the row */
+};
+
+#ifndef NK_OSK_PREVIEW_SIZE
+#  define NK_OSK_PREVIEW_SIZE 256
+#endif
+
+struct nk_osk_state {
+  nk_bool                   open;
+  struct nk_rect            field;
+  char                      preview[NK_OSK_PREVIEW_SIZE]; /**!< the field's line */
+  int                       preview_len;
+  int                       preview_cursor;
+  nk_bool                   closing;
+  nk_bool                   seen;
+  int                       frames;
+  nk_hash                   window;
+  nk_hash                   edit;
+  nk_hash                   name;
+  nk_hash                   return_focus;
+  int                       page;
+  int                       shift; /**!< 0 off, 1 next letter, 2 locked */
+  float                     shift_hold;
+  nk_bool                   shift_held;
+  const struct nk_osk_page *pages; /**!< NULL: built-in */
+  int                       page_count;
+  nk_rune                   text[32];
+  int                       text_len;
+  int                       keys[8];
+  int                       key_count;
+  int                       release[8];
+  int                       release_count;
+};
+
+struct nk_nav {
+  nk_bool            enabled;
+  nk_bool            active;
+  nk_hash            focus; /**!< 0 for none */
+  struct nk_rect     focus_bounds;
+  nk_hash            return_focus;
+  int                adjust;
+  int                adjust_y;
+  nk_bool            captured;
+  nk_bool            leave;
+  nk_bool            click_focus;
+  nk_bool            osk_on_activate;
+  nk_hash            number_window, number_edit;
+  nk_flags           focus_flags;
+  nk_bool            cancel;
+  nk_bool            activate;
+  nk_bool            menu;
+  nk_bool            editing;
+  nk_bool            editing_last;
+  nk_hash            focus_window;
+  struct {
+    nk_hash window, focus;
+  } remembered[NK_NAV_MAX_WINDOWS];
+  nk_bool             text_request;
+  struct nk_rect      text_bounds;
+  nk_hash             text_window, text_edit;
+  nk_bool             hold;
+  struct nk_osk_state osk;
+  int                repeat_key;
+  int                deferred;
+  nk_hash            window_menu;
+  int                window_mode;
+  nk_hash            mode_window;
+  nk_hash            close_window;
+  float              repeat_time;
+  nk_bool            suppress;
+  int                current;
+  int                count[2];
+  struct nk_nav_stop stops[2][NK_NAV_MAX_STOPS];
+};
+
+/** Turns navigation by NK_KEY_NAV_* keys on or off (on from the start with NK_DEFAULT_NAVIGATION). */
+NK_API void
+nk_nav_enable(struct nk_context *ctx, nk_bool enable);
+/** True since a NK_KEY_NAV_* key, until the real mouse moves. */
+NK_API nk_bool
+nk_nav_active(const struct nk_context *ctx);
+/** After drawing: NK_KEY_NAV_CANCEL was pressed and nothing used it. */
+NK_API nk_bool
+nk_nav_cancel_unused(const struct nk_context *ctx);
+/** The window that has the navigation focus (the owner window for a popup), or NULL. */
+NK_API struct nk_window *
+nk_nav_focus_window(struct nk_context *ctx);
+/** After drawing: navigation activated an edit field in this frame. */
+NK_API nk_bool
+nk_nav_text_requested(const struct nk_context *ctx, struct nk_rect *field);
+
+/**
+ * \page On-screen keyboard
+ * nk_osk_open opens it for the field navigation just activated; nk_osk draws it after all other
+ * windows. Typed text reaches the field in the next frame. NK_KEY_NAV_MENU is backspace,
+ * NK_KEY_NAV_WINDOW_PREV/NEXT and NK_KEY_NAV_WORD_PREV/NEXT move the cursor, NK_KEY_NAV_CANCEL closes it.
+ */
+NK_API nk_bool
+nk_osk_open(struct nk_context *ctx);
+NK_API void
+nk_osk_close(struct nk_context *ctx);
+NK_API nk_bool
+nk_osk_is_open(const struct nk_context *ctx);
+/** Replaces the built-in pages; NULL restores them. */
+NK_API void
+nk_osk_layout(struct nk_context *ctx, const struct nk_osk_page *pages, int count);
+NK_API nk_bool
+nk_osk(struct nk_context *ctx, struct nk_rect bounds);
+/** At the bottom, or at the top when the bottom would cover the field. */
+NK_API struct nk_rect
+nk_osk_place(const struct nk_context *ctx, struct nk_rect screen, float width, float height);
+
+#ifndef NK_EDIT_REVERT_SIZE
+#  define NK_EDIT_REVERT_SIZE 1024
+#endif
+
+/* restored by NK_KEY_NAV_CANCEL */
+struct nk_edit_revert {
+  nk_hash window, edit;
+  int     len;
+  nk_bool valid;
+  char    text[NK_EDIT_REVERT_SIZE];
+};
+
+struct nk_text_cache_entry;
+
+/** The text cache: a ring of records in caller memory; see nk_text_memory_init. */
+struct nk_text_cache {
+  struct nk_text_cache_entry **buckets; /**!< NULL: no cache */
+  nk_byte                     *ring;
+  nk_size                      capacity;
+  nk_size                      head;
+  nk_size                      tail;
+  nk_size                      used;
+  nk_size                      wrap;
+  nk_size                      hits; /**!< statistics */
+  nk_size                      misses;
+};
+
 struct nk_context {
   /* public: can be accessed freely */
   struct nk_input                input;
@@ -6999,6 +7233,9 @@ struct nk_context {
   enum nk_button_behavior        button_behavior;
   struct nk_configuration_stacks stacks;
   float                          delta_time_seconds;
+  /* needs more frames without input */
+  nk_bool                        animating;
+  float                          button_repeat_time;
 
 /* private:
     should only be accessed if you
@@ -7017,11 +7254,12 @@ struct nk_context {
   /** draw buffer used for overlay drawing operation like cursor */
   struct nk_command_buffer overlay;
 
-  /** optional fixed measurement and shaped-text cache, carved from nk_init_fixed memory */
-  struct nk_buffer             text_cache;
-  struct nk_text_cache_entry **text_cache_buckets;
-  struct nk_text_backend       text_backend;
-  nk_bool                      text_memory_initialized;
+  /** text shaping and its optional cache (nk_text_memory_init) */
+  struct nk_text_cache   text_cache;
+  struct nk_nav          nav;
+  struct nk_edit_revert  edit_revert;
+  float                  edit_blink;
+  struct nk_text_backend text_backend;
 
   struct nk_rect window_maximize_bounds;
 
@@ -7101,12 +7339,15 @@ struct nk_context {
 #  define NK_ALIGNOF(t) __alignof(t)
 #elif defined(__cplusplus)
 template <typename T> struct nk_alignof;
+
 template <typename T, int size_diff> struct nk_helper {
   enum { value = size_diff };
 };
+
 template <typename T> struct nk_helper<T, 0> {
   enum { value = nk_alignof<T>::value };
 };
+
 template <typename T> struct nk_alignof {
   struct Big {
     T    x;
@@ -7114,6 +7355,7 @@ template <typename T> struct nk_alignof {
   };
   enum { diff = sizeof(Big) - sizeof(T), value = nk_helper<Big, diff>::value };
 };
+
 #  define NK_ALIGNOF(t) (nk_alignof<t>::value)
 #else
 #  define NK_ALIGNOF(t) \
@@ -7146,12 +7388,15 @@ template <typename T> struct nk_alignof {
 #ifdef NK_INCLUDE_DEFAULT_ALLOCATOR
 #  include <stdlib.h> /* malloc, free */
 #endif
+
 #ifdef NK_INCLUDE_STANDARD_IO
 #  include <stdio.h> /* fopen, fclose,... */
 #endif
+
 #ifdef NK_INCLUDE_STANDARD_VARARGS
 #  include <stdarg.h> /* valist, va_start, va_end, ... */
 #endif
+
 #ifndef NK_ASSERT
 #  include <assert.h>
 #  define NK_ASSERT(expr) assert(expr)
@@ -7202,13 +7447,19 @@ NK_STATIC_ASSERT(sizeof(nk_byte) == 1);
 NK_STATIC_ASSERT(sizeof(nk_bool) <= sizeof(int));
 
 NK_GLOBAL const struct nk_rect nk_null_rect = {-8192.0f, -8192.0f, 16384, 16384};
+
 #define NK_FLOAT_PRECISION 0.00000000000001
 
-NK_GLOBAL const struct nk_color nk_red    = {255, 0, 0, 255};
-NK_GLOBAL const struct nk_color nk_green  = {0, 255, 0, 255};
-NK_GLOBAL const struct nk_color nk_blue   = {0, 0, 255, 255};
-NK_GLOBAL const struct nk_color nk_white  = {255, 255, 255, 255};
-NK_GLOBAL const struct nk_color nk_black  = {0, 0, 0, 255};
+NK_GLOBAL const struct nk_color nk_red = {255, 0, 0, 255};
+
+NK_GLOBAL const struct nk_color nk_green = {0, 255, 0, 255};
+
+NK_GLOBAL const struct nk_color nk_blue = {0, 0, 255, 255};
+
+NK_GLOBAL const struct nk_color nk_white = {255, 255, 255, 255};
+
+NK_GLOBAL const struct nk_color nk_black = {0, 0, 0, 255};
+
 NK_GLOBAL const struct nk_color nk_yellow = {255, 255, 0, 255};
 
 /* widget */
@@ -7222,33 +7473,43 @@ NK_GLOBAL const struct nk_color nk_yellow = {255, 255, 0, 255};
 #ifndef NK_INV_SQRT
 #  define NK_INV_SQRT nk_inv_sqrt
 #  define NK_INV_SQRT_NEEDED
+
 NK_LIB float
 nk_inv_sqrt(float n);
 #endif
+
 #ifndef NK_SIN
 #  define NK_SIN nk_sin
 #  define NK_SIN_NEEDED
+
 NK_LIB float
 nk_sin(float x);
 #endif
+
 #ifndef NK_COS
 #  define NK_COS nk_cos
 #  define NK_COS_NEEDED
+
 NK_LIB float
 nk_cos(float x);
 #endif
+
 #ifndef NK_ATAN
 #  define NK_ATAN nk_atan
 #  define NK_ATAN_NEEDED
+
 NK_LIB float
 nk_atan(float x);
 #endif
+
 #ifndef NK_ATAN2
 #  define NK_ATAN2 nk_atan2
 #  define NK_ATAN2_NEEDED
+
 NK_LIB float
 nk_atan2(float y, float x);
 #endif
+
 NK_LIB nk_uint
 nk_round_up_pow2(nk_uint v);
 NK_LIB struct nk_rect
@@ -7266,39 +7527,68 @@ nk_roundf(float x);
 
 /* util */
 enum { NK_DO_NOT_STOP_ON_NEW_LINE, NK_STOP_ON_NEW_LINE };
-NK_LIB nk_bool
-nk_is_lower(int c);
-NK_LIB nk_bool
-nk_is_upper(int c);
-NK_LIB int
-nk_to_upper(int c);
-NK_LIB int
-nk_to_lower(int c);
+
+#if defined(NK_INCLUDE_DEFAULT_ALLOCATOR) && !defined(NK_MEMCPY) && !defined(NK_MEMSET) && !defined(NK_MEMMOVE)
+#  include <string.h>
+#  define NK_MEMCPY  memcpy
+#  define NK_MEMSET  memset
+#  define NK_MEMMOVE memmove
+#  define NK_MEMCMP  memcmp
+#endif
+
+/* NK_MEMMOVE: copies between overlapping regions */
+#ifndef NK_MEMMOVE
+#  define NK_MEMMOVE nk_memmove
+#  define NK_MEMMOVE_NEEDED
+
+NK_LIB void *
+nk_memmove(void *dst, const void *src, nk_size n);
+#endif
 
 #ifndef NK_MEMCPY
 #  define NK_MEMCPY nk_memcopy
 #  define NK_MEMCPY_NEEDED
+
 NK_LIB void *
 nk_memcopy(void *dst, const void *src, nk_size n);
 #endif
+
 #ifndef NK_MEMSET
 #  define NK_MEMSET nk_memset
 #  define NK_MEMSET_NEEDED
+
 NK_LIB void
 nk_memset(void *ptr, int c0, nk_size size);
 #endif
+
 NK_LIB void
 nk_zero(void *ptr, nk_size size);
 NK_LIB char *
 nk_itoa(char *s, long n);
 NK_LIB int
 nk_string_float_limit(char *string, int prec);
+
 #ifndef NK_DTOA
 #  define NK_DTOA nk_dtoa
 #  define NK_DTOA_NEEDED
+
 NK_LIB char *
 nk_dtoa(char *s, double n);
 #endif
+
+struct nk_text_shape;
+/* true when it has the navigation focus */
+NK_LIB nk_bool
+nk_nav_stop(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags);
+NK_LIB enum nk_widget_layout_states
+nk_widget_nav(struct nk_rect *bounds, struct nk_context *ctx);
+NK_LIB void
+nk_nav_update(struct nk_context *ctx);
+NK_LIB void
+nk_nav_next_frame(struct nk_context *ctx);
+NK_LIB void
+nk_draw_text_shaped(struct nk_command_buffer *b, struct nk_rect r, const char *string, int length,
+                    const struct nk_user_font *font, struct nk_color bg, struct nk_color fg, const struct nk_text_shape *shape);
 NK_LIB int
 nk_text_clamp(struct nk_context          *ctx,
               const struct nk_user_font *font,
@@ -7306,9 +7596,7 @@ nk_text_clamp(struct nk_context          *ctx,
               int                        text_len,
               float                      space,
               int                       *glyphs,
-              float                     *text_width,
-              nk_rune                   *sep_list,
-              int                        sep_count);
+              float                     *text_width);
 NK_LIB struct nk_vec2
 nk_text_calculate_text_bounds(struct nk_context          *ctx,
                               const struct nk_user_font *font,
@@ -7319,13 +7607,10 @@ nk_text_calculate_text_bounds(struct nk_context          *ctx,
                               struct nk_vec2            *out_offset,
                               int                       *glyphs,
                               int                        op);
+
 #ifdef NK_INCLUDE_STANDARD_VARARGS
 NK_LIB int
 nk_strfmt(char *buf, int buf_size, const char *fmt, va_list args);
-#endif
-#ifdef NK_INCLUDE_STANDARD_IO
-NK_LIB char *
-nk_file_load(const char *path, nk_size *siz, const struct nk_allocator *alloc);
 #endif
 
 /* math helpers that are only used by nk_dtoa */
@@ -7345,6 +7630,7 @@ nk_malloc(nk_handle unused, void *old, nk_size size);
 NK_LIB void
 nk_mfree(nk_handle unused, void *ptr);
 #endif
+
 NK_LIB void *
 nk_buffer_align(void *unaligned, nk_size align, nk_size *alignment, enum nk_buffer_allocation_type type);
 NK_LIB void *
@@ -7400,6 +7686,7 @@ enum nk_window_insert_location {
   NK_INSERT_BACK, /* inserts window into the back of list (front of screen) */
   NK_INSERT_FRONT /* inserts window into the front of list (back of screen) */
 };
+
 NK_LIB void *
 nk_create_window(struct nk_context *ctx);
 NK_LIB void
@@ -7495,6 +7782,7 @@ struct nk_text {
   struct nk_color background;
   struct nk_color text;
 };
+
 NK_LIB void
 nk_widget_text(struct nk_command_buffer  *o,
                struct nk_rect             b,
@@ -7629,6 +7917,7 @@ nk_do_button_text_image(nk_flags                     *state,
 
 /* toggle */
 enum nk_toggle_type { NK_TOGGLE_CHECK, NK_TOGGLE_OPTION };
+
 NK_LIB nk_bool
 nk_toggle_behavior(const struct nk_input *in, struct nk_rect select, nk_flags *state, nk_bool active);
 NK_LIB void
@@ -7893,6 +8182,7 @@ struct nk_property_variant {
   union nk_property     max_value;
   union nk_property     step;
 };
+
 NK_LIB struct nk_property_variant
 nk_property_variant_int(int value, int min_value, int max_value, int step);
 NK_LIB struct nk_property_variant
@@ -7951,49 +8241,5 @@ nk_property(struct nk_context            *ctx,
             float                         inc_per_pixel,
             const enum nk_property_filter filter);
 
-#ifdef NK_INCLUDE_FONT_BAKING
-
-/**
- * @def NK_NO_STB_RECT_PACK_IMPLEMENTATION
- *
- * When defined, will avoid enabling STB_RECT_PACK_IMPLEMENTATION for when stb_rect_pack.h is already implemented
- * elsewhere.
- */
-#  ifndef NK_NO_STB_RECT_PACK_IMPLEMENTATION
-#    define STB_RECT_PACK_IMPLEMENTATION
-#  endif /* NK_NO_STB_RECT_PACK_IMPLEMENTATION */
-
-/**
- * @def NK_NO_STB_TRUETYPE_IMPLEMENTATION
- *
- * When defined, will avoid enabling STB_TRUETYPE_IMPLEMENTATION for when stb_truetype.h is already implemented
- * elsewhere.
- */
-#  ifndef NK_NO_STB_TRUETYPE_IMPLEMENTATION
-#    define STB_TRUETYPE_IMPLEMENTATION
-#  endif /* NK_NO_STB_TRUETYPE_IMPLEMENTATION */
-
-/* Allow consumer to define own STBTT_malloc/STBTT_free, and use the font atlas' allocator otherwise */
-#  ifndef STBTT_malloc
-static void *
-nk_stbtt_malloc(nk_size size, void *user_data)
-{
-  struct nk_allocator *alloc = (struct nk_allocator *)user_data;
-  return alloc->alloc(alloc->userdata, 0, size);
-}
-
-static void
-nk_stbtt_free(void *ptr, void *user_data)
-{
-  struct nk_allocator *alloc = (struct nk_allocator *)user_data;
-  alloc->free(alloc->userdata, ptr);
-}
-
-#    define STBTT_malloc(x, u) nk_stbtt_malloc(x, u)
-#    define STBTT_free(x, u)   nk_stbtt_free(x, u)
-
-#  endif /* STBTT_malloc */
-
-#endif /* NK_INCLUDE_FONT_BAKING */
 
 #endif /* NK_NUKLEAR_H_ */

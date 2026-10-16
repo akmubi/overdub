@@ -158,6 +158,8 @@ return {
 
 `Down` reports held state. `Pressed` and `Released` report edges for the current frame. `Analog`, `WheelDelta`, and `MousePosition` expose the remaining polled state.
 
+`KeybindDown`, `KeybindPressed`, and `KeybindReleased` poll a keybind such as `"Ctrl+F8"` or `"F8 | Select+RB"`. `KeybindActivated(bind, event)` tells whether an event presses the bind. `KeybindParts` splits a bind into its keyboard and gamepad parts, and `KeybindMerge` joins them.
+
 An input event is an immutable snapshot. Its common fields include `Kind`, `Key`, `Pressed`, `Released`, `Repeat`, `Shift`, `Ctrl`, `Alt`, `Keyboard`, `Mouse`, and `Gamepad`. Mouse, character, analog, and activation events add fields for their own values.
 
 Return true from `Input` only when the event should be consumed.
