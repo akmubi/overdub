@@ -63,24 +63,17 @@ jobs:
             --pattern dsound.dll `
             --dir bootstrap
 
+      - name: Create the mod template
+        uses: ./.github/actions/mod-template
+        with:
+          destination: package/mod-template
+
       - name:  Create packages
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package\steam | Out-Null
           New-Item -ItemType Directory -Force package\epic  | Out-Null
           New-Item -ItemType Directory -Force package\xbox  | Out-Null
-
-          $templateRoot = "package\mod-template"
-          $templateDirectories = @(
-            "$templateRoot\build"
-            "$templateRoot\docs"
-            "$templateRoot\include"
-            "$templateRoot\vendor\kb"
-            "$templateRoot\vendor\minhook\include"
-            "$templateRoot\vendor\nuklear\include"
-            "$templateRoot\vendor\stb"
-          )
-          New-Item -ItemType Directory -Force -Path $templateDirectories | Out-Null
 
           Copy-Item build\overdub.dll package\steam\
           Copy-Item bootstrap\XAPOFX1_5.dll package\steam\
@@ -90,26 +83,6 @@ jobs:
 
           Copy-Item build\overdub.dll package\xbox\
           Copy-Item bootstrap\dsound.dll package\xbox\
-
-          Copy-Item LICENSE "$templateRoot\"
-          Copy-Item build\overdub.lib "$templateRoot\build\"
-          Copy-Item docs\MOD_DEVELOPMENT.md "$templateRoot\docs\"
-          Copy-Item docs\mod-development "$templateRoot\docs\" -Recurse
-          Copy-Item docs\lua "$templateRoot\docs\" -Recurse
-          Copy-Item include\* "$templateRoot\include\" -Recurse
-          Copy-Item mod\main.c "$templateRoot\"
-          Copy-Item mod\Makefile "$templateRoot\"
-          Copy-Item mod\mod.vcxproj "$templateRoot\"
-          Copy-Item mod\mod.vcxproj.filters "$templateRoot\"
-          Copy-Item mod\README.md "$templateRoot\"
-          Copy-Item mod\compile_flags.txt "$templateRoot\"
-          Copy-Item vendor\kb\kb_text_shape.h "$templateRoot\vendor\kb\"
-          Copy-Item vendor\kb\LICENSE "$templateRoot\vendor\kb\"
-          Copy-Item vendor\minhook\include\MinHook.h "$templateRoot\vendor\minhook\include\"
-          Copy-Item vendor\nuklear\include\nuklear.h "$templateRoot\vendor\nuklear\include\"
-          Copy-Item vendor\nuklear\LICENSE "$templateRoot\vendor\nuklear\"
-          Copy-Item vendor\stb\stb_sprintf.h "$templateRoot\vendor\stb\"
-          Copy-Item vendor\stb\LICENSE "$templateRoot\vendor\stb\"
 
           Compress-Archive `
             -Path package\steam\* `
@@ -124,7 +97,7 @@ jobs:
             -DestinationPath "overdub-$env:VERSION.xbox.zip"
 
           Compress-Archive `
-            -Path "$templateRoot\*" `
+            -Path "package\mod-template\*" `
             -DestinationPath "overdub-$env:VERSION.mod-template.zip"
 
       - name: Validate mod template

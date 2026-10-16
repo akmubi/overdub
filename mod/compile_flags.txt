@@ -1,7 +1,5 @@
--Iinclude
--Ivendor
--I../include
--I../vendor
+-Ioverdub/include
+-Ioverdub/vendor
 -xc
 -std=c11
 -fms-extensions

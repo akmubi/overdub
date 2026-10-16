@@ -25,6 +25,22 @@ jobs:
           /p:TreatWarningAsError=true
           /warnAsError
 
+      - name: Create the mod template
+        uses: ./.github/actions/mod-template
+        with:
+          destination: package/mod-template
+
+      - name:  Build the mod template
+        shell: pwsh
+        run: |
+          msbuild package\mod-template\mod.vcxproj `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:ModName=example `
+            /p:TreatWarningAsError=true `
+            /warnAsError
+
   linux:
     name:    Linux / MinGW
     runs-on: ubuntu-latest
@@ -40,3 +56,11 @@ jobs:
 
       - name: Build
         run:  make release CC="x86_64-w64-mingw32-gcc -Werror"
+
+      - name: Create the mod template
+        uses: ./.github/actions/mod-template
+        with:
+          destination: package/mod-template
+
+      - name: Build the mod template
+        run:  make -C package/mod-template CONFIG=release MOD_NAME=example CC="x86_64-w64-mingw32-gcc -Werror"
