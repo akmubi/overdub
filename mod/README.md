@@ -1,6 +1,6 @@
 # Overdub Native Mod Template
 
-This directory is a small native mod project. A release template already contains the matching SDK headers, Nuklear headers, and `build/overdub.lib`. Keep those files from the same Overdub release.
+This directory is a small native mod project. In a release mod template, the `overdub` folder holds the Overdub source the mod builds against, and the build makes `overdub/build/overdub.lib` from it. Use the template of the same Overdub release that the player has installed.
 
 Build with Visual Studio 2022:
 
@@ -28,4 +28,4 @@ kind    = mod
 path = example.dll
 ```
 
-The source template is in `main.c`. In a released template, the full guide starts at `docs/MOD_DEVELOPMENT.md`. In the source checkout, it is at `../docs/MOD_DEVELOPMENT.md`.
+The source template is in `main.c`. The full guide starts at `overdub/docs/MOD_DEVELOPMENT.md`.

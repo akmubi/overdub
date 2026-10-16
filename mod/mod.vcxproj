@@ -57,13 +57,11 @@
 
   <PropertyGroup>
     <ModName Condition="'$(ModName)'==''">mod</ModName>
-    <OverdubDir Condition="'$(OverdubDir)'=='' and '$(OVERDUB_DIR)'!=''">$(OVERDUB_DIR)</OverdubDir>
-    <OverdubDir Condition="'$(OverdubDir)'=='' and Exists('$(ProjectDir)include\mod.h')">$(ProjectDir)</OverdubDir>
-    <OverdubDir Condition="'$(OverdubDir)'==''">$(ProjectDir)..</OverdubDir>
-    <OverdubIncludeDirectory Condition="'$(OverdubIncludeDirectory)'==''">$(OverdubDir)\include</OverdubIncludeDirectory>
-    <OverdubVendorDirectory Condition="'$(OverdubVendorDirectory)'==''">$(OverdubDir)\vendor</OverdubVendorDirectory>
-    <OverdubImportLibrary Condition="'$(OverdubImportLibrary)'==''">$(OverdubDir)\build\overdub.lib</OverdubImportLibrary>
-    <OverdubProject Condition="'$(OverdubProject)'==''">$(OverdubDir)\overdub.vcxproj</OverdubProject>
+    <OverdubDir>$(ProjectDir)overdub</OverdubDir>
+    <OverdubIncludeDirectory>$(OverdubDir)\include</OverdubIncludeDirectory>
+    <OverdubVendorDirectory>$(OverdubDir)\vendor</OverdubVendorDirectory>
+    <OverdubImportLibrary>$(OverdubDir)\build\overdub.lib</OverdubImportLibrary>
+    <OverdubProject>$(OverdubDir)\overdub.vcxproj</OverdubProject>
     <OutDir>$(ProjectDir)build\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)build\obj\$(Configuration)\</IntDir>
     <TargetName>$(ModName)</TargetName>
@@ -134,21 +132,15 @@
     <ClInclude Include="$(OverdubIncludeDirectory)\mod.h" />
   </ItemGroup>
 
-  <Target Name="CheckOverdubSdk" BeforeTargets="ClCompile;Link">
-    <Error Condition="!Exists('$(OverdubIncludeDirectory)\mod.h')"
-           Text="Missing $(OverdubIncludeDirectory)\mod.h. Set OverdubDir or OVERDUB_DIR to the Overdub source directory." />
-    <Error Condition="!Exists('$(OverdubImportLibrary)') and !Exists('$(OverdubProject)')"
-           Text="Missing $(OverdubImportLibrary) and $(OverdubProject). Cannot build Overdub automatically." />
-    <Message Condition="!Exists('$(OverdubImportLibrary)')"
-             Importance="high"
-             Text="$(OverdubImportLibrary) is missing; building $(OverdubProject) ($(Configuration)|$(Platform))." />
-    <MSBuild Condition="!Exists('$(OverdubImportLibrary)')"
-             Projects="$(OverdubProject)"
+  <!-- the import library is the same for every configuration, and Debug links fastest -->
+  <Target Name="BuildOverdub" BeforeTargets="ClCompile;Link">
+    <Error Condition="!Exists('$(OverdubProject)')"
+           Text="Missing $(OverdubProject): the overdub folder must hold the Overdub source." />
+    <MSBuild Projects="$(OverdubProject)"
              Targets="Build"
              BuildInParallel="false"
-             Properties="Configuration=$(Configuration);Platform=$(Platform)" />
-    <Error Condition="!Exists('$(OverdubImportLibrary)')"
-           Text="The Overdub build completed without producing $(OverdubImportLibrary)." />
+             Properties="Configuration=Debug;Platform=$(Platform)"
+             RemoveProperties="OutDir;IntDir;ModName" />
   </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

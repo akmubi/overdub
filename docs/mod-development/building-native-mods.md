@@ -1,6 +1,6 @@
 # Building Native Mods
 
-The release SDK template is self-contained. It has the public headers, Nuklear headers, `build/overdub.lib`, a sample source file, and project files for Visual Studio and MinGW-w64. Use the template from the same Overdub release that the player has installed.
+Each release has a mod template: a sample source file, project files for Visual Studio and MinGW-w64, and the Overdub source in its `overdub` folder. Copy it anywhere and build it. Use the template from the same Overdub release that the player has installed.
 
 ## Visual Studio
 
@@ -18,7 +18,7 @@ Build a release DLL:
 msbuild mod.vcxproj /t:Build /m /p:Configuration=Release /p:Platform=x64 /p:ModName=example
 ```
 
-The DLL is written under `build/Debug` or `build/Release`.
+The DLL is written under `build/Debug` or `build/Release`. Each build also builds Overdub in the `overdub` folder for its import library, `overdub/build/overdub.lib`; only the first one takes long.
 
 ## MinGW-w64
 
@@ -35,19 +35,9 @@ Set `MOD_SRC` when the mod has another source filename or several source files:
 make CONFIG=release MOD_NAME=example MOD_SRC="main.c feature.c"
 ```
 
-## Use a source checkout
+## The overdub folder
 
-The in-repository template finds the parent Overdub checkout automatically. A separate project can point to one explicitly:
-
-```batch
-msbuild mod.vcxproj /p:OverdubDir=C:\src\overdub /p:Configuration=Release /p:Platform=x64 /p:ModName=example
-```
-
-```sh
-make OVERDUB_DIR=/src/overdub CONFIG=release MOD_NAME=example
-```
-
-When `build/overdub.lib` is missing from a source checkout, the template builds Overdub first. A packaged release template already contains the import library and does not need the Overdub source.
+The `overdub` folder holds the Overdub source the mod builds against. It can be replaced with another version of Overdub, or changed: the next build of the mod builds it again.
 
 ## Package the result
 

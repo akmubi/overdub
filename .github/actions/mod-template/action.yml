@@ -1,0 +1,22 @@
+name:        Mod template
+description: The native mod project with the Overdub source in its overdub folder
+
+inputs:
+  destination:
+    description: Directory to write the template into
+    required:    true
+
+runs:
+  using: composite
+  steps:
+    - name:  Create the mod template
+      shell: bash
+      run: |
+        dest="${{ inputs.destination }}"
+        mkdir -p "$dest/overdub"
+
+        git archive --format=tar HEAD -- . ':(exclude)mod' ':(exclude).github' | tar -x -C "$dest/overdub"
+
+        for file in main.c Makefile mod.sln mod.vcxproj mod.vcxproj.filters README.md compile_flags.txt; do
+          cp "mod/$file" "$dest/"
+        done

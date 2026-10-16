@@ -6,22 +6,17 @@
 #   make MOD_NAME=tweaks MOD_SRC=tweaks.c
 #   make MOD_NAME=tweaks MOD_SRC=tweaks.cpp
 #   make CONFIG=release MOD_NAME=tweaks MOD_SRC=tweaks.cpp
-#   make OVERDUB_DIR=/path/to/overdub MOD_NAME=tweaks MOD_SRC=tweaks.c
 #   make clean
 
 MOD_NAME ?= mod
 MOD_SRC  ?= main.c
 CONFIG   ?= debug
 
-# A packaged template keeps the SDK in this directory. The in-repository
-# template falls back to the parent Overdub source tree.
-OVERDUB_DIR         ?= $(if $(wildcard include/mod.h),.,..)
-OVERDUB_INCLUDE_DIR ?= $(OVERDUB_DIR)/include
-OVERDUB_VENDOR_DIR  ?= $(OVERDUB_DIR)/vendor
-OVERDUB_HEADER      ?= $(OVERDUB_INCLUDE_DIR)/mod.h
-OVERDUB_LIB         ?= $(OVERDUB_DIR)/build/overdub.lib
-OVERDUB_MAKEFILE    ?= $(OVERDUB_DIR)/Makefile
-OVERDUB_PROJECT     ?= $(OVERDUB_DIR)/overdub.vcxproj
+OVERDUB_DIR         := overdub
+OVERDUB_INCLUDE_DIR := $(OVERDUB_DIR)/include
+OVERDUB_VENDOR_DIR  := $(OVERDUB_DIR)/vendor
+OVERDUB_LIB         := $(OVERDUB_DIR)/build/overdub.lib
+OVERDUB_MAKEFILE    := $(OVERDUB_DIR)/Makefile
 
 ifeq ($(origin CC), default)
   ifeq ($(OS),Windows_NT)
@@ -71,33 +66,23 @@ LDFLAGS := -shared -static -static-libgcc -static-libstdc++ \
 LDLIBS := "$(OVERDUB_LIB)"
 LINKER := $(if $(filter %.cpp,$(SRCS)),$(CXX),$(CC))
 
-.PHONY: all check-overdub clean
+.PHONY: all overdub clean
 
 all: $(TARGET)
 
-check-overdub:
-	@if [ ! -f "$(OVERDUB_HEADER)" ]; then \
-		printf "ERROR\t%s\n" "$(OVERDUB_HEADER) is missing. Set OVERDUB_DIR to the Overdub source directory."; \
+# the import library is the same for every configuration, and debug links fastest
+overdub:
+	@if [ ! -f "$(OVERDUB_MAKEFILE)" ]; then \
+		printf "ERROR\t%s\n" "Missing $(OVERDUB_MAKEFILE): the overdub folder must hold the Overdub source."; \
 		exit 1; \
 	fi
-	@if [ ! -f "$(OVERDUB_LIB)" ]; then \
-		if [ ! -f "$(OVERDUB_MAKEFILE)" ] || [ ! -f "$(OVERDUB_PROJECT)" ]; then \
-			printf "ERROR\t%s\n" "$(OVERDUB_LIB) is missing and $(OVERDUB_DIR) is not an Overdub source tree. Cannot build Overdub automatically."; \
-			exit 1; \
-		fi; \
-		printf "BUILD\t%s\n" "$(OVERDUB_LIB) is missing; building Overdub ($(CONFIG))."; \
-		$(MAKE) -C "$(OVERDUB_DIR)" "$(CONFIG)" || exit 1; \
-	fi
-	@if [ ! -f "$(OVERDUB_LIB)" ]; then \
-		printf "ERROR\t%s\n" "The Overdub build completed without producing $(OVERDUB_LIB)."; \
-		exit 1; \
-	fi
+	@$(MAKE) -C "$(OVERDUB_DIR)" debug CC="$(CC)"
 
-$(TARGET): $(OBJS) | check-overdub
+$(TARGET): $(OBJS) | overdub
 	@mkdir -p $(@D)
 	$(LINKER) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
-$(OBJS): | check-overdub
+$(OBJS): | overdub
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(@D)
