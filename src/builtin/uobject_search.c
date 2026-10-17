@@ -461,6 +461,8 @@ tool_work_tick(search_tool_t *tool)
 {
   uint64_t start_us = time_now_us();
 
+  cache_drain_inbox(tool);
+
   if (!build_cache_tick(tool, start_us)) {
     return;
   }

@@ -4,6 +4,8 @@
 #include "globals.h"
 #include "ui_nuklear.h"
 
+#include <windows.h>
+
 bool
 build_in_progress(search_tool_t *tool)
 {
@@ -522,7 +524,32 @@ release_names(search_tool_t *tool, record_t *record)
   record->name       = (ui_text_span_t){0};
 }
 
-static void
+/* The record of an object another one refers to (its outer or class). Objects being loaded may come
+ * before the ones they refer to are cached: those are cached now, or there is no record yet. */
+static record_t *
+linked_record(search_tool_t *tool, uobject_t *obj)
+{
+  int32_t slot = obj->internal_idx;
+
+  if (slot < 0 || (uint32_t)slot >= tool->cache.record_cap) {
+    return NULL;
+  }
+
+  record_t *record = record_from_slot(tool, (uint32_t)slot);
+
+  if (!record) {
+    return NULL;
+  }
+
+  if (!record_has_flag(record, RECORD_FLAG_LIVE) || record->obj != obj) {
+    cache_slot(tool, (uint32_t)slot);
+  }
+
+  return record_has_flag(record, RECORD_FLAG_LIVE) && record->obj == obj ? record : NULL;
+}
+
+/* false: the class has no record, so the object can not be shown */
+static bool
 link_record(search_tool_t *tool, record_t *record)
 {
   ASSERT(tool != NULL);
@@ -536,19 +563,20 @@ link_record(search_tool_t *tool, record_t *record)
   ASSERT(record->prev_instance_slot == RECORD_SLOT_INVALID);
   ASSERT(record->next_instance_slot == RECORD_SLOT_INVALID);
 
-  if (record->obj->outer) {
-    int32_t outer_slot = record->obj->outer->internal_idx;
-    MASSERT(outer_slot >= 0 && (uint32_t)outer_slot < tool->cache.record_cap, "invalid slot: %d", outer_slot);
+  record_t *type_record = record->obj->cls ? linked_record(tool, (uobject_t *)record->obj->cls) : NULL;
 
-    record_t *outer_record = record_from_slot(tool, outer_slot);
-    ASSERT(outer_record);
-    ASSERT(record_has_flag(outer_record, RECORD_FLAG_LIVE));
-    ASSERT(record->obj->outer == outer_record->obj);
+  if (!type_record) {
+    return false;
+  }
 
-    record->parent_slot       = outer_slot;
+  uint32_t record_slot = record_to_slot(tool, record);
+
+  /* an outer without a record leaves the object at the top */
+  record_t *outer_record = record->obj->outer ? linked_record(tool, record->obj->outer) : NULL;
+
+  if (outer_record) {
+    record->parent_slot       = record_to_slot(tool, outer_record);
     record->prev_sibling_slot = outer_record->last_child_slot;
-
-    uint32_t record_slot = record_to_slot(tool, record);
 
     record_t *last_child_record = record_from_slot(tool, outer_record->last_child_slot);
     if (last_child_record) {
@@ -560,18 +588,7 @@ link_record(search_tool_t *tool, record_t *record)
     outer_record->last_child_slot = record_slot;
   }
 
-  uobject_t *type_obj  = (uobject_t *)record->obj->cls;
-  int32_t    type_slot = type_obj->internal_idx;
-  ASSERT((uint32_t)type_slot < tool->cache.record_cap);
-
-  record_t *type_record = record_from_slot(tool, type_slot);
-  ASSERT(record_has_flag(type_record, RECORD_FLAG_LIVE));
-  ASSERT(type_record->obj == type_obj);
-
-  record->type_slot = type_slot;
-
-  uint32_t record_slot = record_to_slot(tool, record);
-
+  record->type_slot          = record_to_slot(tool, type_record);
   record->prev_instance_slot = type_record->last_instance_slot;
 
   record_t *last_instance_record = record_from_slot(tool, type_record->last_instance_slot);
@@ -583,6 +600,7 @@ link_record(search_tool_t *tool, record_t *record)
 
   type_record->last_instance_slot  = record_slot;
   type_record->instance_count     += 1;
+  return true;
 }
 
 static void
@@ -775,6 +793,68 @@ cache_slot(search_tool_t *tool, uint32_t slot)
   return true;
 }
 
+/* The game also creates objects on its loading threads: those are queued here and cached on the game thread. */
+#define CACHE_INBOX_CAP   (1u << 16)
+#define CACHE_INBOX_GONE  (1u << 31)
+
+static SRWLOCK  g_inbox_lock = SRWLOCK_INIT;
+static uint32_t g_inbox[CACHE_INBOX_CAP];
+static uint32_t g_inbox_count;
+static bool     g_inbox_overflow;
+
+static bool
+on_game_thread(void)
+{
+  return !globals.game_thread_id || GetCurrentThreadId() == globals.game_thread_id;
+}
+
+static void
+inbox_push(uint32_t entry)
+{
+  AcquireSRWLockExclusive(&g_inbox_lock);
+
+  if (g_inbox_count < CACHE_INBOX_CAP) {
+    g_inbox[g_inbox_count++] = entry;
+  } else {
+    g_inbox_overflow = true;
+  }
+
+  ReleaseSRWLockExclusive(&g_inbox_lock);
+}
+
+void
+cache_drain_inbox(search_tool_t *tool)
+{
+  static uint32_t entries[CACHE_INBOX_CAP];
+
+  AcquireSRWLockExclusive(&g_inbox_lock);
+
+  uint32_t count    = g_inbox_count;
+  bool     overflow = g_inbox_overflow;
+
+  memcpy(entries, g_inbox, count * sizeof(entries[0]));
+  g_inbox_count    = 0;
+  g_inbox_overflow = false;
+
+  ReleaseSRWLockExclusive(&g_inbox_lock);
+
+  for (uint32_t i = 0; i < count; ++i) {
+    uint32_t slot = entries[i] & ~CACHE_INBOX_GONE;
+
+    if (entries[i] & CACHE_INBOX_GONE) {
+      remove_slot(tool, slot);
+    } else {
+      cache_slot(tool, slot);
+    }
+  }
+
+  /* some were lost: every slot is looked at again */
+  if (overflow) {
+    tool->cache.build_cursor = 0;
+    tool->cache.build_total  = MIN_VAL((uint32_t)unreal_uobject_array_count(), tool->cache.record_cap);
+  }
+}
+
 void
 on_uobject_created(uobject_t *obj, int32_t idx, void *user)
 {
@@ -785,8 +865,12 @@ on_uobject_created(uobject_t *obj, int32_t idx, void *user)
     return;
   }
 
-  uint32_t slot = (uint32_t)idx;
-  cache_slot(tool, slot);
+  if (!on_game_thread()) {
+    inbox_push((uint32_t)idx);
+    return;
+  }
+
+  cache_slot(tool, (uint32_t)idx);
 }
 
 void
@@ -800,6 +884,11 @@ on_uobject_deleted(uobject_t *obj, int32_t idx, void *user)
   }
 
   uint32_t slot = (uint32_t)idx;
+
+  if (!on_game_thread()) {
+    inbox_push(slot | CACHE_INBOX_GONE);
+    return;
+  }
 
 #if BUILD_DEBUG
   if (slot < tool->cache.record_cap) {
@@ -819,7 +908,9 @@ process_pending_slot(search_tool_t *tool, record_t *record)
   ASSERT(tool != NULL);
   ASSERT(record != NULL);
 
-  link_record(tool, record);
+  if (!link_record(tool, record)) {
+    remove_slot(tool, record_to_slot(tool, record));
+  }
 }
 
 bool

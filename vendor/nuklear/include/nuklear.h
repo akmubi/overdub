@@ -3621,6 +3621,9 @@ struct nk_text_options {
 
 NK_API nk_bool
 nk_text_ex(struct nk_context *, const char *, int, const struct nk_text_options *);
+/* selectable text that is not drawn (a row of a long list out of view): a selection over it and its copy still count it */
+NK_API void
+nk_text_hidden(struct nk_context *, const char *, int, const struct nk_text_options *, struct nk_rect bounds);
 
 #ifndef NK_GRID_MAX_COLUMNS
 #  define NK_GRID_MAX_COLUMNS 16

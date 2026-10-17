@@ -721,6 +721,10 @@ ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
   int            visible   = MIN_VAL(total, console->max_lines);
   int            start     = MAX_VAL(0, total - visible);
   int            shown     = 0;
+  float          origin_y  = ctx->current->layout->bounds.y - (float)console->scroll.y;
+
+  /* the lines out of view still count for a selection over them and its copy */
+  struct nk_text_options hidden = {.flags = NK_TEXT_OPTION_SELECTABLE};
 
   for (int i = 0; i < visible; ++i) {
     ui_console_line_t *line = &console->lines[(start + i) % console->max_lines];
@@ -744,6 +748,7 @@ ui_console_draw_lines(ui_console_t *console, struct nk_context *ctx)
     shown += 1;
 
     if (y + h + spacing < view_top || y > view_end) {
+      nk_text_hidden(ctx, (const char *)text.data, (int)text.len, &hidden, nk_rect(view.x, origin_y + y, view.w, h));
       skipped += h + spacing;
       y       += h + spacing;
       continue;

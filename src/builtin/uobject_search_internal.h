@@ -363,6 +363,8 @@ build_cache_all(search_tool_t *tool);
 
 bool
 process_pending_slots_tick(search_tool_t *tool, uint64_t start_us);
+void
+cache_drain_inbox(search_tool_t *tool);
 
 typedef struct tool_search_s tool_search_t;
 struct tool_search_s {
