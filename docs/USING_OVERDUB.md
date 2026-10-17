@@ -49,7 +49,7 @@ Settings controls the mod directory, window shortcuts, console behavior, and oth
 
 A shortcut has a keyboard part and a gamepad part, written as `F1 | Select+RS`. Either part can be empty. Overdub's shortcuts are set in Settings, and a mod's shortcuts in its Config section.
 
-A combination works as soon as all of its buttons are down, pressed in any order. Buttons such as `Select` and `Start` wait briefly in case a combination follows; the buttons the game needs on the beat (attacks, dodge, jump) reach it at once. A single-button shortcut works when held for the hold time set in Settings, and a shorter press still reaches the game.
+A gamepad combination is pressed in its order, its first button first: `Select` before `RS`. It works as soon as all of its buttons are down. Buttons such as `Select` and `Start` wait briefly in case a combination follows; the buttons the game needs on the beat (attacks, dodge, jump) reach it at once. A single-button shortcut works when held for the hold time set in Settings, and a shorter press still reaches the game.
 
 To change a shortcut, open its dialog: opened with the gamepad it sets the gamepad part, otherwise the keyboard part. Choose Capture, press the new keys or buttons together and release them, then Apply. Clear empties the part, and Cancel (or `B`, `Escape`) keeps the shortcut as it was. The dialog warns when the keys are already used by another shortcut.
 
