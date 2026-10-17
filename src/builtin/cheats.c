@@ -10,6 +10,7 @@
 #include "ui_nuklear.h"
 #include "unreal_prop.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
@@ -20,6 +21,8 @@
 #define CFG_ENABLE_INFINITE_JUMPS "enable-infinite-jumps"
 #define CFG_INFINITE_DASH         "infinite-dash"
 #define CFG_GOD_MODE              "god-mode"
+#define CFG_INFINITE_HEALTH       "infinite-health"
+#define CFG_INFINITE_REVERB       "infinite-reverb-gauge"
 #define MOD_ID                    "cheats"
 
 typedef enum {
@@ -166,6 +169,8 @@ struct cheats_cfg_s {
   mod_cfg_handle_t enable_infinite_jumps_h;
   mod_cfg_handle_t infinite_dash_h;
   mod_cfg_handle_t god_mode_h;
+  mod_cfg_handle_t infinite_health_h;
+  mod_cfg_handle_t infinite_reverb_h;
 };
 
 typedef struct cheats_checkpoint_s cheats_checkpoint_t;
@@ -189,22 +194,58 @@ struct cheats_item_s {
   str_t           tag;
   str_t           name;
   int             category;
+  int32_t         store; // EHbkInventoryCategory of the item's class
 };
 
+/* the Items sections in the order shown; the costumes are grouped by character under one node */
 static const struct {
   const char *prefix;
   const char *label;
+  bool        costume;
 } g_item_categories[] = {
-  {"Inventory.Variable.",      "Upgrades"       },
-  {"Inventory.Chip.",          "Chips"          },
-  {"Inventory.SpecialAttack.", "Special attacks"},
-  {"Inventory.Ability.",       "Abilities"      },
-  {"Inventory.Attack.",        "Attacks"        },
-  {"Inventory.Combo.",         "Combos"         },
-  {"Inventory.Partner.",       "Partner skills" },
-  {"Inventory.Costume.",       "Costumes"       },
-  {"Inventory.File.",          "Files"          },
+  {"Inventory.Variable.",      "Variable",      false},
+  {"Inventory.Chip.",          "Chip",          false},
+  {"Inventory.SpecialAttack.", "SpecialAttack", false},
+  {"Inventory.Ability.",       "Ability",       false},
+  {"Inventory.Attack.",        "Attack",        false},
+  {"Inventory.Combo.",         "Combo",         false},
+  {"Inventory.Partner.",       "Partner",       false},
+  {"Inventory.Costume.808.",   "808",           true },
+  {"Inventory.Costume.CHA.",   "Chai",          true },
+  {"Inventory.Costume.CNM.",   "CNMN",          true },
+  {"Inventory.Costume.KOR.",   "Korsica",       true },
+  {"Inventory.Costume.MAC.",   "Macaron",       true },
+  {"Inventory.Costume.PEP.",   "Peppermint",    true },
+  {"Inventory.File.",          "File",          false},
 };
+
+/* EHbkInventoryCategory::LatestVariableItem: used up when taken, like life gauges and reverb cores */
+#define CHEATS_STORE_USED_UP 3
+
+/* where an item the player has is in the inventory lists */
+typedef struct cheats_owned_s cheats_owned_t;
+struct cheats_owned_s {
+  tarray_uint8_t *list;
+  int32_t         index;
+};
+
+/* how the inventory lists are laid out, read with the lists */
+typedef struct cheats_inventory_s cheats_inventory_t;
+struct cheats_inventory_s {
+  fprop_t *item_prop; // FHbkInventoryItem
+  int32_t  id_offset;
+  int32_t  count_offset;
+};
+
+/* the game flag manager's own setter: it adds the category and the flag when they are missing */
+typedef void(__fastcall *cheats_set_flag_fn_t)(uobject_t *manager, uint8_t container, fname_t category, fname_t name, int32_t value, bool unknown);
+
+/* the flag manager's containers: what is saved with the game, and with its stage progress */
+#define CHEATS_FLAGS_GAME     0
+#define CHEATS_FLAGS_PROGRESS 1
+
+/* EHbkProductStateType::Purchased */
+#define CHEATS_PRODUCT_PURCHASED 4
 
 typedef struct cheats_s cheats_t;
 struct cheats_s {
@@ -221,13 +262,25 @@ struct cheats_s {
 
   uobject_t *player_manager;
   double     player_manager_search_time;
+  uobject_t *gauge;
+  double     gauge_search_time;
+  uobject_t *health_bar;
+  double     health_bar_search_time;
+  uobject_t *hud_player; // the player the gauge and the health bar were found for
 
-  cheats_item_t *items;
-  int            item_count;
-  int            item_category;
-  int            item_give_count;
-  char           item_filter[64];
-  char           money_text[16];
+  cheats_item_t     *items;
+  int                item_count;
+  int32_t           *item_slots; // the item index + 1 by tag hash, a power of two long
+  int32_t            item_slot_count;
+  int32_t           *owned;      // how many of each item the player has
+  cheats_owned_t    *owned_at;
+  bool              *not_kept;   // given, and not kept by the game (the costume sets)
+  cheats_inventory_t inventory;
+
+  enum nk_collapse_states item_open[COUNTOF(g_item_categories)];
+  enum nk_collapse_states costume_open;
+  enum nk_collapse_states abilities_open;
+  enum nk_collapse_states partners_open;
 
   cheats_checkpoint_t *checkpoints;
   int                  checkpoint_count;
@@ -240,6 +293,13 @@ struct cheats_s {
   bool                 teleport_saw_save;
   int                  teleport_frames;
   bool                 god_mode_on;
+  bool                 infinite_health_on;
+  cheats_set_flag_fn_t set_flag;
+
+  /* the player whose reactions that break super armor are put away, and how many there were */
+  uobject_t *god_player;
+  int32_t    god_reaction_tags;
+  int32_t    god_reaction_parents;
 };
 
 static cheats_t g_cheats = {0};
@@ -420,7 +480,8 @@ cheats_init(mod_handle_t h)
   cheats->cfg.enable_infinite_jumps_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_ENABLE_INFINITE_JUMPS));
   cheats->cfg.infinite_dash_h         = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_INFINITE_DASH));
   cheats->cfg.god_mode_h              = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_GOD_MODE));
-  cheats->item_give_count             = 1;
+  cheats->cfg.infinite_health_h       = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_INFINITE_HEALTH));
+  cheats->cfg.infinite_reverb_h       = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_INFINITE_REVERB));
 
   /* the offsets are read from the code that uses them: or byte [rdi+air], 1, comiss xmm7, [rbx+cooldown] and inc dword [rbx+chain] */
   void           *air_dash          = NULL;
@@ -449,6 +510,15 @@ cheats_init(mod_handle_t h)
 
   if (!cheats->air_dash_offset || !cheats->dash_cooldown_offset || !cheats->dash_chain_offset) {
     LOG_WARN("cheats: the dash code was not found, infinite dash is off");
+  }
+
+  void           *set_flag     = NULL;
+  sigscan_entry_t set_flag_sig = SIG_ENTRY_DIRECT(set_flag, "4C 8B DC 4D 89 43 18 53 41 57 48 83 EC 68 0F B6 C2 49 8B D9 45 0F B7 D0 4C 8B F9 49 89 6B 08", 0x020495B0);
+
+  if (mod_sigscan(&set_flag_sig) == SIG_ERR_OK && set_flag_sig.addr) {
+    cheats->set_flag = (cheats_set_flag_fn_t)set_flag_sig.addr;
+  } else {
+    LOG_WARN("cheats: the game flag setter was not found, some unlocks are off");
   }
 
   void *jbox_play_music_addr = NULL;
@@ -910,8 +980,11 @@ cheats_load_items(cheats_t *cheats)
       continue;
     }
 
-    uobject_t *cdo  = *value ? (*value)->cdo : NULL;
-    fprop_t   *name = cdo ? unreal_ustruct_find_prop((ustruct_t *)cdo->cls, STR_LIT("InventoryObjectNameText")) : NULL;
+    uobject_t *cdo   = *value ? (*value)->cdo : NULL;
+    fprop_t   *name  = cdo ? unreal_ustruct_find_prop((ustruct_t *)cdo->cls, STR_LIT("InventoryObjectNameText")) : NULL;
+    fprop_t   *store = cdo ? unreal_ustruct_find_prop((ustruct_t *)cdo->cls, STR_LIT("InventoryCategory")) : NULL;
+
+    item.store = store ? *((uint8_t *)cdo + store->offset_internal) : 0;
 
     item.name = name ? cheats_text((ftext_t *)((uint8_t *)cdo + name->offset_internal), cheats->perm) : STR_NULL;
     if (str_is_empty(item.name)) {
@@ -922,106 +995,57 @@ cheats_load_items(cheats_t *cheats)
   }
 
   qsort(cheats->items, (size_t)cheats->item_count, sizeof(cheats->items[0]), cheats_item_compare);
+
+  cheats->item_slot_count = 1;
+  while (cheats->item_slot_count < cheats->item_count * 2) {
+    cheats->item_slot_count *= 2;
+  }
+
+  cheats->item_slots = ARENA_PUSH_ARRAY_ZERO(cheats->perm, int32_t, cheats->item_slot_count);
+  cheats->owned      = ARENA_PUSH_ARRAY_ZERO(cheats->perm, int32_t, cheats->item_count);
+  cheats->owned_at   = ARENA_PUSH_ARRAY_ZERO(cheats->perm, cheats_owned_t, cheats->item_count);
+  cheats->not_kept   = ARENA_PUSH_ARRAY_ZERO(cheats->perm, bool, cheats->item_count);
+
+  uint32_t mask = (uint32_t)cheats->item_slot_count - 1;
+  for (int i = 0; i < cheats->item_count; ++i) {
+    uint32_t at = unreal_fname_hash(cheats->items[i].id.tag_name) & mask;
+    while (cheats->item_slots[at]) {
+      at = (at + 1) & mask;
+    }
+
+    cheats->item_slots[at] = i + 1;
+  }
+
   LOG_INFO("cheats: %d items", cheats->item_count);
 }
 
-static bool
-cheats_item_matches(cheats_t *cheats, cheats_item_t *item)
+/* -1 when the game has no such item */
+static int
+cheats_item_find(cheats_t *cheats, fname_t tag)
 {
-  if (cheats->item_category > 0 && item->category != cheats->item_category - 1) {
-    return false;
+  if (!cheats->item_slots) {
+    return -1;
   }
 
-  str_t filter = str_from_cstr(cheats->item_filter);
-  return str_is_empty(filter) || str_find(item->name, filter, STR_CMP_FLAG_IGNORE_CASE, NULL) ||
-         str_find(item->tag, filter, STR_CMP_FLAG_IGNORE_CASE, NULL);
-}
+  uint32_t mask = (uint32_t)cheats->item_slot_count - 1;
+  for (uint32_t at = unreal_fname_hash(tag) & mask;; at = (at + 1) & mask) {
+    int32_t slot = cheats->item_slots[at];
 
-static void
-cheats_draw_money(cheats_t *cheats, struct nk_context *ctx)
-{
-  int money = cheats_get_money(cheats);
-
-  nk_layout_row_dynamic(ctx, 22.0f, 1);
-
-  if (money < 0) {
-    nk_label(ctx, "Load a save to change the gears", NK_TEXT_LEFT);
-    return;
-  }
-
-  nk_labelf(ctx, NK_TEXT_LEFT, "Gears: %d", money);
-
-  nk_layout_row_dynamic(ctx, 26.0f, 4);
-  nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, cheats->money_text, (int)sizeof(cheats->money_text), nk_filter_decimal);
-
-  if (nk_button_label(ctx, "Set") && cheats->money_text[0]) {
-    cheats_set_money(cheats, atoll(cheats->money_text));
-  }
-
-  if (nk_button_label(ctx, "+10,000")) {
-    cheats_set_money(cheats, (int64_t)money + 10000);
-  }
-
-  if (nk_button_label(ctx, "+100,000")) {
-    cheats_set_money(cheats, (int64_t)money + 100000);
-  }
-}
-
-static void
-cheats_draw_items(cheats_t *cheats, struct nk_context *ctx)
-{
-  cheats_load_items(cheats);
-
-  if (!cheats->items) {
-    nk_layout_row_dynamic(ctx, 22.0f, 1);
-    nk_label(ctx, "The game has not loaded its item list yet", NK_TEXT_LEFT);
-    return;
-  }
-
-  const char *labels[COUNTOF(g_item_categories) + 1] = {"All"};
-  for (int c = 0; c < COUNTOF(g_item_categories); ++c) {
-    labels[c + 1] = g_item_categories[c].label;
-  }
-
-  nk_layout_row_dynamic(ctx, 26.0f, 3);
-  cheats->item_category = nk_combo(ctx, labels, COUNTOF(labels), cheats->item_category, 24, nk_vec2(200.0f, 280.0f));
-  nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, cheats->item_filter, (int)sizeof(cheats->item_filter), nk_filter_default);
-  nk_property_int(ctx, "Count:", 1, &cheats->item_give_count, 99, 1, 1.0f);
-
-  bool has_player = cheats_player_character(cheats) != NULL;
-
-  if (!has_player) {
-    nk_layout_row_dynamic(ctx, 22.0f, 1);
-    nk_label(ctx, "Load a save to give items", NK_TEXT_LEFT);
-  }
-
-  nk_layout_row_dynamic(ctx, 320.0f, 1);
-
-  if (nk_group_begin(ctx, "cheats.items", 0)) {
-    float give_w = ui_text_width(ctx, STR_LIT("Give")) + 24.0f;
-
-    for (int i = 0; i < cheats->item_count; ++i) {
-      cheats_item_t *item = &cheats->items[i];
-      if (!cheats_item_matches(cheats, item)) {
-        continue;
-      }
-
-      nk_layout_row_template_begin(ctx, 22.0f);
-      nk_layout_row_template_push_dynamic(ctx);
-      nk_layout_row_template_push_dynamic(ctx);
-      nk_layout_row_template_push_static(ctx, give_w);
-      nk_layout_row_template_end(ctx);
-
-      nk_text(ctx, (const char *)item->name.data, (int)item->name.len, NK_TEXT_LEFT);
-      nk_text_colored(ctx, (const char *)item->tag.data + 10, (int)item->tag.len - 10, NK_TEXT_LEFT, UI_C_TEXT_DIM);
-
-      if (nk_button_label(ctx, "Give") && has_player) {
-        cheats_give_item(cheats, item, cheats->item_give_count);
-      }
+    if (!slot) {
+      return -1;
     }
 
-    nk_group_end(ctx);
+    if (unreal_fname_equal(cheats->items[slot - 1].id.tag_name, tag, false)) {
+      return slot - 1;
+    }
   }
+}
+
+static int
+cheats_item_find_tag(cheats_t *cheats, str_t tag)
+{
+  cheats_load_items(cheats);
+  return cheats_item_find(cheats, unreal_fname_from_str(tag, FNAME_FIND));
 }
 
 static void *
@@ -1043,15 +1067,74 @@ cheats_object_prop(uobject_t *obj, str_t name)
   return value && *value && unreal_uobject_is_valid(*value) ? *value : NULL;
 }
 
+static bool
+cheats_call_bool(uobject_t *self, str_t func)
+{
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, self, func)) {
+    return false;
+  }
+
+  cheats_call(&call);
+
+  bool *value = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return value && *value;
+}
+
+/* Super armor keeps the player from reacting to a hit. The reactions that break it (being blown off) are
+ * emptied from the player's list while god mode is on, and put back after. */
+static void
+cheats_god_reactions(cheats_t *cheats, uobject_t *player, bool enable)
+{
+  cheats_call_t call;
+  if (cheats_call_bool(player, STR_LIT("IsSuperArmor")) != enable && cheats_call_begin(&call, player, STR_LIT("SetSuperArmor"))) {
+    bool *armor = cheats_call_param(&call, STR_LIT("SuperArmor"));
+
+    if (armor) {
+      *armor = enable;
+      cheats_call(&call);
+    }
+  }
+
+  bool                       same = cheats->god_player == player;
+  fgameplay_tag_container_t *tags = cheats_prop_ptr(player, (ustruct_t *)player->cls, STR_LIT("OverReactionTags"), NULL);
+
+  if (!tags) {
+    return;
+  }
+
+  if (enable && (!same || tags->gameplay_tags.num > 0 || tags->parent_tags.num > 0)) {
+    cheats->god_player           = player;
+    cheats->god_reaction_tags    = tags->gameplay_tags.num;
+    cheats->god_reaction_parents = tags->parent_tags.num;
+    tags->gameplay_tags.num      = 0;
+    tags->parent_tags.num        = 0;
+  } else if (!enable && same) {
+    /* the arrays still hold them */
+    tags->gameplay_tags.num = MIN_VAL(cheats->god_reaction_tags, tags->gameplay_tags.max);
+    tags->parent_tags.num   = MIN_VAL(cheats->god_reaction_parents, tags->parent_tags.max);
+    cheats->god_player      = NULL;
+  }
+}
+
 /* The damage component's correction list scales every hit to nothing (one entry, no tags, rate 0). The hits
- * are taken as usual otherwise, so parries work. The player also can not die and is kept at full health. */
+ * are taken as usual otherwise, so parries work, and with super armor the player does not react to them. The
+ * player also can not die and is kept at full health. */
 static void
 cheats_god_mode(cheats_t *cheats, bool enable)
 {
-  uobject_t *damage = cheats_object_prop(cheats_player_character(cheats), STR_LIT("HbkDamage"));
+  uobject_t *player = cheats_player_character(cheats);
+  uobject_t *damage = cheats_object_prop(player, STR_LIT("HbkDamage"));
   if (!damage) {
     return;
   }
+
+  /* a player from a level since left has nothing to put back */
+  if (cheats->god_player && !unreal_uobject_is_valid(cheats->god_player)) {
+    cheats->god_player = NULL;
+  }
+
+  cheats_god_reactions(cheats, player, enable);
 
   ustruct_t *type         = (ustruct_t *)damage->cls;
   fprop_t   *undead       = NULL;
@@ -1102,6 +1185,205 @@ cheats_god_mode(cheats_t *cheats, bool enable)
   }
 
   cheats->god_mode_on = enable;
+}
+
+/* A new level has a new player: the gauge and the health bar of the last one stay valid for a while */
+static void
+cheats_check_hud_player(cheats_t *cheats)
+{
+  uobject_t *player = cheats_player_character(cheats);
+
+  if (player != cheats->hud_player) {
+    cheats->hud_player             = player;
+    cheats->gauge                  = NULL;
+    cheats->health_bar             = NULL;
+    cheats->gauge_search_time      = 0.0;
+    cheats->health_bar_search_time = 0.0;
+  }
+}
+
+/* The HUD's health bar, which also draws the reverb gauge. Only the one on screen has a player: the others
+ * (templates, widgets not shown) can not be updated. It is looked for at most once a second. */
+static uobject_t *
+cheats_health_bar(cheats_t *cheats)
+{
+  cheats_check_hud_player(cheats);
+
+  if (cheats->health_bar && unreal_uobject_is_valid(cheats->health_bar)) {
+    return cheats->health_bar;
+  }
+
+  cheats->health_bar = NULL;
+
+  double now = (double)time_now_us() / 1e6;
+  if (now - cheats->health_bar_search_time < 1.0) {
+    return NULL;
+  }
+
+  cheats->health_bar_search_time = now;
+
+  uclass_t *cls = unreal_uclass_find(STR_LIT("HbkHealthBarWidget"), false, true);
+  for (int i = 0, count = cls ? unreal_uobject_array_count() : 0; i < count; ++i) {
+    uobject_t    *obj = unreal_uobject_array_get_obj(i);
+    cheats_call_t call;
+
+    if (!obj || !unreal_uobject_is_a(obj, cls) || unreal_uobject_is_default(obj) || !unreal_uobject_is_valid(obj) ||
+        !cheats_call_begin(&call, obj, STR_LIT("GetOwningPlayer"))) {
+      continue;
+    }
+
+    cheats_call(&call);
+
+    uobject_t **player = cheats_call_param(&call, STR_LIT("ReturnValue"));
+    if (player && *player) {
+      cheats->health_bar = obj;
+      break;
+    }
+  }
+
+  return cheats->health_bar;
+}
+
+/* the bar draws its own count of reverb bars, and fills them up to it once started */
+static void
+cheats_redraw_reverb(cheats_t *cheats, int bars)
+{
+  uobject_t    *bar   = cheats_health_bar(cheats);
+  int32_t      *count = bar ? cheats_prop_ptr(bar, (ustruct_t *)bar->cls, STR_LIT("DeathblowGaugeNum"), NULL) : NULL;
+  cheats_call_t call;
+
+  if (count && cheats_call_begin(&call, bar, STR_LIT("StartDeathblowGauge"))) {
+    *count = bars;
+    cheats_call(&call);
+  }
+}
+
+/* The player's health is the player controller's: the character's own damage component does not change */
+static uobject_t *
+cheats_player_damage(cheats_t *cheats)
+{
+  uobject_t    *player = cheats_player_character(cheats);
+  cheats_call_t call;
+
+  if (player && cheats_call_begin(&call, player, STR_LIT("GetController"))) {
+    cheats_call(&call);
+
+    uobject_t **controller = cheats_call_param(&call, STR_LIT("ReturnValue"));
+    uobject_t  *damage     = controller && *controller ? cheats_object_prop(*controller, STR_LIT("HbkDamage")) : NULL;
+
+    if (damage) {
+      return damage;
+    }
+  }
+
+  return cheats_object_prop(player, STR_LIT("HbkDamage"));
+}
+
+/* Hits land and hurt as usual, but the player can not die and the health is filled up again at once */
+static void
+cheats_infinite_health(cheats_t *cheats, bool enable)
+{
+  uobject_t *damage = cheats_player_damage(cheats);
+  if (!damage) {
+    return;
+  }
+
+  ustruct_t *type         = (ustruct_t *)damage->cls;
+  fprop_t   *undead       = NULL;
+  void      *undead_value = cheats_prop_ptr(damage, type, STR_LIT("bUnDeadMode"), &undead);
+  float     *health       = cheats_prop_ptr(damage, type, STR_LIT("CurrentHealth"), NULL);
+  float     *maximum      = cheats_prop_ptr(damage, type, STR_LIT("MaxHealth"), NULL);
+
+  /* god mode keeps the player alive on its own */
+  if (undead_value && (enable || !mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.god_mode_h))) {
+    unreal_fprop_write_bool(undead, undead_value, enable);
+  }
+
+  cheats_call_t call;
+  if (enable && health && maximum && *health < *maximum && cheats_call_begin(&call, damage, STR_LIT("AddHealth"))) {
+    float *value = cheats_call_param(&call, STR_LIT("Value"));
+
+    if (value) {
+      *value = *maximum - *health;
+      cheats_call(&call);
+    }
+  }
+
+  cheats->infinite_health_on = enable;
+}
+
+/* the reverb gauge is on the player controller; it is looked for at most once a second */
+static uobject_t *
+cheats_reverb_gauge(cheats_t *cheats)
+{
+  cheats_check_hud_player(cheats);
+
+  if (cheats->gauge && unreal_uobject_is_valid(cheats->gauge)) {
+    return cheats->gauge;
+  }
+
+  cheats->gauge = NULL;
+
+  double now = (double)time_now_us() / 1e6;
+  if (now - cheats->gauge_search_time < 1.0 || !cheats_player_character(cheats)) {
+    return NULL;
+  }
+
+  cheats->gauge_search_time = now;
+  cheats->gauge             = cheats_find_live(STR_LIT("HbkPlayerGaugeComponent"));
+  return cheats->gauge;
+}
+
+static int
+cheats_call_int(uobject_t *self, str_t func)
+{
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, self, func)) {
+    return 0;
+  }
+
+  cheats_call(&call);
+
+  int32_t *value = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return value ? *value : 0;
+}
+
+static float
+cheats_call_float(uobject_t *self, str_t func)
+{
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, self, func)) {
+    return 0.0f;
+  }
+
+  cheats_call(&call);
+
+  float *value = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return value ? *value : 0.0f;
+}
+
+static void
+cheats_infinite_reverb(cheats_t *cheats)
+{
+  uobject_t *gauge = cheats_reverb_gauge(cheats);
+  if (!gauge) {
+    return;
+  }
+
+  /* the capacity is one bar of the gauge */
+  float         full  = cheats_call_float(gauge, STR_LIT("GetGaugeCapacity")) * (float)cheats_call_int(gauge, STR_LIT("GetGaugeMax"));
+  float         value = cheats_call_float(gauge, STR_LIT("GetAccumulatedGaugeValue"));
+  cheats_call_t call;
+
+  if (value < full && cheats_call_begin(&call, gauge, STR_LIT("AccumulateGaugeValue"))) {
+    float *add = cheats_call_param(&call, STR_LIT("AddValue"));
+
+    if (add) {
+      *add = full - value;
+      cheats_call(&call);
+      cheats_redraw_reverb(cheats, cheats_call_int(gauge, STR_LIT("GetAccumulatedGaugeCount")));
+    }
+  }
 }
 
 /* a parameter of an enum or a small integer type, by its own size */
@@ -1182,21 +1464,6 @@ cheats_learn_ability(int ability)
   }
 }
 
-static int
-cheats_joined_partners(void)
-{
-  uobject_t *manager = cheats_player_manager(&g_cheats);
-  fprop_t   *info    = NULL;
-  void      *value   = manager ? cheats_prop_ptr(manager, (ustruct_t *)manager->cls, STR_LIT("PlayerStateInfo"), &info) : NULL;
-
-  if (!value || unreal_fprop_get_kind(info) != UNREAL_PROP_KIND_STRUCT) {
-    return 0;
-  }
-
-  uint8_t *flags = cheats_prop_ptr(value, (ustruct_t *)((fprop_struct_t *)info)->script_struct, STR_LIT("JoinedPartnerFlags"), NULL);
-  return flags ? *flags : 0;
-}
-
 static void
 cheats_join_partner(int flag)
 {
@@ -1247,21 +1514,6 @@ cheats_add_count(str_t func, int add)
   if (value) {
     *value = add;
     cheats_call(&call);
-  }
-}
-
-/* tickets are the Bonus Ticket item */
-static void
-cheats_give_tickets(int count)
-{
-  cheats_t *cheats = &g_cheats;
-  cheats_load_items(cheats);
-
-  for (int i = 0; i < cheats->item_count; ++i) {
-    if (str_equal(cheats->items[i].tag, STR_LIT("Inventory.Variable.Ticket"), 0)) {
-      cheats_give_item(cheats, &cheats->items[i], count);
-      return;
-    }
   }
 }
 
@@ -1619,68 +1871,784 @@ static const struct {
   {16, "CNMN"      },
 };
 
+static void *
+cheats_state_prop(str_t name)
+{
+  uobject_t *manager = cheats_player_manager(&g_cheats);
+  fprop_t   *info    = NULL;
+  void      *value   = manager ? cheats_prop_ptr(manager, (ustruct_t *)manager->cls, STR_LIT("PlayerStateInfo"), &info) : NULL;
+
+  if (!value || unreal_fprop_get_kind(info) != UNREAL_PROP_KIND_STRUCT) {
+    return NULL;
+  }
+
+  return cheats_prop_ptr(value, (ustruct_t *)((fprop_struct_t *)info)->script_struct, name, NULL);
+}
+
+/* the player state's inventory: a map from the inventory category to a list of items and their counts */
+static fprop_map_t *
+cheats_inventory_map(void **out_map)
+{
+  fprop_t    *inventory_prop = NULL;
+  uobject_t  *manager        = cheats_player_character(&g_cheats) ? cheats_player_manager(&g_cheats) : NULL;
+  fprop_t    *state_prop     = NULL;
+  void       *state          = manager ? cheats_prop_ptr(manager, (ustruct_t *)manager->cls, STR_LIT("PlayerStateInfo"), &state_prop) : NULL;
+
+  if (!state || unreal_fprop_get_kind(state_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return NULL;
+  }
+
+  void *inventory = cheats_prop_ptr(state, (ustruct_t *)((fprop_struct_t *)state_prop)->script_struct, STR_LIT("PlayerInventory"), &inventory_prop);
+  if (!inventory || unreal_fprop_get_kind(inventory_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return NULL;
+  }
+
+  uobject_t **data = cheats_prop_ptr(inventory, (ustruct_t *)((fprop_struct_t *)inventory_prop)->script_struct, STR_LIT("InventoryCategoryData"), NULL);
+  if (!data || !*data || !unreal_uobject_is_valid(*data)) {
+    return NULL;
+  }
+
+  fprop_t *map_prop = NULL;
+  void    *map      = cheats_prop_ptr(*data, (ustruct_t *)(*data)->cls, STR_LIT("Map"), &map_prop);
+
+  if (!map || unreal_fprop_get_kind(map_prop) != UNREAL_PROP_KIND_MAP) {
+    return NULL;
+  }
+
+  *out_map = map;
+  return (fprop_map_t *)map_prop;
+}
+
+/* Counts what the player has of each item. An item can be in its category's list and in the one of what was
+ * taken since the last save: the counts add up, and the first list it is in is the one changed. */
+static bool
+cheats_scan_inventory(cheats_t *cheats)
+{
+  cheats_load_items(cheats);
+
+  if (!cheats->items) {
+    return false;
+  }
+
+  mem_zero(cheats->owned, sizeof(cheats->owned[0]) * (size_t)cheats->item_count);
+  mem_zero(cheats->owned_at, sizeof(cheats->owned_at[0]) * (size_t)cheats->item_count);
+
+  void        *map  = NULL;
+  fprop_map_t *prop = cheats_inventory_map(&map);
+
+  if (!prop || !prop->val_prop || unreal_fprop_get_kind(prop->val_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return false;
+  }
+
+  fprop_t *list_prop = unreal_ustruct_find_prop((ustruct_t *)((fprop_struct_t *)prop->val_prop)->script_struct, STR_LIT("List"));
+  fprop_t *item_prop = list_prop && unreal_fprop_get_kind(list_prop) == UNREAL_PROP_KIND_ARRAY ? ((fprop_array_t *)list_prop)->inner : NULL;
+
+  if (!item_prop || unreal_fprop_get_kind(item_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return false;
+  }
+
+  ustruct_t *item_type = (ustruct_t *)((fprop_struct_t *)item_prop)->script_struct;
+  fprop_t   *id_prop   = unreal_ustruct_find_prop(item_type, STR_LIT("InventoryId"));
+  fprop_t   *count     = unreal_ustruct_find_prop(item_type, STR_LIT("Count"));
+
+  if (!id_prop || !count) {
+    return false;
+  }
+
+  cheats->inventory = (cheats_inventory_t){
+    .item_prop    = item_prop,
+    .id_offset    = id_prop->offset_internal,
+    .count_offset = count->offset_internal,
+  };
+
+  for (int32_t i = 0, max = unreal_map_max_index(map, prop); i < max; ++i) {
+    uint8_t *value = unreal_map_is_valid_index(map, prop, i) ? unreal_map_get_value(map, prop, i) : NULL;
+    if (!value) {
+      continue;
+    }
+
+    tarray_uint8_t *list = (tarray_uint8_t *)(value + list_prop->offset_internal);
+
+    for (int32_t j = 0; j < list->num; ++j) {
+      uint8_t *entry = list->data + (size_t)j * (size_t)item_prop->elem_size;
+      int      item  = cheats_item_find(cheats, ((fgameplay_tag_t *)(entry + cheats->inventory.id_offset))->tag_name);
+
+      if (item < 0) {
+        continue;
+      }
+
+      cheats->owned[item] += *(int32_t *)(entry + cheats->inventory.count_offset);
+
+      if (!cheats->owned_at[item].list) {
+        cheats->owned_at[item] = (cheats_owned_t){.list = list, .index = j};
+      }
+    }
+  }
+
+  return true;
+}
+
+/* More are taken through the game; fewer are written to the list, and none takes the item away */
+static void
+cheats_set_item_count(cheats_t *cheats, int item, int count)
+{
+  cheats_owned_t *at   = &cheats->owned_at[item];
+  int             have = cheats->owned[item];
+
+  if (count > have) {
+    cheats_give_item(cheats, &cheats->items[item], count - have);
+    cheats_scan_inventory(cheats);
+
+    cheats->not_kept[item] = cheats->owned[item] <= have;
+    return;
+  } else if (count < have && at->list && at->index < at->list->num) {
+    int32_t  size  = cheats->inventory.item_prop->elem_size;
+    uint8_t *entry = at->list->data + (size_t)at->index * (size_t)size;
+    int32_t *first = (int32_t *)(entry + cheats->inventory.count_offset);
+    int32_t  left  = count - (have - *first);
+
+    if (left > 0) {
+      *first = left;
+    } else {
+      unreal_fprop_destroy_value(cheats->inventory.item_prop, entry);
+      memmove(entry, entry + size, (size_t)(at->list->num - at->index - 1) * (size_t)size);
+      at->list->num -= 1;
+    }
+
+    LOG_INFO("cheats: %.*s set to %d", STR_ARG(cheats->items[item].tag), count);
+  }
+
+  cheats_scan_inventory(cheats);
+}
+
+static bool
+cheats_count_row(struct nk_context *ctx, const char *label, int *value, int max)
+{
+  nk_layout_row_template_begin(ctx, 26.0f);
+  nk_layout_row_template_push_dynamic(ctx);
+  nk_layout_row_template_push_static(ctx, 180.0f);
+  nk_layout_row_template_end(ctx);
+
+  nk_label(ctx, label, NK_TEXT_LEFT);
+
+  int before = *value;
+  nk_property_int(ctx, "#", 0, value, max, 1, 1.0f);
+  return *value != before;
+}
+
+static void
+cheats_draw_general(cheats_t *cheats, struct nk_context *ctx)
+{
+  int money = cheats_get_money(cheats);
+
+  if (money < 0 || !cheats_scan_inventory(cheats)) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "Load a save to change these", NK_TEXT_LEFT);
+    return;
+  }
+
+  if (cheats_count_row(ctx, "Gears", &money, 99999999)) {
+    cheats_set_money(cheats, money);
+  }
+
+  int circuits = cheats_get_count(STR_LIT("GetCircuitNum"));
+  int before   = circuits;
+
+  if (circuits >= 0 && cheats_count_row(ctx, "Circuits", &circuits, 9999)) {
+    cheats_add_count(STR_LIT("AddCircuitNum"), circuits - before);
+  }
+
+  int ticket = cheats_item_find_tag(cheats, STR_LIT("Inventory.Variable.Ticket"));
+  if (ticket >= 0) {
+    int tickets = cheats->owned[ticket];
+
+    if (cheats_count_row(ctx, "Tickets", &tickets, 9999)) {
+      cheats_set_item_count(cheats, ticket, tickets);
+    }
+  }
+}
+
+static void
+cheats_draw_item_table(cheats_t *cheats, struct nk_context *ctx, int category)
+{
+  nk_layout_row_dynamic(ctx, 26.0f, 1);
+
+  if (nk_button_label(ctx, "Give every item")) {
+    for (int i = 0; i < cheats->item_count; ++i) {
+      if (cheats->items[i].category != category) {
+        continue;
+      }
+
+      if (cheats->items[i].store == CHEATS_STORE_USED_UP) {
+        cheats_give_item(cheats, &cheats->items[i], 1);
+      } else if (cheats->owned[i] <= 0) {
+        cheats_set_item_count(cheats, i, 1);
+      }
+    }
+  }
+
+  for (int i = 0; i < cheats->item_count; ++i) {
+    cheats_item_t *item = &cheats->items[i];
+    if (item->category != category) {
+      continue;
+    }
+
+    nk_layout_row_template_begin(ctx, 24.0f);
+    nk_layout_row_template_push_dynamic(ctx);
+    nk_layout_row_template_push_dynamic(ctx);
+    nk_layout_row_template_push_static(ctx, 140.0f);
+    nk_layout_row_template_end(ctx);
+
+    /* the columns are narrow: the whole name and tag are in a tooltip */
+    if (nk_widget_is_hovered(ctx)) {
+      nk_tooltip_text(ctx, (const char *)item->name.data, (int)item->name.len);
+    }
+
+    nk_text(ctx, (const char *)item->name.data, (int)item->name.len, NK_TEXT_LEFT);
+
+    if (nk_widget_is_hovered(ctx)) {
+      nk_tooltip_text(ctx, (const char *)item->tag.data, (int)item->tag.len);
+    }
+
+    nk_text_colored(ctx, (const char *)item->tag.data + 10, (int)item->tag.len - 10, NK_TEXT_LEFT, UI_C_TEXT_DIM);
+
+    if (cheats->not_kept[i] && cheats->owned[i] <= 0) {
+      if (nk_widget_is_hovered(ctx)) {
+        nk_tooltip(ctx, "The game takes this one but does not keep it in the inventory");
+      }
+
+      nk_label_colored(ctx, "Not kept", NK_TEXT_CENTERED, UI_C_TEXT_DIM);
+      continue;
+    }
+
+    /* the gamepad focus is on the count: its tooltip names the item too */
+    if (nk_widget_is_hovered(ctx)) {
+      char text[256];
+      snprintf(text, sizeof(text), "%.*s (%.*s)", STR_ARG(item->name), STR_ARG(item->tag));
+      nk_tooltip(ctx, text);
+    }
+
+    /* used up when taken: there is no count to show */
+    if (item->store == CHEATS_STORE_USED_UP) {
+      if (nk_button_label(ctx, "Give")) {
+        cheats_give_item(cheats, item, 1);
+      }
+
+      continue;
+    }
+
+    int count = cheats->owned[i];
+    nk_property_int(ctx, "#", 0, &count, 9999, 1, 1.0f);
+
+    if (count != cheats->owned[i]) {
+      cheats_set_item_count(cheats, i, count);
+    }
+  }
+}
+
+static void
+cheats_draw_items(cheats_t *cheats, struct nk_context *ctx)
+{
+  if (!cheats_scan_inventory(cheats)) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, cheats->items ? "Load a save to change the items" : "The game has not loaded its item list yet", NK_TEXT_LEFT);
+    return;
+  }
+
+  for (int c = 0; c < COUNTOF(g_item_categories); ++c) {
+    if (!g_item_categories[c].costume) {
+      if (nk_tree_state_push(ctx, NK_TREE_NODE, g_item_categories[c].label, &cheats->item_open[c])) {
+        cheats_draw_item_table(cheats, ctx, c);
+        nk_tree_pop(ctx);
+      }
+
+      continue;
+    }
+
+    /* the costume nodes are drawn with the first of them */
+    if (c > 0 && g_item_categories[c - 1].costume) {
+      continue;
+    }
+
+    if (nk_tree_state_push(ctx, NK_TREE_NODE, "Costume", &cheats->costume_open)) {
+      for (int k = c; k < COUNTOF(g_item_categories) && g_item_categories[k].costume; ++k) {
+        if (nk_tree_state_push(ctx, NK_TREE_NODE, g_item_categories[k].label, &cheats->item_open[k])) {
+          cheats_draw_item_table(cheats, ctx, k);
+          nk_tree_pop(ctx);
+        }
+      }
+
+      nk_tree_pop(ctx);
+    }
+  }
+}
+
+/* the tags of an ability, from the player manager's map of them by EHbkPlayerAppendAbilityType */
+static fgameplay_tag_t *
+cheats_ability_tag(int ability, fgameplay_tag_t **out_item)
+{
+  uobject_t *manager = cheats_player_manager(&g_cheats);
+  fprop_t   *prop    = NULL;
+  void      *map     = manager ? cheats_prop_ptr(manager, (ustruct_t *)manager->cls, STR_LIT("PlayerAbilityInfoMap"), &prop) : NULL;
+
+  if (!map || unreal_fprop_get_kind(prop) != UNREAL_PROP_KIND_MAP) {
+    return NULL;
+  }
+
+  fprop_map_t *map_prop = (fprop_map_t *)prop;
+  uint8_t      key      = (uint8_t)ability;
+  void        *info     = unreal_map_find_value_ptr(map, map_prop, &key);
+
+  if (!info || unreal_fprop_get_kind(map_prop->val_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return NULL;
+  }
+
+  ustruct_t *type = (ustruct_t *)((fprop_struct_t *)map_prop->val_prop)->script_struct;
+
+  *out_item = cheats_prop_ptr(info, type, STR_LIT("InventoryTag"), NULL);
+  return cheats_prop_ptr(info, type, STR_LIT("AbilityTag"), NULL);
+}
+
+/* the ability's tag leaves the player's tags, and the item that teaches it the inventory */
+static void
+cheats_forget_ability(cheats_t *cheats, int ability)
+{
+  fgameplay_tag_t           *item_tag = NULL;
+  fgameplay_tag_t           *tag      = cheats_ability_tag(ability, &item_tag);
+  fgameplay_tag_container_t *tags     = cheats_state_prop(STR_LIT("AbilityTags"));
+
+  if (!tag || !tags) {
+    return;
+  }
+
+  for (int32_t i = 0; i < tags->gameplay_tags.num; ++i) {
+    if (unreal_fname_equal(tags->gameplay_tags.data[i].tag_name, tag->tag_name, false)) {
+      memmove(&tags->gameplay_tags.data[i], &tags->gameplay_tags.data[i + 1], sizeof(tags->gameplay_tags.data[0]) * (size_t)(tags->gameplay_tags.num - i - 1));
+      tags->gameplay_tags.num -= 1;
+      break;
+    }
+  }
+
+  int item = item_tag && !unreal_fname_is_none(item_tag->tag_name) ? cheats_item_find(cheats, item_tag->tag_name) : -1;
+  if (item >= 0 && cheats_scan_inventory(cheats) && cheats->owned[item] > 0) {
+    cheats_set_item_count(cheats, item, 0);
+  }
+
+  LOG_INFO("cheats: ability %d forgotten", ability);
+}
+
+static void
+cheats_unlock_all_skills(void)
+{
+  cheats_call_simple(STR_LIT("DebugOpenAllSkills"));
+
+  cheats_call_t call;
+  if (cheats_call_begin(&call, cheats_find_live(STR_LIT("HbkInventoryManager")), STR_LIT("GetSkillAll"))) {
+    cheats_call(&call);
+  }
+}
+
+/* the health bar and the reverb gauge grow with the items the game gives for them */
+static void
+cheats_max_growth(cheats_t *cheats, bool health)
+{
+  uobject_t *growth = cheats_find_live(STR_LIT("HbkPlayerGrowthComponent"));
+  int32_t   *max    = growth ? cheats_prop_ptr(growth, (ustruct_t *)growth->cls, health ? STR_LIT("HealthGrowthMaxNum") : STR_LIT("GaugeGrowthMaxNum"), NULL) : NULL;
+  int32_t   *step   = growth ? cheats_prop_ptr(growth, (ustruct_t *)growth->cls, STR_LIT("GaugeGrowthAmount"), NULL) : NULL;
+  int        item   = cheats_item_find_tag(cheats, health ? STR_LIT("Inventory.Variable.LifeUp") : STR_LIT("Inventory.Variable.GaugeUp"));
+
+  if (!max || item < 0) {
+    return;
+  }
+
+  int now     = cheats_call_int(growth, health ? STR_LIT("GetCurrentHealthGrowthNum") : STR_LIT("GetCurrentGaugeGrowthAmount"));
+  int missing = health ? *max - now : *max - now / MAX_VAL(step ? *step : 1, 1);
+
+  if (missing > 0) {
+    cheats_give_item(cheats, &cheats->items[item], missing);
+  }
+}
+
 static void
 cheats_draw_progress(cheats_t *cheats, struct nk_context *ctx)
 {
-  int circuits = cheats_get_count(STR_LIT("GetCircuitNum"));
-
-  if (circuits < 0) {
+  if (!cheats_player_character(cheats)) {
     nk_layout_row_dynamic(ctx, 22.0f, 1);
     nk_label(ctx, "Load a save to change the progress", NK_TEXT_LEFT);
     return;
   }
 
-  nk_layout_row_dynamic(ctx, 26.0f, 1);
-  if (nk_button_label(ctx, "Unlock all skills")) {
-    cheats_call_simple(STR_LIT("DebugOpenAllSkills"));
-  }
-
-  int tickets = cheats_get_count(STR_LIT("GetViewerTicketNum"));
-
   nk_layout_row_dynamic(ctx, 26.0f, 3);
-  nk_labelf(ctx, NK_TEXT_LEFT, "Circuits: %d", circuits);
-  if (nk_button_label(ctx, "+1")) {
-    cheats_add_count(STR_LIT("AddCircuitNum"), 1);
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "Unlocks all abilities, partners, combos, partner combos, special attacks, chips, additional chip slots and the special attack slot");
   }
 
-  if (nk_button_label(ctx, "+10")) {
-    cheats_add_count(STR_LIT("AddCircuitNum"), 10);
+  if (nk_button_label(ctx, "Unlock all skills")) {
+    cheats_unlock_all_skills();
   }
 
-  nk_labelf(ctx, NK_TEXT_LEFT, "Tickets: %d", tickets);
-  if (nk_button_label(ctx, "+1")) {
-    cheats_give_tickets(1);
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "Unlocks the maximum possible health bar");
   }
 
-  if (nk_button_label(ctx, "+10")) {
-    cheats_give_tickets(10);
+  if (nk_button_label(ctx, "Unlock max healthbar")) {
+    cheats_max_growth(cheats, true);
   }
 
-  nk_layout_row_dynamic(ctx, 20.0f, 1);
-  nk_label(ctx, "Abilities", NK_TEXT_LEFT);
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "Unlocks the maximum possible reverb gauge");
+  }
 
-  nk_layout_row_dynamic(ctx, 24.0f, 3);
-  /* the ones the player has are shown dim, the others can be learned */
-  for (int i = 1; i < COUNTOF(g_ability_labels); ++i) {
-    if (cheats_has_ability(i)) {
-      nk_label_colored(ctx, g_ability_labels[i], NK_TEXT_CENTERED, UI_C_TEXT_DIM);
-    } else if (nk_button_label(ctx, g_ability_labels[i])) {
-      cheats_learn_ability(i);
+  if (nk_button_label(ctx, "Unlock max reverb gauge")) {
+    cheats_max_growth(cheats, false);
+  }
+
+  if (nk_tree_state_push(ctx, NK_TREE_NODE, "Abilities", &cheats->abilities_open)) {
+    for (int i = 1; i < COUNTOF(g_ability_labels); ++i) {
+      nk_layout_row_template_begin(ctx, 24.0f);
+      nk_layout_row_template_push_dynamic(ctx);
+      nk_layout_row_template_push_static(ctx, 120.0f);
+      nk_layout_row_template_end(ctx);
+
+      nk_label(ctx, g_ability_labels[i], NK_TEXT_LEFT);
+
+      int has = cheats_has_ability(i) ? 1 : 0;
+      int now = has;
+
+      nk_checkbox_label(ctx, "Unlocked", &now);
+
+      if (now != has) {
+        if (now) {
+          cheats_learn_ability(i);
+        } else {
+          cheats_forget_ability(cheats, i);
+        }
+      }
+    }
+
+    nk_tree_pop(ctx);
+  }
+
+  if (nk_tree_state_push(ctx, NK_TREE_NODE, "Partners", &cheats->partners_open)) {
+    uint8_t *joined = cheats_state_prop(STR_LIT("JoinedPartnerFlags"));
+
+    for (int i = 0; i < COUNTOF(g_partners) && joined; ++i) {
+      nk_layout_row_template_begin(ctx, 24.0f);
+      nk_layout_row_template_push_dynamic(ctx);
+      nk_layout_row_template_push_static(ctx, 120.0f);
+      nk_layout_row_template_end(ctx);
+
+      nk_label(ctx, g_partners[i].label, NK_TEXT_LEFT);
+
+      int has = (*joined & g_partners[i].flag) ? 1 : 0;
+      int now = has;
+
+      nk_checkbox_label(ctx, "Joined", &now);
+
+      if (now && !has) {
+        cheats_join_partner(g_partners[i].flag);
+      } else if (!now && has) {
+        *joined &= (uint8_t)~g_partners[i].flag;
+        LOG_INFO("cheats: partner %d left", g_partners[i].flag);
+      }
+    }
+
+    nk_tree_pop(ctx);
+  }
+}
+
+static void
+cheats_set_hideout_flag(cheats_t *cheats, str_t flag, int value)
+{
+  uobject_t    *player = cheats_player_character(cheats);
+  uclass_t     *cls    = unreal_uclass_find(STR_LIT("HbkGameFlagFunction"), false, true);
+  cheats_call_t call;
+
+  if (!player || !cls || !cls->cdo || !cheats_call_begin(&call, cls->cdo, STR_LIT("SetHideOutFlag"))) {
+    return;
+  }
+
+  uobject_t **context = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  fname_t    *name    = cheats_call_param(&call, STR_LIT("FlagName"));
+  int32_t    *set     = cheats_call_param(&call, STR_LIT("SetFlag"));
+
+  if (!context || !name || !set) {
+    return;
+  }
+
+  *context = player;
+  *name    = unreal_fname_from_str(flag, FNAME_FIND_OR_ADD);
+  *set     = value;
+  cheats_call(&call);
+
+  LOG_INFO("cheats: hideout flag %.*s set to %d", STR_ARG(flag), value);
+}
+
+/* every challenge on the wall as reached; their rewards are still taken at the wall */
+static void
+cheats_unlock_wall_of_fame(void)
+{
+  uobject_t *wall          = cheats_find_live(STR_LIT("HbkHideOutChallenge"));
+  fprop_t   *progress_prop = NULL;
+  void      *progress      = wall ? cheats_prop_ptr(wall, (ustruct_t *)wall->cls, STR_LIT("Progress"), &progress_prop) : NULL;
+
+  if (!progress || unreal_fprop_get_kind(progress_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return;
+  }
+
+  fprop_t *table_prop = NULL;
+  void    *table      = cheats_prop_ptr(progress, (ustruct_t *)((fprop_struct_t *)progress_prop)->script_struct, STR_LIT("ChallengeProgressTbl"), &table_prop);
+
+  if (!table || unreal_fprop_get_kind(table_prop) != UNREAL_PROP_KIND_MAP) {
+    return;
+  }
+
+  fprop_map_t *map = (fprop_map_t *)table_prop;
+  if (unreal_fprop_get_kind(map->val_prop) != UNREAL_PROP_KIND_STRUCT) {
+    return;
+  }
+
+  ustruct_t *type   = (ustruct_t *)((fprop_struct_t *)map->val_prop)->script_struct;
+  fprop_t   *status = unreal_ustruct_find_prop(type, STR_LIT("Status"));
+  fprop_t   *now    = unreal_ustruct_find_prop(type, STR_LIT("NowValue"));
+  fprop_t   *target = unreal_ustruct_find_prop(type, STR_LIT("TargetValue"));
+  fprop_t   *fresh  = unreal_ustruct_find_prop(type, STR_LIT("bNewUnlocked"));
+
+  if (!status || !now || !target) {
+    return;
+  }
+
+  int unlocked = 0;
+  for (int32_t i = 0, max = unreal_map_max_index(table, map); i < max; ++i) {
+    uint8_t *param = unreal_map_is_valid_index(table, map, i) ? unreal_map_get_value(table, map, i) : NULL;
+
+    /* EHbkHideOutChallengeStatus::Unlocked */
+    if (!param || param[status->offset_internal] == 2) {
+      continue;
+    }
+
+    param[status->offset_internal]               = 2;
+    *(int32_t *)(param + now->offset_internal)    = *(int32_t *)(param + target->offset_internal);
+
+    if (fresh) {
+      unreal_fprop_write_bool(fresh, param + fresh->offset_internal, true);
+    }
+
+    unlocked += 1;
+  }
+
+  LOG_INFO("cheats: %d challenges unlocked", unlocked);
+}
+
+static bool
+cheats_set_flag(cheats_t *cheats, uint8_t container, str_t category, fname_t name, int32_t value)
+{
+  uobject_t *manager = cheats->set_flag ? cheats_find_live(STR_LIT("HbkGameFlagManager")) : NULL;
+  if (!manager) {
+    return false;
+  }
+
+  cheats->set_flag(manager, container, unreal_fname_from_str(category, FNAME_FIND_OR_ADD), name, value, false);
+  return true;
+}
+
+typedef struct cheats_products_s cheats_products_t;
+struct cheats_products_s {
+  str_t   prefix;
+  fname_t names[512];
+  int     count;
+};
+
+/* a product's tag is the category, the group and the product under Product.Gallery: the shorter ones are groups */
+static bool
+cheats_gather_product(fname_t name, fname_entry_t *entry, void *user)
+{
+  cheats_products_t *products = user;
+
+  if (!unreal_fname_entry_match_text(entry, products->prefix, false, false)) {
+    return true;
+  }
+
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    str_t text  = unreal_fname_to_str(name, tmp.arena);
+    int   parts = 1;
+
+    for (uint64_t i = 0; i < text.len; ++i) {
+      parts += text.data[i] == '.';
+    }
+
+    if (parts == 5 && str_has_prefix(text, products->prefix, 0) && products->count < COUNTOF(products->names)) {
+      products->names[products->count++] = name;
+    }
+  }
+  scratch_end(tmp);
+
+  return true;
+}
+
+/* Songs in the jukebox and models in the model viewer are bought with gears: they are set as bought. The
+ * names are gathered first, the setter may add names to the pool. */
+static void
+cheats_purchase_gallery(cheats_t *cheats, str_t prefix)
+{
+  static cheats_products_t products;
+  products = (cheats_products_t){.prefix = prefix};
+
+  if (!cheats->set_flag) {
+    LOG_ERROR("cheats: the game flag setter was not found");
+    return;
+  }
+
+  unreal_fname_pool_iterate(cheats_gather_product, &products);
+
+  int bought = 0;
+  for (int i = 0; i < products.count; ++i) {
+    bought += cheats_set_flag(cheats, CHEATS_FLAGS_GAME, STR_LIT("Product"), products.names[i], CHEATS_PRODUCT_PURCHASED);
+  }
+
+  LOG_INFO("cheats: %d of %.*s bought", bought, STR_ARG(prefix));
+}
+
+/* A graffiti is found when its row's flag is in the stage progress' GraffitiCollectFound. The last one is
+ * the one given at the end, when all the others are found. */
+static void
+cheats_find_graffiti(cheats_t *cheats, bool last)
+{
+  uobject_t              *settings = cheats_find_live(STR_LIT("HbkGraffitiCollectSettingsDataAsset"));
+  udata_table_t         **table    = settings ? cheats_prop_ptr(settings, (ustruct_t *)settings->cls, STR_LIT("DataTable"), NULL) : NULL;
+  tmap_fname_uint8ptr_t  *rows     = table && *table ? unreal_udata_table_get_row_map(*table) : NULL;
+  fprop_t                *flag     = rows ? unreal_ustruct_find_prop((ustruct_t *)(*table)->row_struct, STR_LIT("FoundGameFlagItemName")) : NULL;
+
+  if (!flag || !cheats->set_flag) {
+    LOG_ERROR("cheats: the graffiti list or the game flag setter was not found");
+    return;
+  }
+
+  int found = 0;
+  TMAP_FOR_EACH_INDEX(rows, idx) {
+    uint8_t *row = TMAP_VALUE_AT(rows, idx);
+    if (!row) {
+      continue;
+    }
+
+    fname_t name    = *(fname_t *)(row + flag->offset_internal);
+    bool    is_last = unreal_fname_match_text(name, STR_LIT("Graffiti.LastGraffiti"), false, true);
+
+    if (is_last != last || unreal_fname_match_text(name, STR_LIT("Default"), false, true)) {
+      continue;
+    }
+
+    if (cheats_set_flag(cheats, CHEATS_FLAGS_PROGRESS, STR_LIT("GraffitiCollectFound"), name, 1)) {
+      found += 1;
     }
   }
 
-  int joined = cheats_joined_partners();
+  if (last) {
+    cheats_set_hideout_flag(cheats, STR_LIT("LastGraffiti"), 1);
+  }
 
-  nk_layout_row_dynamic(ctx, 20.0f, 1);
-  nk_label(ctx, "Partners", NK_TEXT_LEFT);
+  LOG_INFO("cheats: %d graffiti found", found);
+}
 
-  nk_layout_row_dynamic(ctx, 24.0f, 5);
-  for (int i = 0; i < COUNTOF(g_partners); ++i) {
-    if (joined & g_partners[i].flag) {
-      nk_label_colored(ctx, g_partners[i].label, NK_TEXT_CENTERED, UI_C_TEXT_DIM);
-    } else if (nk_button_label(ctx, g_partners[i].label)) {
-      cheats_join_partner(g_partners[i].flag);
+/* got from the game studio, a stat of the save; the hideout flag puts it in the hideout */
+static void
+cheats_give_gift_basket(cheats_t *cheats)
+{
+  uobject_t    *player = cheats_player_character(cheats);
+  uclass_t     *cls    = unreal_uclass_find(STR_LIT("HbkPlayerMetricsFunction"), false, true);
+  cheats_call_t call;
+
+  if (!player || !cls || !cls->cdo || !cheats_call_begin(&call, cls->cdo, STR_LIT("ModifyStat"))) {
+    return;
+  }
+
+  uobject_t **context  = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  fname_t    *name     = cheats_call_param(&call, STR_LIT("StatName"));
+  int32_t    *value    = cheats_call_param(&call, STR_LIT("Value"));
+  uint8_t    *modifier = cheats_call_param(&call, STR_LIT("Modifier"));
+
+  if (!context || !name || !value || !modifier) {
+    return;
+  }
+
+  *context  = player;
+  *name     = unreal_fname_from_str(STR_LIT("GotGameStudioGiftBasket"), FNAME_FIND_OR_ADD);
+  *value    = 1;
+  *modifier = 3; // EHbkPlayerMetricsStatModifier::Max
+  cheats_call(&call);
+  cheats_set_hideout_flag(cheats, STR_LIT("Giftbox"), 1);
+
+  LOG_INFO("cheats: gift basket got");
+}
+
+static void
+cheats_draw_misc(cheats_t *cheats, struct nk_context *ctx)
+{
+  if (!cheats_player_character(cheats)) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "Load a save to unlock these", NK_TEXT_LEFT);
+    return;
+  }
+
+  nk_layout_row_dynamic(ctx, 26.0f, 1);
+
+  if (nk_button_label(ctx, "Unlock every song in jukebox")) {
+    cheats_purchase_gallery(cheats, STR_LIT("Product.Gallery.SoundGallery."));
+  }
+
+  if (nk_button_label(ctx, "Unlock every model in model viewer")) {
+    cheats_purchase_gallery(cheats, STR_LIT("Product.Gallery.ModelViewer."));
+  }
+
+  if (nk_button_label(ctx, "Unlock every costume")) {
+    cheats_call_t call;
+    if (cheats_call_begin(&call, cheats_find_live(STR_LIT("HbkInventoryManager")), STR_LIT("OpenCostumeAll"))) {
+      cheats_call(&call);
+      LOG_INFO("cheats: every costume unlocked");
     }
+  }
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "Unlocks every achievement in Wall of Fame");
+  }
+
+  if (nk_button_label(ctx, "Unlock everything in Wall of Fame")) {
+    cheats_unlock_wall_of_fame();
+  }
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "The arcade machine in the hideout");
+  }
+
+  if (nk_button_label(ctx, "Unlock BPM RUSH and Power Up! Tower Up!")) {
+    cheats_set_hideout_flag(cheats, STR_LIT("OpenArcadeMode"), 1);
+    cheats_set_hideout_flag(cheats, STR_LIT("OpenTowerTalk"), 1);
+  }
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "They do not show up right away: go through a checkpoint in a stage and come back to the hideout");
+  }
+
+  if (nk_button_label(ctx, "Unlock every graffiti")) {
+    cheats_find_graffiti(cheats, false);
+  }
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "The gift basket in the hideout. It does not show up right away: go to a stage and come back to the hideout");
+  }
+
+  if (nk_button_label(ctx, "Unlock Gift Basket")) {
+    cheats_give_gift_basket(cheats);
+  }
+
+  if (nk_widget_is_hovered(ctx)) {
+    nk_tooltip(ctx, "The Chai banana head graffiti in the hideout. It does not show up right away: go through a checkpoint in a stage and come back to the hideout");
+  }
+
+  if (nk_button_label(ctx, "Unlock the graffiti")) {
+    cheats_find_graffiti(cheats, true);
   }
 }
 
@@ -1780,18 +2748,19 @@ cheats_draw_panel(mod_handle_t h, struct nk_context *ctx)
 {
   (void)h;
 
-  static enum nk_collapse_states money_open = NK_MAXIMIZED;
+  static enum nk_collapse_states general_open  = NK_MAXIMIZED;
   static enum nk_collapse_states items_open    = NK_MINIMIZED;
   static enum nk_collapse_states progress_open = NK_MINIMIZED;
   static enum nk_collapse_states teleport_open = NK_MINIMIZED;
+  static enum nk_collapse_states misc_open     = NK_MINIMIZED;
 
   cheats_t *cheats = &g_cheats;
   if (!cheats->inited) {
     return;
   }
 
-  if (nk_tree_state_push(ctx, NK_TREE_TAB, "Gears", &money_open)) {
-    cheats_draw_money(cheats, ctx);
+  if (nk_tree_state_push(ctx, NK_TREE_TAB, "General", &general_open)) {
+    cheats_draw_general(cheats, ctx);
     nk_tree_pop(ctx);
   }
 
@@ -1807,6 +2776,11 @@ cheats_draw_panel(mod_handle_t h, struct nk_context *ctx)
 
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Teleport", &teleport_open)) {
     cheats_draw_teleport(cheats, ctx);
+    nk_tree_pop(ctx);
+  }
+
+  if (nk_tree_state_push(ctx, NK_TREE_TAB, "Misc", &misc_open)) {
+    cheats_draw_misc(cheats, ctx);
     nk_tree_pop(ctx);
   }
 }
@@ -1882,6 +2856,15 @@ cheats_tick(mod_handle_t h, float delta)
   bool god_mode = mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.god_mode_h);
   if (god_mode || cheats->god_mode_on) {
     cheats_god_mode(cheats, god_mode);
+  }
+
+  bool infinite_health = mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.infinite_health_h);
+  if (infinite_health || cheats->infinite_health_on) {
+    cheats_infinite_health(cheats, infinite_health);
+  }
+
+  if (mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.infinite_reverb_h)) {
+    cheats_infinite_reverb(cheats);
   }
 
   if (cheats->teleport_request > 0) {
@@ -1987,6 +2970,28 @@ register_builtin_cheats(mod_manager_t *manager)
       .id          = STR_CLIT(CFG_GOD_MODE),
       .label       = STR_CLIT("God mode"),
       .description = STR_CLIT("Hits do no damage and the player can not die; hits still land, so parries work"),
+      .val = {
+        .boolean = {
+          .default_val = false,
+        },
+      },
+    },
+    {
+      .type        = MOD_OPTION_BOOL,
+      .id          = STR_CLIT(CFG_INFINITE_HEALTH),
+      .label       = STR_CLIT("Infinite health"),
+      .description = STR_CLIT("Hits hurt as usual, but the health is filled up again at once and the player can not die"),
+      .val = {
+        .boolean = {
+          .default_val = false,
+        },
+      },
+    },
+    {
+      .type        = MOD_OPTION_BOOL,
+      .id          = STR_CLIT(CFG_INFINITE_REVERB),
+      .label       = STR_CLIT("Infinite reverb gauge"),
+      .description = STR_CLIT("The reverb gauge is always full"),
       .val = {
         .boolean = {
           .default_val = false,

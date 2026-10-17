@@ -186,19 +186,20 @@ nk_pow(double x, int n)
 #endif
 
 #ifdef NK_DTOA_NEEDED
+/* a whole negative number is its own floor */
 NK_LIB int
 nk_ifloord(double x)
 {
-  x = (double)((int)x - ((x < 0.0) ? 1 : 0));
-  return (int)x;
+  int i = (int)x;
+  return (x < (double)i) ? i - 1 : i;
 }
 #endif
 
 NK_LIB int
 nk_ifloorf(float x)
 {
-  x = (float)((int)x - ((x < 0.0f) ? 1 : 0));
-  return (int)x;
+  int i = (int)x;
+  return (x < (float)i) ? i - 1 : i;
 }
 
 NK_LIB int
@@ -10874,6 +10875,11 @@ nk_nav_stop_keyed(struct nk_context *ctx, struct nk_rect bounds, nk_flags flags,
 
   id = id ? id : 1;
 
+  /* out of its panel's view, whichever widget it is */
+  if (!(flags & NK_NAV_STOP_PANEL) && !NK_INTERSECT(bounds.x, bounds.y, bounds.w, bounds.h, layout->clip.x, layout->clip.y, layout->clip.w, layout->clip.h)) {
+    flags |= NK_NAV_STOP_HIDDEN;
+  }
+
   if (nav->count[nav->current] < NK_NAV_MAX_STOPS) {
     stop         = &nav->stops[nav->current][nav->count[nav->current]++];
     stop->id     = id;
@@ -11842,8 +11848,15 @@ nk_nav_update(struct nk_context *ctx)
     ctx->animating = nk_true;
   }
 
-  in->mouse.pos.x   = nav->focus_bounds.x + nav->focus_bounds.w * 0.5f;
-  in->mouse.pos.y   = nav->focus_bounds.y + nav->focus_bounds.h * 0.5f;
+  /* a focus scrolled out of view leaves the mouse away from everything, not over what is drawn there instead */
+  if (!NK_INTERSECT(nav->focus_bounds.x, nav->focus_bounds.y, nav->focus_bounds.w, nav->focus_bounds.h,
+                    stops[focus].clip.x, stops[focus].clip.y, stops[focus].clip.w, stops[focus].clip.h)) {
+    in->mouse.pos = nk_vec2(-100000.0f, -100000.0f);
+  } else {
+    in->mouse.pos.x = nav->focus_bounds.x + nav->focus_bounds.w * 0.5f;
+    in->mouse.pos.y = nav->focus_bounds.y + nav->focus_bounds.h * 0.5f;
+  }
+
   in->mouse.prev    = in->mouse.pos;
   in->mouse.delta.x = 0;
   in->mouse.delta.y = 0;
@@ -18063,7 +18076,9 @@ nk_grid_text(struct nk_grid *grid, int column, const char *text, int len, const 
     return nk_text_selection_widget_clipped(grid->ctx, text, len, options, bounds);
   }
 
+  /* the text is drawn inside its padding, in a widget cut to whole pixels: a width short of a pixel drops the last letter */
   width = len > 0 ? nk_text_width(grid->ctx, grid->ctx->style.font, grid->ctx->style.font_size, text, len) : 0.0f;
+  width = (float)nk_iceilf(width + 2.0f * grid->ctx->style.text.padding.x) + 1.0f;
   nk_grid_push(grid, column, nk_vec2(width, grid->ctx->style.font_size));
   return nk_text_ex(grid->ctx, text, len, options);
 }
@@ -18424,7 +18439,12 @@ nk_tree_state_base(struct nk_context *ctx, enum nk_tree_type type, struct nk_ima
     sym.w = sym.h = style->font_size;
     sym.y = header.y + style->tab.padding.y;
     sym.x = header.x + style->tab.padding.x;
+
+    /* the whole header is the stop: the triangle takes no input of its own */
+    nk_bool suppress  = ctx->nav.suppress;
+    ctx->nav.suppress = nk_true;
     nk_do_button_symbol(&ws, &win->buffer, sym, symbol, NK_BUTTON_DEFAULT, button, 0, style->font);
+    ctx->nav.suppress = suppress;
 
     if (img) {
       /* draw optional image icon */
@@ -19436,9 +19456,10 @@ nk_widget(struct nk_rect *bounds, const struct nk_context *ctx)
   NK_ASSERT(!(layout->flags & NK_WINDOW_HIDDEN));
   NK_ASSERT(!(layout->flags & NK_WINDOW_CLOSED));
 
-  /* need to convert to int here to remove floating point errors */
-  bounds->x = (float)((int)bounds->x);
-  bounds->y = (float)((int)bounds->y);
+  /* need to convert to int here to remove floating point errors; floored, so a widget above or left of the
+   * screen keeps its place in the panel and its navigation id */
+  bounds->x = (float)nk_ifloorf(bounds->x);
+  bounds->y = (float)nk_ifloorf(bounds->y);
   bounds->w = (float)((int)bounds->w);
   bounds->h = (float)((int)bounds->h);
 
