@@ -3597,7 +3597,7 @@ draw_details_panel(search_tool_t *tool, float panel_h)
       float scroll_h    = ctx->style.window.scrollbar_size.y;
 
       float button_pad = ctx->style.button.padding.x + ctx->style.button.border + ctx->style.button.rounding;
-      float x_width    = ui_text_width(ctx, STR_LIT("X")) + 2.0f * button_pad;
+      float x_width    = ui_text_width(ctx, STR_LIT("X")) + 2.0f * (text_pad + button_pad);
 
       float total_width = 0.0f;
 
@@ -3633,7 +3633,15 @@ draw_details_panel(search_tool_t *tool, float panel_h)
 
             nk_layout_row_push(ctx, label.width + 2.0f * (text_pad + button_pad));
             bool is_selected = (tool->details.selected_tab == tab);
-            bool is_pinned   = (tab->pinned);
+            bool is_preview  = !tab->pinned;
+
+            /* the preview tab is replaced by the next object looked at: darker, with dim text */
+            if (is_preview && !is_selected) {
+              nk_style_push_style_item(ctx, &ctx->style.button.normal, UI_ITEM(UI_C_BG_PANEL));
+              nk_style_push_style_item(ctx, &ctx->style.button.hover, UI_ITEM(UI_C_BG_HOVER));
+              nk_style_push_style_item(ctx, &ctx->style.button.active, UI_ITEM(UI_C_BG_ACTIVE));
+              nk_style_push_color(ctx, &ctx->style.button.border_color, UI_C_BORDER_SOFT);
+            }
 
             if (is_selected) {
               nk_style_push_style_item(ctx, &ctx->style.button.normal, UI_ITEM(UI_C_ACCENT));
@@ -3642,8 +3650,8 @@ draw_details_panel(search_tool_t *tool, float panel_h)
               nk_style_push_color(ctx, &ctx->style.button.border_color, UI_C_BORDER_FOCUS);
             }
 
-            if (is_pinned) {
-              nk_style_push_color(ctx, &ctx->style.button.text_normal, UI_C_TEXT_MUTED);
+            if (is_preview) {
+              nk_style_push_color(ctx, &ctx->style.button.text_normal, is_selected ? UI_C_TEXT_MUTED : UI_C_TEXT_DIM);
               nk_style_push_color(ctx, &ctx->style.button.text_hover,  UI_C_TEXT_MUTED);
               nk_style_push_color(ctx, &ctx->style.button.text_active, UI_C_TEXT_MUTED);
             }
@@ -3658,13 +3666,13 @@ draw_details_panel(search_tool_t *tool, float panel_h)
               tab_to_close = tab;
             }
 
-            if (is_pinned) {
+            if (is_preview) {
               nk_style_pop_color(ctx);
               nk_style_pop_color(ctx);
               nk_style_pop_color(ctx);
             }
 
-            if (is_selected) {
+            if (is_selected || is_preview) {
               nk_style_pop_color(ctx);
               nk_style_pop_style_item(ctx);
               nk_style_pop_style_item(ctx);

@@ -162,14 +162,14 @@ action_gamepad_part(action_t *a)
   return a->bind ? keybind_gamepad_part(*a->bind) : KEYBIND_NULL;
 }
 
-/* some part has all of the held buttons, pressed in any order */
+/* some part with the same leader has all of the held buttons */
 static bool
 held_fits(actions_t *registry, keybind_t held)
 {
   for (int i = 0; i < registry->count; ++i) {
     keybind_t part = action_gamepad_part(&registry->items[i]);
 
-    if (part.count > 0 && held_subset(held, part)) {
+    if (part.count > 0 && part.keys[0] == held.keys[0] && held_subset(held, part)) {
       return true;
     }
   }
@@ -182,7 +182,7 @@ held_match(actions_t *registry, keybind_t held)
   for (int i = 0; i < registry->count; ++i) {
     keybind_t part = action_gamepad_part(&registry->items[i]);
 
-    if (part.count == held.count && part.count > 0 && held_subset(held, part)) {
+    if (part.count == held.count && part.count > 0 && part.keys[0] == held.keys[0] && held_subset(held, part)) {
       return i;
     }
   }
@@ -195,7 +195,7 @@ held_has_longer(actions_t *registry, keybind_t held)
   for (int i = 0; i < registry->count; ++i) {
     keybind_t part = action_gamepad_part(&registry->items[i]);
 
-    if (part.count > held.count && held_subset(held, part)) {
+    if (part.count > held.count && part.keys[0] == held.keys[0] && held_subset(held, part)) {
       return true;
     }
   }
