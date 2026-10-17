@@ -20245,7 +20245,10 @@ nk_text_selection_widget_begin(struct nk_context *ctx, struct nk_text_selection_
     context->copy_last    = 0;
     context->copy_length  = 0;
 
-    if (nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT) || nk_text_selection_storage_window(ctx->current)->edit.active) {
+    /* one selection at a time: a field's own selection ends this one */
+    struct nk_edit_state *edit = &nk_text_selection_storage_window(ctx->current)->edit;
+
+    if (nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT) || (edit->active && edit->sel_start != edit->sel_end)) {
       context->selection.active   = nk_false;
       context->selection.dragging = nk_false;
     } else if (!ctx->input.mouse.buttons[NK_BUTTON_LEFT].down && !nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT)) {
@@ -20812,6 +20815,17 @@ nk_text_layout_auto_height(struct nk_context *ctx, const char *str, int len)
   line_count  = NK_MAX(1, line_count);
   line_height = ctx->style.font_size + 2.0f * padding.y;
   nk_layout_row_dynamic(ctx, line_height * (float)line_count + 2.0f * padding.y, 1);
+}
+
+NK_API void
+nk_text_hidden(struct nk_context *ctx, const char *str, int len, const struct nk_text_options *options, struct nk_rect bounds)
+{
+  NK_ASSERT(ctx);
+  NK_ASSERT(options);
+
+  if (ctx && ctx->current && options) {
+    nk_text_selection_widget_clipped(ctx, str ? str : "", str ? len : 0, options, bounds);
+  }
 }
 
 NK_API nk_bool
