@@ -567,7 +567,7 @@ loader_init(HINSTANCE inst)
   {
     register_builtin_uobject_search(&globals.mod_manager);
     register_builtin_ufunction_tracer(&globals.mod_manager);
-    register_builtin_tweaks(&globals.mod_manager);
+    register_builtin_cheats(&globals.mod_manager);
   }
   mod_manager_startup_load_mods(&globals.mod_manager);
 

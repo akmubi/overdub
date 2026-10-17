@@ -95,9 +95,17 @@ ui_uobject_row(struct nk_context *ctx, struct nk_grid *grid, ui_text_cell_t type
   };
 
   bool clicked = false;
-  if (nk_grid_row_begin(grid)) {
-    ui_nk_item_t item = {0};
+  bool visible = nk_grid_row_begin(grid);
+
+  /* a row just out of view is still a navigation stop, so the d-pad can move on to it */
+  struct nk_rect row  = nk_layout_space_rect_to_screen(ctx, nk_rect(0.0f, 0.0f, grid->row_width, grid->row_height));
+  struct nk_rect clip = ctx->current->layout->clip;
+  bool           near = row.y + 2.0f * row.h >= clip.y && row.y - row.h <= clip.y + clip.h;
+
+  if (visible || near) {
+    ui_nk_item_t item = {.nav = true};
     nk_grid_push_row(grid);
+
     if (ui_nk_item_begin(ctx, &item)) {
       clicked = ui_nk_selectable_behavior(ctx, &item);
 
