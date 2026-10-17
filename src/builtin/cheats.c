@@ -19,6 +19,7 @@
 #define CFG_DEBUG_WIDGET_KEYBIND  "debug-widget-keybind"
 #define CFG_ENABLE_INFINITE_JUMPS "enable-infinite-jumps"
 #define CFG_INFINITE_DASH         "infinite-dash"
+#define CFG_GOD_MODE              "god-mode"
 #define MOD_ID                    "cheats"
 
 typedef enum {
@@ -164,6 +165,22 @@ struct cheats_cfg_s {
   mod_cfg_handle_t debug_widget_keybind_h;
   mod_cfg_handle_t enable_infinite_jumps_h;
   mod_cfg_handle_t infinite_dash_h;
+  mod_cfg_handle_t god_mode_h;
+};
+
+typedef struct cheats_checkpoint_s cheats_checkpoint_t;
+struct cheats_checkpoint_s {
+  str_t       level;
+  fname_t     spawn;
+  const char *label;
+  bool        hideout;
+};
+
+typedef struct cheats_stage_s cheats_stage_t;
+struct cheats_stage_s {
+  const char *label;
+  int         first;
+  int         count;
 };
 
 typedef struct cheats_item_s cheats_item_t;
@@ -197,8 +214,9 @@ struct cheats_s {
   bool          inited;
   int           tutorial_close_ticks;
 
-  /* where the dodge cooldown and the "air dash used" bit are on the player character */
+  /* where the dodge cooldown, the on-beat dodge chain and the "air dash used" bit are on the player character */
   int32_t dash_cooldown_offset;
+  int32_t dash_chain_offset;
   int32_t air_dash_offset;
 
   uobject_t *player_manager;
@@ -210,6 +228,18 @@ struct cheats_s {
   int            item_give_count;
   char           item_filter[64];
   char           money_text[16];
+
+  cheats_checkpoint_t *checkpoints;
+  int                  checkpoint_count;
+  cheats_stage_t      *stages;
+  int                  stage_count;
+  int                  stage_index;
+  int                  checkpoint_index;
+  int                  teleport_request; // checkpoint + 1, taken on the next tick
+  bool                 teleport_saving;
+  bool                 teleport_saw_save;
+  int                  teleport_frames;
+  bool                 god_mode_on;
 };
 
 static cheats_t g_cheats = {0};
@@ -372,6 +402,8 @@ static void MOD_CALL
 cheats_cmd_gears(mod_handle_t h, str_t name, str_t args, void *user);
 static void MOD_CALL
 cheats_cmd_give(mod_handle_t h, str_t name, str_t args, void *user);
+static void MOD_CALL
+cheats_cmd_teleport(mod_handle_t h, str_t name, str_t args, void *user);
 
 static bool MOD_CALL
 cheats_init(mod_handle_t h)
@@ -387,13 +419,17 @@ cheats_init(mod_handle_t h)
   cheats->cfg.debug_widget_keybind_h  = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_DEBUG_WIDGET_KEYBIND));
   cheats->cfg.enable_infinite_jumps_h = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_ENABLE_INFINITE_JUMPS));
   cheats->cfg.infinite_dash_h         = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_INFINITE_DASH));
+  cheats->cfg.god_mode_h              = mod_cfg_get_by_id(&globals.mod_manager, h, STR_LIT(CFG_GOD_MODE));
   cheats->item_give_count             = 1;
 
-  /* the offsets are read from the code that uses them: or byte [rdi+air], 1 and comiss xmm7, [rbx+cooldown] */
-  void           *air_dash         = NULL;
-  void           *dash_cooldown    = NULL;
-  sigscan_entry_t air_dash_sig     = SIG_ENTRY_DIRECT(air_dash, "0F B6 87 ? ? ? ? 80 8F ? ? ? ? 01 24 CF 0C 4C", 0x02143C4C, 0x020C752C);
+  /* the offsets are read from the code that uses them: or byte [rdi+air], 1, comiss xmm7, [rbx+cooldown] and inc dword [rbx+chain] */
+  void           *air_dash          = NULL;
+  void           *dash_cooldown     = NULL;
+  void           *dash_chain        = NULL;
+  sigscan_entry_t air_dash_sig      = SIG_ENTRY_DIRECT(air_dash, "0F B6 87 ? ? ? ? 80 8F ? ? ? ? 01 24 CF 0C 4C", 0x02143C4C, 0x020C752C);
   sigscan_entry_t dash_cooldown_sig = SIG_ENTRY_DIRECT(dash_cooldown, "0F 57 FF 0F 2F BB ? ? ? ? 0F 82 ? ? ? ? 80 A3", 0x02142176, 0x020C5A56);
+  sigscan_entry_t dash_chain_sig    = SIG_ENTRY_DIRECT(dash_chain, "FF 83 ? ? ? ? 48 8B CB E8 ? ? ? ? 48 8B 16 48 8B C8 E8 ? ? ? ? 84 C0 74 ? 8B 83 ? ? ? ? 83 F8 04",
+                                                       0x0214297A, 0x020C625A);
 
   if (mod_sigscan(&air_dash_sig) == SIG_ERR_OK && air_dash_sig.addr) {
     cheats->air_dash_offset = *(int32_t *)((uint8_t *)air_dash_sig.addr + 9);
@@ -405,8 +441,13 @@ cheats_init(mod_handle_t h)
 
   mod_register_cmd(h, STR_LIT("cheats.gears"), STR_LIT("[<amount> | +<amount>]: show or change the gears"), cheats_cmd_gears, NULL);
   mod_register_cmd(h, STR_LIT("cheats.give"), STR_LIT("<item tag> [count]: give an item, e.g. Variable.LifeTank"), cheats_cmd_give, NULL);
+  mod_register_cmd(h, STR_LIT("cheats.teleport"), STR_LIT("<checkpoint>: load the save at a checkpoint, e.g. ST02_CP0010"), cheats_cmd_teleport, NULL);
 
-  if (!cheats->air_dash_offset || !cheats->dash_cooldown_offset) {
+  if (mod_sigscan(&dash_chain_sig) == SIG_ERR_OK && dash_chain_sig.addr) {
+    cheats->dash_chain_offset = *(int32_t *)((uint8_t *)dash_chain_sig.addr + 2);
+  }
+
+  if (!cheats->air_dash_offset || !cheats->dash_cooldown_offset || !cheats->dash_chain_offset) {
     LOG_WARN("cheats: the dash code was not found, infinite dash is off");
   }
 
@@ -617,6 +658,25 @@ cheats_close_shown_tutorials(void)
 }
 
 static uobject_t *
+cheats_find_live(str_t class_name)
+{
+  uclass_t *cls = unreal_uclass_find(class_name, false, true);
+  if (!cls) {
+    return NULL;
+  }
+
+  for (int i = 0, count = unreal_uobject_array_count(); i < count; ++i) {
+    uobject_t *obj = unreal_uobject_array_get_obj(i);
+
+    if (obj && unreal_uobject_is_a(obj, cls) && !unreal_uobject_is_default(obj) && unreal_uobject_is_valid(obj)) {
+      return obj;
+    }
+  }
+
+  return NULL;
+}
+
+static uobject_t *
 cheats_player_manager(cheats_t *cheats)
 {
   if (cheats->player_manager && unreal_uobject_is_valid(cheats->player_manager)) {
@@ -633,8 +693,7 @@ cheats_player_manager(cheats_t *cheats)
 
   cheats->player_manager_search_time = now;
 
-  uclass_t *cls          = unreal_uclass_find(STR_LIT("HbkPlayerCharacterManager"), false, true);
-  cheats->player_manager = cls ? unreal_uobject_find_first_of(cls) : NULL;
+  cheats->player_manager = cheats_find_live(STR_LIT("HbkPlayerCharacterManager"));
   return cheats->player_manager;
 }
 
@@ -744,24 +803,32 @@ cheats_give_item(cheats_t *cheats, cheats_item_t *item, int count)
   return !taken || *taken;
 }
 
-/* the dodge cooldown never runs, and the air dash is never used up */
+/* The dodge cooldown never runs and the air dash is never used up. On the beat, the third dodge of a
+ * chain is refused: the chain is kept at its start. */
 static void
 cheats_infinite_dash(cheats_t *cheats)
 {
-  if (cheats->dash_cooldown_offset <= 0 || cheats->air_dash_offset <= 0) {
+  if (cheats->dash_cooldown_offset <= 0 || cheats->dash_chain_offset <= 0 || cheats->air_dash_offset <= 0) {
     return;
   }
 
   uobject_t *player = cheats_player_character(cheats);
-  if (!player || ((ustruct_t *)player->cls)->props_size <= MAX_VAL(cheats->dash_cooldown_offset, cheats->air_dash_offset)) {
+  int32_t end = MAX_VAL(MAX_VAL(cheats->dash_cooldown_offset, cheats->dash_chain_offset) + 4, cheats->air_dash_offset + 1);
+  if (!player || ((ustruct_t *)player->cls)->props_size < end) {
     return;
   }
 
   uint8_t *bytes    = (uint8_t *)player;
   float   *cooldown = (float *)(bytes + cheats->dash_cooldown_offset);
 
+  int32_t *chain    = (int32_t *)(bytes + cheats->dash_chain_offset);
+
   if (*cooldown > 0.0f) {
     *cooldown = 0.0f;
+  }
+
+  if (*chain > 0) {
+    *chain = 0;
   }
 
   bytes[cheats->air_dash_offset] &= (uint8_t)~1u;
@@ -804,8 +871,7 @@ cheats_load_items(cheats_t *cheats)
     return;
   }
 
-  uclass_t  *cls   = unreal_uclass_find(STR_LIT("HbkInventoryDataAsset"), false, true);
-  uobject_t *asset = cls ? unreal_uobject_find_first_of(cls) : NULL;
+  uobject_t *asset = cheats_find_live(STR_LIT("HbkInventoryDataAsset"));
   if (!asset) {
     return;
   }
@@ -958,6 +1024,691 @@ cheats_draw_items(cheats_t *cheats, struct nk_context *ctx)
   }
 }
 
+static void *
+cheats_prop_ptr(void *container, ustruct_t *type, str_t name, fprop_t **out_prop)
+{
+  fprop_t *prop = container && type ? unreal_ustruct_find_prop(type, name) : NULL;
+
+  if (out_prop) {
+    *out_prop = prop;
+  }
+
+  return prop ? (uint8_t *)container + prop->offset_internal : NULL;
+}
+
+static uobject_t *
+cheats_object_prop(uobject_t *obj, str_t name)
+{
+  uobject_t **value = obj ? cheats_prop_ptr(obj, (ustruct_t *)obj->cls, name, NULL) : NULL;
+  return value && *value && unreal_uobject_is_valid(*value) ? *value : NULL;
+}
+
+/* The damage component's correction list scales every hit to nothing (one entry, no tags, rate 0). The hits
+ * are taken as usual otherwise, so parries work. The player also can not die and is kept at full health. */
+static void
+cheats_god_mode(cheats_t *cheats, bool enable)
+{
+  uobject_t *damage = cheats_object_prop(cheats_player_character(cheats), STR_LIT("HbkDamage"));
+  if (!damage) {
+    return;
+  }
+
+  ustruct_t *type         = (ustruct_t *)damage->cls;
+  fprop_t   *undead       = NULL;
+  fprop_t   *list_prop    = NULL;
+  void      *undead_value = cheats_prop_ptr(damage, type, STR_LIT("bUnDeadMode"), &undead);
+  float     *health       = cheats_prop_ptr(damage, type, STR_LIT("CurrentHealth"), NULL);
+  float     *maximum      = cheats_prop_ptr(damage, type, STR_LIT("MaxHealth"), NULL);
+
+  TARRAY(uint8_t) *list = cheats_prop_ptr(damage, type, STR_LIT("DamageCorrectionList"), &list_prop);
+
+  if (undead_value) {
+    unreal_fprop_write_bool(undead, undead_value, enable);
+  }
+
+  /* set through the game's own setter, which copies the list */
+  cheats_call_t call;
+  if (list && unreal_fprop_get_kind(list_prop) == UNREAL_PROP_KIND_ARRAY && (enable ? list->num == 0 : list->num > 0) &&
+      cheats_call_begin(&call, damage, STR_LIT("SetDamageCorrectionList"))) {
+    fprop_t *inner = ((fprop_array_t *)list_prop)->inner;
+    TARRAY(uint8_t) *param = cheats_call_param(&call, STR_LIT("InDamageCorrectionList"));
+    uint8_t entry[128] = {0};
+
+    if (param && inner && unreal_fprop_get_kind(inner) == UNREAL_PROP_KIND_STRUCT && inner->elem_size <= (int32_t)sizeof(entry)) {
+      ustruct_t *entry_type = (ustruct_t *)((fprop_struct_t *)inner)->script_struct;
+      uint8_t   *kind       = cheats_prop_ptr(entry, entry_type, STR_LIT("CorrectionType"), NULL);
+      float     *rate       = cheats_prop_ptr(entry, entry_type, STR_LIT("CorrectionValue"), NULL);
+
+      if (kind && rate) {
+        *kind = 0; // EHbkDamageCorrectionType::Rate
+        *rate = 0.0f;
+
+        param->data = enable ? entry : NULL;
+        param->num  = enable ? 1 : 0;
+        param->max  = param->num;
+        cheats_call(&call);
+      }
+    }
+  }
+
+  /* healed through the game, so the health bar follows */
+  if (enable && health && maximum && *health < *maximum && cheats_call_begin(&call, damage, STR_LIT("AddHealth"))) {
+    float *value = cheats_call_param(&call, STR_LIT("Value"));
+
+    if (value) {
+      *value = *maximum - *health;
+      cheats_call(&call);
+    }
+  }
+
+  cheats->god_mode_on = enable;
+}
+
+/* a parameter of an enum or a small integer type, by its own size */
+static void
+cheats_write_small_int(fprop_t *prop, void *value, int64_t input)
+{
+  switch (prop->elem_size) {
+    case 1: {
+      *(uint8_t *)value = (uint8_t)input;
+      break;
+    }
+
+    case 2: {
+      *(uint16_t *)value = (uint16_t)input;
+      break;
+    }
+
+    default: {
+      *(int32_t *)value = (int32_t)input;
+      break;
+    }
+  }
+}
+
+static bool
+cheats_call_with_context(cheats_call_t *call, str_t name)
+{
+  uobject_t *player = cheats_player_character(&g_cheats);
+
+  if (!player || !cheats_call_begin(call, cheats_player_manager(&g_cheats), name)) {
+    return false;
+  }
+
+  uobject_t **context = cheats_call_param(call, STR_LIT("WorldContextObject"));
+  if (context) {
+    *context = player;
+  }
+
+  return true;
+}
+
+static bool
+cheats_has_ability(int ability)
+{
+  cheats_call_t call;
+  if (!cheats_call_with_context(&call, STR_LIT("HasPlayerAbility"))) {
+    return false;
+  }
+
+  fprop_t *prop  = unreal_ustruct_find_prop((ustruct_t *)call.func, STR_LIT("AbilityType"));
+  void    *value = cheats_call_param(&call, STR_LIT("AbilityType"));
+  bool    *has   = cheats_call_param(&call, STR_LIT("ReturnValue"));
+
+  if (!prop || !value || !has) {
+    return false;
+  }
+
+  cheats_write_small_int(prop, value, ability);
+  cheats_call(&call);
+  return *has;
+}
+
+static void
+cheats_learn_ability(int ability)
+{
+  cheats_call_t call;
+  if (!cheats_call_with_context(&call, STR_LIT("LearnPlayerAbility"))) {
+    return;
+  }
+
+  fprop_t *prop  = unreal_ustruct_find_prop((ustruct_t *)call.func, STR_LIT("AbilityType"));
+  void    *value = cheats_call_param(&call, STR_LIT("AbilityType"));
+
+  if (prop && value) {
+    cheats_write_small_int(prop, value, ability);
+    cheats_call(&call);
+    LOG_INFO("cheats: ability %d learned", ability);
+  }
+}
+
+static int
+cheats_joined_partners(void)
+{
+  uobject_t *manager = cheats_player_manager(&g_cheats);
+  fprop_t   *info    = NULL;
+  void      *value   = manager ? cheats_prop_ptr(manager, (ustruct_t *)manager->cls, STR_LIT("PlayerStateInfo"), &info) : NULL;
+
+  if (!value || unreal_fprop_get_kind(info) != UNREAL_PROP_KIND_STRUCT) {
+    return 0;
+  }
+
+  uint8_t *flags = cheats_prop_ptr(value, (ustruct_t *)((fprop_struct_t *)info)->script_struct, STR_LIT("JoinedPartnerFlags"), NULL);
+  return flags ? *flags : 0;
+}
+
+static void
+cheats_join_partner(int flag)
+{
+  cheats_call_t call;
+  if (!cheats_call_with_context(&call, STR_LIT("JoinedNewPartner"))) {
+    return;
+  }
+
+  fprop_t *prop  = unreal_ustruct_find_prop((ustruct_t *)call.func, STR_LIT("NewPartner"));
+  void    *value = cheats_call_param(&call, STR_LIT("NewPartner"));
+
+  if (prop && value) {
+    cheats_write_small_int(prop, value, flag);
+    cheats_call(&call);
+    LOG_INFO("cheats: partner %d joined", flag);
+  }
+}
+
+/* GetCircuitNum / GetViewerTicketNum, -1 without a player */
+static int
+cheats_get_count(str_t func)
+{
+  if (!cheats_player_character(&g_cheats)) {
+    return -1;
+  }
+
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, cheats_player_manager(&g_cheats), func)) {
+    return -1;
+  }
+
+  cheats_call(&call);
+
+  int32_t *count = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return count ? *count : -1;
+}
+
+/* AddCircuitNum (the game's AddViewerTicketNum adds circuits too) */
+static void
+cheats_add_count(str_t func, int add)
+{
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, cheats_player_manager(&g_cheats), func)) {
+    return;
+  }
+
+  int32_t *value = cheats_call_param(&call, STR_LIT("Add"));
+  if (value) {
+    *value = add;
+    cheats_call(&call);
+  }
+}
+
+/* tickets are the Bonus Ticket item */
+static void
+cheats_give_tickets(int count)
+{
+  cheats_t *cheats = &g_cheats;
+  cheats_load_items(cheats);
+
+  for (int i = 0; i < cheats->item_count; ++i) {
+    if (str_equal(cheats->items[i].tag, STR_LIT("Inventory.Variable.Ticket"), 0)) {
+      cheats_give_item(cheats, &cheats->items[i], count);
+      return;
+    }
+  }
+}
+
+static void
+cheats_call_simple(str_t func)
+{
+  cheats_call_t call;
+  if (cheats_player_character(&g_cheats) && cheats_call_begin(&call, cheats_player_manager(&g_cheats), func)) {
+    cheats_call(&call);
+    LOG_INFO("cheats: %.*s", STR_ARG(func));
+  }
+}
+
+/* The debug jump table lists every checkpoint. A teleport does not use the debug jump, which also puts a
+ * preset over the player's data: the game saves as if the player went to the checkpoint's stage, and the
+ * save is loaded. */
+static void
+cheats_load_checkpoints(cheats_t *cheats)
+{
+  if (cheats->checkpoints) {
+    return;
+  }
+
+  uobject_t *asset = cheats_find_live(STR_LIT("HbkDebugJumpDataAsset"));
+  TARRAY(udata_table_t *) *tables = asset ? cheats_prop_ptr(asset, (ustruct_t *)asset->cls, STR_LIT("DataTables"), NULL) : NULL;
+
+  if (!tables || tables->num <= 0) {
+    return;
+  }
+
+  int total = 0;
+  for (int32_t t = 0; t < tables->num; ++t) {
+    tmap_fname_uint8ptr_t *rows = tables->data[t] ? unreal_udata_table_get_row_map(tables->data[t]) : NULL;
+    total += rows ? TMAP_NUM(rows) : 0;
+  }
+
+  cheats->checkpoints      = ARENA_PUSH_ARRAY_ZERO(cheats->perm, cheats_checkpoint_t, total + 1);
+  cheats->stages           = ARENA_PUSH_ARRAY_ZERO(cheats->perm, cheats_stage_t, tables->num + 1);
+  cheats->checkpoint_count = 0;
+  cheats->stage_count      = 0;
+
+  /* the hideout is not in the table: its level is the game mode's, and the game picks the spawn point */
+  uclass_t *mode_cls = unreal_uclass_find(STR_LIT("HbkGameModeBase"), false, true);
+  fname_t  *hideout  = mode_cls && mode_cls->cdo ? cheats_prop_ptr(mode_cls->cdo, (ustruct_t *)mode_cls, STR_LIT("LevelName_HideOut"), NULL) : NULL;
+
+  if (hideout && hideout->cmp_idx != 0) {
+    cheats->stages[cheats->stage_count++] = (cheats_stage_t){.label = "Hideout", .first = 0, .count = 1};
+    cheats->checkpoints[cheats->checkpoint_count++] = (cheats_checkpoint_t){
+      .level   = unreal_fname_to_str(*hideout, cheats->perm),
+      .label   = "Hideout",
+      .hideout = true,
+    };
+  }
+
+  for (int32_t t = 0; t < tables->num; ++t) {
+    udata_table_t         *table = tables->data[t];
+    tmap_fname_uint8ptr_t *rows  = table ? unreal_udata_table_get_row_map(table) : NULL;
+    ustruct_t             *type  = table ? (ustruct_t *)table->row_struct : NULL;
+    str_t                  name  = table ? unreal_fname_to_str(((uobject_t *)table)->name, cheats->perm) : STR_NULL;
+
+    /* the stages only: not the rhythm tower waves or BPM rush */
+    if (!rows || !type || !str_has_prefix(name, STR_LIT("Stage"), 0)) {
+      continue;
+    }
+
+    fprop_t *text_prop  = unreal_ustruct_find_prop(type, STR_LIT("Text"));
+    fprop_t *level_prop = unreal_ustruct_find_prop(type, STR_LIT("LevelName"));
+    fprop_t *start_prop = unreal_ustruct_find_prop(type, STR_LIT("PlayerStartName"));
+    if (!level_prop || !start_prop) {
+      continue;
+    }
+
+    cheats_stage_t *stage = &cheats->stages[cheats->stage_count++];
+    stage->label          = str_push_cstr(cheats->perm, str_has_suffix(name, STR_LIT("_DT"), 0) ? str_make(name.data, name.len - 3) : name);
+    stage->first          = cheats->checkpoint_count;
+
+    TMAP_FOR_EACH_INDEX(rows, idx) {
+      uint8_t *row = TMAP_VALUE_AT(rows, idx);
+      if (!row || cheats->checkpoint_count >= total) {
+        continue;
+      }
+
+      str_t level = unreal_fname_to_str(*(fname_t *)(row + level_prop->offset_internal), cheats->perm);
+      for (uint64_t i = level.len; i > 0; --i) {
+        if (level.data[i - 1] == '/') {
+          level = str_make(level.data + i, level.len - i);
+          break;
+        }
+      }
+
+      cheats_checkpoint_t *checkpoint = &cheats->checkpoints[cheats->checkpoint_count++];
+      checkpoint->level               = level;
+      checkpoint->spawn               = *(fname_t *)(row + start_prop->offset_internal);
+
+      str_t label = text_prop ? cheats_text((ftext_t *)(row + text_prop->offset_internal), cheats->perm) : STR_NULL;
+      if (str_is_empty(label)) {
+        label = unreal_fname_to_str(checkpoint->spawn, cheats->perm);
+      }
+
+      checkpoint->label = str_push_cstr(cheats->perm, label);
+
+      stage->count += 1;
+    }
+
+  }
+}
+
+/* the game mode of the world the player is in */
+static uobject_t *
+cheats_game_mode(cheats_t *cheats)
+{
+  uobject_t    *player = cheats_player_character(cheats);
+  uclass_t     *cls    = unreal_uclass_find(STR_LIT("HbkGameModeBase"), false, true);
+  cheats_call_t call;
+
+  if (!player || !cls || !cls->cdo || !cheats_call_begin(&call, cls->cdo, STR_LIT("GetHbkGameMode"))) {
+    return NULL;
+  }
+
+  uobject_t **context = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  if (context) {
+    *context = player;
+  }
+
+  cheats_call(&call);
+
+  uobject_t **mode = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return mode && *mode && unreal_uobject_is_valid(*mode) ? *mode : NULL;
+}
+
+/* The save is loaded by the main game mode only: the hideout runs another one, and leaving it for a stage
+ * any other way (a plain level load) puts a stage preset over the player's data, which the game then saves. */
+static bool
+cheats_in_hideout(cheats_t *cheats)
+{
+  uobject_t    *player = cheats_player_character(cheats);
+  uclass_t     *cls    = unreal_uclass_find(STR_LIT("HbkGameModeBase"), false, true);
+  cheats_call_t call;
+
+  if (!player || !cls || !cls->cdo || !cheats_call_begin(&call, cls->cdo, STR_LIT("IsHideOutLevel"))) {
+    return false;
+  }
+
+  uobject_t **context = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  if (context) {
+    *context = player;
+  }
+
+  cheats_call(&call);
+
+  bool *hideout = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return hideout && *hideout;
+}
+
+static bool
+cheats_save_busy(void)
+{
+  cheats_call_t call;
+  if (!cheats_call_begin(&call, cheats_find_live(STR_LIT("HbkSaveGameManager")), STR_LIT("IsWorkingJob"))) {
+    return false;
+  }
+
+  cheats_call(&call);
+
+  bool *busy = cheats_call_param(&call, STR_LIT("ReturnValue"));
+  return busy && *busy;
+}
+
+/* LoadGame reads the save from disk again, so the spawn point goes in through the save the game makes when
+ * the player moves to another stage. It moves the global save only: the hideout's "Continue stage" still
+ * leads to the last stage checkpoint, and the game saves that one once the player is there. */
+static void
+cheats_teleport(cheats_t *cheats, cheats_checkpoint_t *checkpoint)
+{
+  if (cheats_in_hideout(cheats)) {
+    LOG_ERROR("cheats: teleport does not work in the hideout: leave it for a stage first");
+    return;
+  }
+
+  /* only in game: loaded from a menu, the save fails to load */
+  uobject_t    *player = cheats_player_character(cheats);
+  uclass_t     *cls    = unreal_uclass_find(STR_LIT("HbkSaveGameBlueprintAsyncSaveGame"), false, true);
+  cheats_call_t call;
+
+  if (!player || !cheats_game_mode(cheats) || cheats->teleport_saving || cheats_save_busy()) {
+    LOG_ERROR("cheats: teleport needs a loaded save, with no save in progress");
+    return;
+  }
+
+  if (!cls || !cls->cdo || !cheats_call_begin(&call, cls->cdo, STR_LIT("RequestAutoSaveGameOnTransferStageDatas"))) {
+    LOG_ERROR("cheats: the game's stage save was not found");
+    return;
+  }
+
+  uobject_t **context = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  fstring_t  *level   = cheats_call_param(&call, STR_LIT("LevelName"));
+  fstring_t  *spawn   = cheats_call_param(&call, STR_LIT("SpawnSpotName"));
+  uobject_t **action  = cheats_call_param(&call, STR_LIT("ReturnValue"));
+
+  if (!context || !level || !spawn || !action) {
+    LOG_ERROR("cheats: the game's stage save was not found");
+    return;
+  }
+
+  tmp_arena_t tmp = scratch_begin(NULL);
+  {
+    str_t spawn_name = checkpoint->spawn.cmp_idx ? unreal_fname_to_str(checkpoint->spawn, tmp.arena) : STR_NULL;
+
+    /* an empty spawn point is the stage's default start */
+    *context = player;
+    *level   = unreal_fstring_from_str(checkpoint->level, tmp.arena);
+    if (!str_is_empty(spawn_name)) {
+      *spawn = unreal_fstring_from_str(spawn_name, tmp.arena);
+    }
+
+    LOG_INFO("cheats: teleporting to %s (%.*s, %.*s)", checkpoint->label, STR_ARG(checkpoint->level), STR_ARG(spawn_name));
+
+    cheats_call(&call);
+  }
+  scratch_end(tmp);
+
+  if (!*action || !cheats_call_begin(&call, *action, STR_LIT("Activate"))) {
+    LOG_ERROR("cheats: the game did not start its stage save");
+    return;
+  }
+
+  cheats_call(&call);
+
+  cheats->teleport_saving   = true;
+  cheats->teleport_saw_save = false;
+  cheats->teleport_frames   = 0;
+}
+
+/* the save runs a few jobs one after another: the save is loaded once none has run for a while */
+static void
+cheats_teleport_load(cheats_t *cheats)
+{
+  cheats->teleport_frames += 1;
+
+  if (cheats_save_busy()) {
+    cheats->teleport_saw_save = true;
+    cheats->teleport_frames   = 0;
+    return;
+  }
+
+  if (!cheats->teleport_saw_save) {
+    if (cheats->teleport_frames > 300) {
+      LOG_ERROR("cheats: the game did not save, teleport canceled");
+      cheats->teleport_saving = false;
+    }
+    return;
+  }
+
+  if (cheats->teleport_frames < 10) {
+    return;
+  }
+
+  cheats->teleport_saving = false;
+
+  uobject_t    *game_mode = cheats_game_mode(cheats);
+  cheats_call_t call;
+
+  if (!game_mode || !cheats_call_begin(&call, game_mode, STR_LIT("LoadGame"))) {
+    LOG_ERROR("cheats: teleport needs a loaded save");
+    return;
+  }
+
+  uobject_t **context = cheats_call_param(&call, STR_LIT("WorldContextObject"));
+  if (context) {
+    *context = game_mode;
+  }
+
+  cheats_call(&call);
+}
+
+static void
+cheats_draw_teleport(cheats_t *cheats, struct nk_context *ctx)
+{
+  cheats_load_checkpoints(cheats);
+
+  if (!cheats->stage_count) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "The game has not loaded its checkpoint list yet", NK_TEXT_LEFT);
+    return;
+  }
+
+  if (!cheats_player_character(cheats)) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "Load a save to teleport", NK_TEXT_LEFT);
+    return;
+  }
+
+  if (cheats_in_hideout(cheats)) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "Teleport does not work in the hideout: leave it for a stage first", NK_TEXT_LEFT);
+    return;
+  }
+
+  cheats->stage_index = CLAMP(cheats->stage_index, 0, cheats->stage_count - 1);
+  cheats_stage_t *stage = &cheats->stages[cheats->stage_index];
+
+  const char *stage_labels[64];
+  int         stage_count = MIN_VAL(cheats->stage_count, (int)COUNTOF(stage_labels));
+  for (int i = 0; i < stage_count; ++i) {
+    stage_labels[i] = cheats->stages[i].label;
+  }
+
+  nk_layout_row_dynamic(ctx, 26.0f, 3);
+
+  /* popups as tall as their entries: a tall one opens upwards from the bottom of the window, far away */
+  float stage_h = MIN_VAL(300.0f, (float)stage_count * 28.0f + 16.0f);
+  int   picked  = nk_combo(ctx, stage_labels, stage_count, cheats->stage_index, 24, nk_vec2(220.0f, stage_h));
+  if (picked != cheats->stage_index) {
+    cheats->stage_index      = picked;
+    cheats->checkpoint_index = 0;
+    stage                    = &cheats->stages[picked];
+  }
+
+  cheats->checkpoint_index = CLAMP(cheats->checkpoint_index, 0, MAX_VAL(stage->count - 1, 0));
+
+  if (nk_combo_begin_label(ctx, stage->count ? cheats->checkpoints[stage->first + cheats->checkpoint_index].label : "",
+                           nk_vec2(320.0f, MIN_VAL(360.0f, (float)stage->count * 28.0f + 16.0f)))) {
+    nk_layout_row_dynamic(ctx, 24.0f, 1);
+
+    for (int i = 0; i < stage->count; ++i) {
+      if (nk_combo_item_label(ctx, cheats->checkpoints[stage->first + i].label, NK_TEXT_LEFT)) {
+        cheats->checkpoint_index = i;
+      }
+    }
+
+    nk_combo_end(ctx);
+  }
+
+  if (nk_button_label(ctx, "Teleport") && stage->count) {
+    cheats->teleport_request = stage->first + cheats->checkpoint_index + 1;
+  }
+
+  nk_layout_row_dynamic(ctx, 20.0f, 1);
+  nk_label_colored(ctx, "Loads the save at the checkpoint: progress since the last save is lost", NK_TEXT_LEFT, UI_C_TEXT_DIM);
+}
+
+static const char *g_ability_labels[] = {
+  "", "Beat hit", "Special attack", "Dodge", "Air dodge", "Rhythm dodge", "Magnet", "Magnet backstab", "Parry", "Air parry",
+  "Directional parry", "Partner call",
+};
+
+static const struct {
+  int         flag;
+  const char *label;
+} g_partners[] = {
+  {1,  "808"       },
+  {2,  "Peppermint"},
+  {4,  "Macaron"   },
+  {8,  "Korsica"   },
+  {16, "CNMN"      },
+};
+
+static void
+cheats_draw_progress(cheats_t *cheats, struct nk_context *ctx)
+{
+  int circuits = cheats_get_count(STR_LIT("GetCircuitNum"));
+
+  if (circuits < 0) {
+    nk_layout_row_dynamic(ctx, 22.0f, 1);
+    nk_label(ctx, "Load a save to change the progress", NK_TEXT_LEFT);
+    return;
+  }
+
+  nk_layout_row_dynamic(ctx, 26.0f, 1);
+  if (nk_button_label(ctx, "Unlock all skills")) {
+    cheats_call_simple(STR_LIT("DebugOpenAllSkills"));
+  }
+
+  int tickets = cheats_get_count(STR_LIT("GetViewerTicketNum"));
+
+  nk_layout_row_dynamic(ctx, 26.0f, 3);
+  nk_labelf(ctx, NK_TEXT_LEFT, "Circuits: %d", circuits);
+  if (nk_button_label(ctx, "+1")) {
+    cheats_add_count(STR_LIT("AddCircuitNum"), 1);
+  }
+
+  if (nk_button_label(ctx, "+10")) {
+    cheats_add_count(STR_LIT("AddCircuitNum"), 10);
+  }
+
+  nk_labelf(ctx, NK_TEXT_LEFT, "Tickets: %d", tickets);
+  if (nk_button_label(ctx, "+1")) {
+    cheats_give_tickets(1);
+  }
+
+  if (nk_button_label(ctx, "+10")) {
+    cheats_give_tickets(10);
+  }
+
+  nk_layout_row_dynamic(ctx, 20.0f, 1);
+  nk_label(ctx, "Abilities", NK_TEXT_LEFT);
+
+  nk_layout_row_dynamic(ctx, 24.0f, 3);
+  /* the ones the player has are shown dim, the others can be learned */
+  for (int i = 1; i < COUNTOF(g_ability_labels); ++i) {
+    if (cheats_has_ability(i)) {
+      nk_label_colored(ctx, g_ability_labels[i], NK_TEXT_CENTERED, UI_C_TEXT_DIM);
+    } else if (nk_button_label(ctx, g_ability_labels[i])) {
+      cheats_learn_ability(i);
+    }
+  }
+
+  int joined = cheats_joined_partners();
+
+  nk_layout_row_dynamic(ctx, 20.0f, 1);
+  nk_label(ctx, "Partners", NK_TEXT_LEFT);
+
+  nk_layout_row_dynamic(ctx, 24.0f, 5);
+  for (int i = 0; i < COUNTOF(g_partners); ++i) {
+    if (joined & g_partners[i].flag) {
+      nk_label_colored(ctx, g_partners[i].label, NK_TEXT_CENTERED, UI_C_TEXT_DIM);
+    } else if (nk_button_label(ctx, g_partners[i].label)) {
+      cheats_join_partner(g_partners[i].flag);
+    }
+  }
+}
+
+static void MOD_CALL
+cheats_cmd_teleport(mod_handle_t h, str_t name, str_t args, void *user)
+{
+  (void)h;
+  (void)name;
+  (void)user;
+
+  cheats_t *cheats = &g_cheats;
+  cheats_load_checkpoints(cheats);
+
+  str_t wanted = str_trim_space(args);
+
+  for (int i = 0; i < cheats->checkpoint_count && !str_is_empty(wanted); ++i) {
+    cheats_checkpoint_t *checkpoint = &cheats->checkpoints[i];
+
+    if (str_equal(str_from_cstr(checkpoint->label), wanted, STR_CMP_FLAG_IGNORE_CASE) ||
+        (checkpoint->spawn.cmp_idx && unreal_fname_match_text(checkpoint->spawn, wanted, true, true))) {
+      cheats->teleport_request = i + 1;
+      return;
+    }
+  }
+
+  LOG_ERROR("Usage: cheats.teleport <checkpoint, e.g. ST02_CP0010>");
+}
+
 static void MOD_CALL
 cheats_cmd_gears(mod_handle_t h, str_t name, str_t args, void *user)
 {
@@ -1030,7 +1781,9 @@ cheats_draw_panel(mod_handle_t h, struct nk_context *ctx)
   (void)h;
 
   static enum nk_collapse_states money_open = NK_MAXIMIZED;
-  static enum nk_collapse_states items_open = NK_MINIMIZED;
+  static enum nk_collapse_states items_open    = NK_MINIMIZED;
+  static enum nk_collapse_states progress_open = NK_MINIMIZED;
+  static enum nk_collapse_states teleport_open = NK_MINIMIZED;
 
   cheats_t *cheats = &g_cheats;
   if (!cheats->inited) {
@@ -1044,6 +1797,16 @@ cheats_draw_panel(mod_handle_t h, struct nk_context *ctx)
 
   if (nk_tree_state_push(ctx, NK_TREE_TAB, "Items", &items_open)) {
     cheats_draw_items(cheats, ctx);
+    nk_tree_pop(ctx);
+  }
+
+  if (nk_tree_state_push(ctx, NK_TREE_TAB, "Progress", &progress_open)) {
+    cheats_draw_progress(cheats, ctx);
+    nk_tree_pop(ctx);
+  }
+
+  if (nk_tree_state_push(ctx, NK_TREE_TAB, "Teleport", &teleport_open)) {
+    cheats_draw_teleport(cheats, ctx);
     nk_tree_pop(ctx);
   }
 }
@@ -1114,6 +1877,24 @@ cheats_tick(mod_handle_t h, float delta)
 
   if (mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.infinite_dash_h)) {
     cheats_infinite_dash(cheats);
+  }
+
+  bool god_mode = mod_manager_cfg_get_bool(&globals.mod_manager, cheats->cfg.god_mode_h);
+  if (god_mode || cheats->god_mode_on) {
+    cheats_god_mode(cheats, god_mode);
+  }
+
+  if (cheats->teleport_request > 0) {
+    int checkpoint           = cheats->teleport_request - 1;
+    cheats->teleport_request = 0;
+
+    if (checkpoint < cheats->checkpoint_count) {
+      cheats_teleport(cheats, &cheats->checkpoints[checkpoint]);
+    }
+  }
+
+  if (cheats->teleport_saving) {
+    cheats_teleport_load(cheats);
   }
 }
 
@@ -1195,6 +1976,17 @@ register_builtin_cheats(mod_manager_t *manager)
       .id          = STR_CLIT(CFG_INFINITE_DASH),
       .label       = STR_CLIT("Infinite dash"),
       .description = STR_CLIT("Dash as often as you like, on the ground and in the air"),
+      .val = {
+        .boolean = {
+          .default_val = false,
+        },
+      },
+    },
+    {
+      .type        = MOD_OPTION_BOOL,
+      .id          = STR_CLIT(CFG_GOD_MODE),
+      .label       = STR_CLIT("God mode"),
+      .description = STR_CLIT("Hits do no damage and the player can not die; hits still land, so parries work"),
       .val = {
         .boolean = {
           .default_val = false,

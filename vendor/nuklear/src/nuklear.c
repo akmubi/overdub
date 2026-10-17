@@ -11024,9 +11024,11 @@ nk_nav_first(const struct nk_nav_stop *stops, int count, nk_hash window)
   int found = -1;
   int pass, i;
 
-  for (pass = 0; pass < 2 && found < 0; ++pass) {
+  /* a splitter or a slider is not where a window starts: visible plain stops first, then visible ones, then any */
+  for (pass = 0; pass < 3 && found < 0; ++pass) {
     for (i = 0; i < count; ++i) {
-      if (stops[i].window == window && (pass || !(stops[i].flags & NK_NAV_STOP_HIDDEN)) &&
+      if (stops[i].window == window && (pass > 1 || !(stops[i].flags & NK_NAV_STOP_HIDDEN)) &&
+          (pass > 0 || !(stops[i].flags & NK_NAV_STOP_ADJUST)) &&
           (found < 0 || stops[i].bounds.y < stops[found].bounds.y ||
            (stops[i].bounds.y == stops[found].bounds.y && stops[i].bounds.x < stops[found].bounds.x))) {
         found = i;
@@ -11428,7 +11430,7 @@ nk_nav_update(struct nk_context *ctx)
     int under = -1;
 
     for (i = 0; i < count; ++i) {
-      if ((!scope || stops[i].window == scope) && !(stops[i].flags & NK_NAV_STOP_HIDDEN) &&
+      if ((!scope || stops[i].window == scope) && !(stops[i].flags & (NK_NAV_STOP_HIDDEN | NK_NAV_STOP_ADJUST)) &&
           NK_INBOX(in->mouse.pos.x, in->mouse.pos.y, stops[i].bounds.x, stops[i].bounds.y, stops[i].bounds.w, stops[i].bounds.h)) {
         under = i;
       }
