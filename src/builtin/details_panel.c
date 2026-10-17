@@ -3651,9 +3651,9 @@ draw_details_panel(search_tool_t *tool, float panel_h)
             }
 
             if (is_preview) {
-              nk_style_push_color(ctx, &ctx->style.button.text_normal, is_selected ? UI_C_TEXT_MUTED : UI_C_TEXT_DIM);
-              nk_style_push_color(ctx, &ctx->style.button.text_hover,  UI_C_TEXT_MUTED);
-              nk_style_push_color(ctx, &ctx->style.button.text_active, UI_C_TEXT_MUTED);
+              nk_style_push_color(ctx, &ctx->style.button.text_normal, is_selected ? UI_C_TEXT_DIM : UI_C_TEXT_DISABLED);
+              nk_style_push_color(ctx, &ctx->style.button.text_hover,  UI_C_TEXT_DIM);
+              nk_style_push_color(ctx, &ctx->style.button.text_active, UI_C_TEXT_DIM);
             }
 
             if (ui_button_str(ctx, label.str)) {
