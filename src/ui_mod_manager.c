@@ -1551,16 +1551,27 @@ ui_mod_manager_draw(ui_mod_manager_t *ui, struct nk_context *ctx, mod_manager_t 
   ui->vw = viewport_width;
   ui->vh = viewport_height;
 
-  int win_width  = 1000;
-  int win_height = 600;
+  float vw         = (float)ui->vw;
+  float vh         = (float)ui->vh;
+  float win_width  = NK_MIN(1000.0f, vw);
+  float win_height = NK_MIN(600.0f, vh);
 
-  if (ui->bounds.x == 0 && ui->bounds.y == 0 && ui->bounds.w == 0 && ui->bounds.h == 0) {
+  bool unset     = ui->bounds.x == 0 && ui->bounds.y == 0 && ui->bounds.w == 0 && ui->bounds.h == 0;
+  bool offscreen = ui->bounds.x >= vw || ui->bounds.y >= vh || ui->bounds.x + ui->bounds.w <= 0 || ui->bounds.y + ui->bounds.h <= 0;
+
+  /* the game window can be smaller than the default size, or shrink while the manager is away */
+  if (unset || offscreen) {
     ui->bounds = (struct nk_rect){
-      .x = (ui->vw - win_width) * 0.5f,
-      .y = (ui->vh - win_height) * 0.5f,
-      .w = (float)win_width,
-      .h = (float)win_height,
+      .x = (vw - win_width) * 0.5f,
+      .y = (vh - win_height) * 0.5f,
+      .w = win_width,
+      .h = win_height,
     };
+
+    struct nk_window *win = nk_window_find(ctx, name);
+    if (win) {
+      win->bounds = ui->bounds;
+    }
   }
 
   static char title[256] = {0};
