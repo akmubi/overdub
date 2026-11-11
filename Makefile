@@ -42,7 +42,8 @@ $(OBJ_DIR_DEBUG)/%.o: %.c
 	@printf "CC\t$@\n"
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -DBUILD_DEBUG -DOVERDUB_BUILD_DLL -MMD -MP -c $< -o $@
 
-$(OBJ_DIR_RELEASE)/src/vendor_kb.o: CFLAGS_RELEASE := $(filter-out -flto,$(CFLAGS_RELEASE))
+$(OBJ_DIR_DEBUG)/src/vendor_kb.o:   CFLAGS_DEBUG   += -w
+$(OBJ_DIR_RELEASE)/src/vendor_kb.o: CFLAGS_RELEASE := $(filter-out -flto,$(CFLAGS_RELEASE)) -w
 
 $(OBJ_DIR_RELEASE)/%.o: %.c
 	@mkdir -p $(dir $@)
