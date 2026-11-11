@@ -652,8 +652,13 @@ pak_file_mount_hook(void *self, const wchar_t *pak_filename, int pak_order, cons
     str_t pak_filename_str = str_from_str16(tmp.arena, str16_from_wstr(pak_filename));
     str_t path_str         = str_from_str16(tmp.arena, str16_from_wstr(path));
 
-    bool pak_only = unreal_pak_is_standalone(pak_filename_str);
-    if (pak_only && pak_order < CONFIG_MOD_ASSET_BASE_PRIORITY) {
+    /* A pak put next to the game's (in Content/Paks, without a mod.ini) is a mod: it goes above the game's paks, as
+     * the mods' assets do, or the game's own files would win over it. */
+    str_t base     = path_base(pak_filename_str);
+    bool  game_pak = str_has_prefix(base, STR_LIT("Hibiki-WindowsNoEditor"), STR_CMP_FLAG_IGNORE_CASE) ||
+                    str_has_prefix(base, STR_LIT("global"), STR_CMP_FLAG_IGNORE_CASE);
+    bool  pak_only = unreal_pak_is_standalone(pak_filename_str);
+    if ((pak_only || !game_pak) && pak_order < CONFIG_MOD_ASSET_BASE_PRIORITY) {
       pak_order = CONFIG_MOD_ASSET_BASE_PRIORITY;
     }
 

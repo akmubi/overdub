@@ -298,6 +298,7 @@ struct cheats_s {
 
   /* the player whose reactions that break super armor are put away, and how many there were */
   uobject_t *god_player;
+  fweak_object_ptr_t god_player_weak;
   int32_t    god_reaction_tags;
   int32_t    god_reaction_parents;
 };
@@ -1105,6 +1106,7 @@ cheats_god_reactions(cheats_t *cheats, uobject_t *player, bool enable)
 
   if (enable && (!same || tags->gameplay_tags.num > 0 || tags->parent_tags.num > 0)) {
     cheats->god_player           = player;
+    unreal_fweak_object_from_object(player, &cheats->god_player_weak);
     cheats->god_reaction_tags    = tags->gameplay_tags.num;
     cheats->god_reaction_parents = tags->parent_tags.num;
     tags->gameplay_tags.num      = 0;
@@ -1130,7 +1132,7 @@ cheats_god_mode(cheats_t *cheats, bool enable)
   }
 
   /* a player from a level since left has nothing to put back */
-  if (cheats->god_player && !unreal_uobject_is_valid(cheats->god_player)) {
+  if (cheats->god_player && unreal_fweak_object_resolve(cheats->god_player_weak) != cheats->god_player) {
     cheats->god_player = NULL;
   }
 
