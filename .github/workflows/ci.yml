@@ -41,27 +41,29 @@ jobs:
             /p:TreatWarningAsError=true `
             /warnAsError
 
-  linux:
-    name:    Linux / MinGW
-    # a settled image: ubuntu-latest moving to a new release has broken the package mirrors before
-    runs-on: ubuntu-24.04
+  mingw:
+    name:    Windows / MinGW
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install MinGW
-        run:  |
-          sudo apt-get -o Acquire::Retries=5 update
-          sudo apt-get -o Acquire::Retries=5 install -y gcc-mingw-w64-x86-64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: make mingw-w64-x86_64-gcc
 
-      - name: Build
-        run:  make release CC="x86_64-w64-mingw32-gcc -Werror"
+      - name:  Build
+        shell: msys2 {0}
+        run:   make release CC="x86_64-w64-mingw32-gcc -Werror"
 
       - name: Create the mod template
         uses: ./.github/actions/mod-template
         with:
           destination: package/mod-template
 
-      - name: Build the mod template
-        run:  make -C package/mod-template CONFIG=release MOD_NAME=example CC="x86_64-w64-mingw32-gcc -Werror"
+      - name:  Build the mod template
+        shell: msys2 {0}
+        run:   make -C package/mod-template CONFIG=release MOD_NAME=example CC="x86_64-w64-mingw32-gcc -Werror"
