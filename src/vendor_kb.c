@@ -5,6 +5,7 @@
 #elif COMPILER_GCC
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wunused-parameter"
+#  pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 
 #define KB_TEXT_SHAPE_IMPLEMENTATION
